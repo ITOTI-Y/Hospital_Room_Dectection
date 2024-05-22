@@ -22,8 +22,8 @@ class RoomDataset(Dataset):
     def _prep_data(self):
         image_path = self.data_path.rglob('*.jpg')
         for path in image_path:
-            if '-meng' in path.name:
-                name = path.stem.removesuffix('-meng')
+            if '_mask' in path.name:
+                name = path.stem.removesuffix('_mask')
                 if name in self.data:
                     self.data[name]['label'] = Image.open(path)
                 else:
@@ -51,3 +51,4 @@ class RoomDataLoader(DataLoader):
     def __iter__(self) -> Generator[Tuple[torch.Tensor,torch.Tensor], None, None]:
         for data in super().__iter__():
             yield data
+
