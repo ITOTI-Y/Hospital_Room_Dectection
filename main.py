@@ -1,9 +1,10 @@
 import pathlib
 import torch
-from src.train import *
+import src
+
 
 if __name__ == "__main__":
     DATA_PATH = pathlib.Path('./data')
-    dataset = RoomDataset(data_path=DATA_PATH)
-    model = None
-    Train(dataset=dataset, model=model, bathc_size=1, epochs = 100)._step_train()
+    dataset = src.RoomDataset(data_path=DATA_PATH)
+    model = src.Backbone()
+    src.Train(dataset=dataset, model=model, bathc_size=2, epochs = 100)._step_train()
