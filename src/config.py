@@ -1,4 +1,9 @@
 
+class Model_Config:
+    IMAGE_SIZE = (256,256)
+    def __init__(self):
+        pass
+
 COLOR_LABEL = {
     'f54337': 'Pharmacy',
     'ea1e63': 'Chinese Pharmacy',
