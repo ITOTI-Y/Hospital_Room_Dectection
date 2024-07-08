@@ -1,55 +1,68 @@
 import pathlib
 import torch
+import numpy as np
 from typing import Tuple, Generator
 from PIL import Image
-from torch.utils.data import Dataset, DataLoader
-from .config import Model_Config
-import torchvision.transforms.v2 as v2
+from torch.utils.data import Dataset
+from .config import Train_Config, COLOR_MAP
+from .utils import *
+import albumentations as A
+from albumentations.pytorch import ToTensorV2
 
+CONFIG = Train_Config()
+
+# 定义共享的几何变换
+shared_transforms = A.Compose([
+    A.RandomRotate90(p=0.5),
+    A.Flip(p=0.5),
+    A.RandomResizedCrop(height=3000, width=3000, scale=(0.8, 1.0), ratio=(0.9, 1.1), p=0.5),
+])
+
+# 定义仅应用于图像的增强
+image_specific_transforms = A.Compose([
+    A.OneOf([
+        A.RandomBrightnessContrast(brightness_limit=0.1, contrast_limit=0.1, p=0.8),
+        A.GaussNoise(var_limit=(10.0, 50.0), mean=0, p=0.8),
+        A.GaussianBlur(blur_limit=(3, 7), p=0.8),
+        A.RandomShadow(shadow_roi=(0, 0, 1, 1), num_shadows_lower=1, num_shadows_upper=2, shadow_dimension=5, p=0.8),
+    ], p=0.5),
+    A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+    ToTensorV2(),
+])
+
+# 定义仅应用于标签的转换
+mask_specific_transforms = A.Compose([
+    ToTensorV2(transpose_mask=True),
+])
+
+# 数据集类
 class RoomDataset(Dataset):
-    def __init__(self, data_path: pathlib.Path):
+    def __init__(self):
         super().__init__()
-        self.data_path = data_path
-        self.data = {}
-        self._prep_data()
-        self.init_transforms = v2.Compose([
-            v2.ToImage(), # Convert to tensor, only needed if you had a PIL image
-            v2.ToDtype(torch.uint8, scale=True),  # optional, most input are already uint8 at this point
-            v2.Resize(size=Model_Config.IMAGE_SIZE, antialias=True),
-            v2.ToDtype(torch.float32, scale=True),  # Normalize expects float input
-            v2.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            ])
+        self.image_dir = self._getlist(CONFIG.IMAGE_DIR)
+        self.label_dir = self._getlist(CONFIG.IMAGE_DIR)
+        self.data = {i:{'image':image, 'label':label} for i, (image, label) in enumerate(zip(self.image_dir, self.label_dir))}
 
-    def _prep_data(self):
-        image_path = self.data_path.rglob('*.jpg')
-        for path in image_path:
-            if '_mask' in path.name:
-                name = path.stem.removesuffix('_mask')
-                if name in self.data:
-                    self.data[name]['label'] = Image.open(path)
-                else:
-                    self.data[name] = {'label': Image.open(path)}
-            else:
-                name = path.stem
-                if name in self.data:
-                    self.data[name]['image'] = Image.open(path)
-                else:
-                    self.data[name] = {'image': Image.open(path)}
+    def _getlist(self, data_dir: pathlib.Path):
+        jpg_list = data_dir.glob("*.jpg")
+        png_list = data_dir.glob("*.png")
+        return list(jpg_list) + list(png_list)
 
     def __len__(self):
-        return len(self.data)
+        return len(self.image_dir)
     
-    def __getitem__(self, idx:int) -> Tuple[torch.Tensor,torch.Tensor]:
-        name = list(self.data.keys())[idx]
-        image = self.data[name]['image']
-        label = self.data[name]['label']
-        return self.init_transforms(image), self.init_transforms(label)
-    
-class RoomDataLoader(DataLoader):
-    def __init__(self, dataset: RoomDataset, batch_size: 1, **kwargs):
-        super().__init__(dataset, batch_size=batch_size, **kwargs)
+    def __getitem__(self, idx):
+        image = np.array(Image.open(self.data[idx]['image']).convert('RGB'))
+        process_image(image, COLOR_MAP)
+        label = np.array(Image.open(self.data[idx]['label']).convert('L'))
 
-    def __iter__(self) -> Generator[Tuple[torch.Tensor,torch.Tensor], None, None]:
-        for data in super().__iter__():
-            yield data
+        # 应用共享的几何变换
+        transformed = shared_transforms(image=image, mask=label)
+        image, label = transformed['image'], transformed['mask']
 
+        # 应用图像特定的增强
+        image = image_specific_transforms(image=image)['image']
+
+        # 应用标签特定的转换
+        label = mask_specific_transforms(image=label)['image']
+        return image, label.squeeze(0)

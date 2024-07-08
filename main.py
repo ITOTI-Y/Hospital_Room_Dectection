@@ -1,10 +1,13 @@
 import pathlib
 import torch
 import src
+import src.utils
+from src.config import COLOR_MAP
 
+CONFIG = src.Train_Config()
 
 if __name__ == "__main__":
-    DATA_PATH = pathlib.Path('./data')
-    dataset = src.RoomDataset(data_path=DATA_PATH)
-    model = src.Backbone()
-    src.Train(dataset=dataset, model=model, bathc_size=2, epochs = 100)._step_train()
+    dataset = src.RoomDataset()
+    dataset[0]
+    # src.utils.visualize_dataset(dataset)
+    # src.Train(dataset=dataset)._step_epoch()
