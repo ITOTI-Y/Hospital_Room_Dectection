@@ -4,18 +4,19 @@ import numpy as np
 from typing import Tuple, Generator
 from PIL import Image
 from torch.utils.data import Dataset
-from .config import Train_Config, COLOR_MAP
+from .config import Train_Config, COLOR_MAP, Model_Config
 from .utils import *
 import albumentations as A
 from albumentations.pytorch import ToTensorV2
 
-CONFIG = Train_Config()
+TRAIN_CONFIG = Train_Config()
+MODEL_CONFIG = Model_Config()
 
 # 定义共享的几何变换
 shared_transforms = A.Compose([
     A.RandomRotate90(p=0.5),
     A.Flip(p=0.5),
-    A.RandomResizedCrop(height=3000, width=3000, scale=(0.8, 1.0), ratio=(0.9, 1.1), p=0.5),
+    A.RandomResizedCrop(height=MODEL_CONFIG.IMAGE_SIZE[0], width=MODEL_CONFIG.IMAGE_SIZE[1], scale=(0.8, 1.0), ratio=(0.9, 1.1), p=1),
 ])
 
 # 定义仅应用于图像的增强
@@ -30,18 +31,14 @@ image_specific_transforms = A.Compose([
     ToTensorV2(),
 ])
 
-# 定义仅应用于标签的转换
-mask_specific_transforms = A.Compose([
-    ToTensorV2(transpose_mask=True),
-])
-
 # 数据集类
 class RoomDataset(Dataset):
     def __init__(self):
         super().__init__()
-        self.image_dir = self._getlist(CONFIG.IMAGE_DIR)
-        self.label_dir = self._getlist(CONFIG.IMAGE_DIR)
+        self.image_dir = self._getlist(TRAIN_CONFIG.IMAGE_DIR)
+        self.label_dir = self._getlist(TRAIN_CONFIG.LABEL_DIR)
         self.data = {i:{'image':image, 'label':label} for i, (image, label) in enumerate(zip(self.image_dir, self.label_dir))}
+        self.num_classes = len(COLOR_MAP)
 
     def _getlist(self, data_dir: pathlib.Path):
         jpg_list = data_dir.glob("*.jpg")
@@ -53,8 +50,8 @@ class RoomDataset(Dataset):
     
     def __getitem__(self, idx):
         image = np.array(Image.open(self.data[idx]['image']).convert('RGB'))
-        process_image(image, COLOR_MAP)
-        label = np.array(Image.open(self.data[idx]['label']).convert('L'))
+        label = np.array(Image.open(self.data[idx]['label']))
+        label = process_image_vectorized(label, COLOR_MAP)
 
         # 应用共享的几何变换
         transformed = shared_transforms(image=image, mask=label)
@@ -63,6 +60,22 @@ class RoomDataset(Dataset):
         # 应用图像特定的增强
         image = image_specific_transforms(image=image)['image']
 
-        # 应用标签特定的转换
-        label = mask_specific_transforms(image=label)['image']
-        return image, label.squeeze(0)
+        # 将标签转换为one-hot编码
+        label = torch.from_numpy(label).long().squeeze()
+        label_one_hot = torch.nn.functional.one_hot(label, num_classes=self.num_classes)
+        label_one_hot = label_one_hot.permute(2, 0, 1).float()
+        return image, label_one_hot
+    
+    def _visualize(self, idx):
+        image = np.array(Image.open(self.data[idx]['image']).convert('RGB'))
+        label = np.array(Image.open(self.data[idx]['label']))
+        label = process_image_vectorized(label, COLOR_MAP)
+
+        # 应用共享的几何变换
+        transformed = shared_transforms(image=image, mask=label)
+        image, label = transformed['image'], transformed['mask']
+
+        # 应用图像特定的增强
+        image = image_specific_transforms(image=image)['image']
+
+        return image, label
