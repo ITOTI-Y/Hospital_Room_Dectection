@@ -28,15 +28,15 @@ class SwinV2Backbone(nn.Module):
 
         # 使用 reshaped_hidden_states 作为特征图
         if output_hidden_states:
-            feature_maps = outputs.reshaped_hidden_states
+            outputs.feature_maps = outputs.reshaped_hidden_states
         else:
             # 如果没有 reshaped_hidden_states，使用 last_hidden_state 并重塑
             last_hidden_state = outputs.last_hidden_state
             batch_size, _, hidden_size = last_hidden_state.shape
             height = width = int((last_hidden_state.shape[1])**0.5)
-            feature_maps = [last_hidden_state.reshape(batch_size, height, width, hidden_size).permute(0, 3, 1, 2)]
+            outputs.feature_maps = [last_hidden_state.reshape(batch_size, height, width, hidden_size).permute(0, 3, 1, 2)]
 
-        return {"feature_maps": feature_maps}
+        return outputs
     
 class Mask2FormerSegmentation(nn.Module):
     def __init__(self, backbone_config):
