@@ -1,10 +1,14 @@
 import src
 import src.utils
+import torch
+from torch.utils.data import random_split
 from src.config import COLOR_MAP
 
 CONFIG = src.Train_Config()
 
 if __name__ == "__main__":
-    dataset = src.RoomDataset()
+    torch.manual_seed(CONFIG.SEED)
+    train_dataset, val_dataset = random_split(src.RoomDataset(one_hot=False), [CONFIG.TRAIN_SIZE, CONFIG.VAL_SIZE])
     # src.utils.visualize_dataset(dataset)
-    src.Train(dataset=dataset)._step_epoch()
+    
+    src.Train(train_dataset,val_dataset).train()

@@ -1,12 +1,29 @@
 import pathlib
 import torch
 
-
 class Train_Config:
     def __init__(self):
         self.DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.IMAGE_DIR = pathlib.Path('./data/image')
         self.LABEL_DIR = pathlib.Path('./data/label')
+
+        # LOG CONFIG
+        self.LOG_DIR = pathlib.Path('./logs')
+        self.LOG_INTERVAL = 10
+
+        self.TRAIN_SIZE = 0.8
+        self.VAL_SIZE = 0.2
+        self.SEED = 1
+        self.NUM_WORKERS = 4
+
+        self.LR = 1e-4
+        self.LR_FACTOR = 0.1
+        self.LR_PATIENCE = 5
+        self.LR_VERBOSE = False
+        self.LR_MODE = 'min'
+        self.WEIGHT_DECAY = 1e-6
+        
+        self.PATIENCE = 10
         self.BATCH_SIZE = 2
         self.EPOCHS = 10
         self.SHUFFLE = True
@@ -15,6 +32,12 @@ class Model_Config:
     def __init__(self):
         self.PRETRAINED_MODEL = 'microsoft/swinv2-tiny-patch4-window8-256'
         self.IMAGE_SIZE = (512,512)
+
+class Loss_Config:
+    def __init__(self):
+        self.SMOOTH = 1e-5
+        self.CE_WEIGHT = 0.5
+        self.DICE_WEIGHT = 0.5
 
 COLOR_MAP = {
     (245, 67, 55): 'Pharmacy', 

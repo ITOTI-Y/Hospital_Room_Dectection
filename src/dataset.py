@@ -33,12 +33,13 @@ image_specific_transforms = A.Compose([
 
 # 数据集类
 class RoomDataset(Dataset):
-    def __init__(self):
+    def __init__(self, one_hot: bool = False):
         super().__init__()
         self.image_dir = self._getlist(TRAIN_CONFIG.IMAGE_DIR)
         self.label_dir = self._getlist(TRAIN_CONFIG.LABEL_DIR)
         self.data = {i:{'image':image, 'label':label} for i, (image, label) in enumerate(zip(self.image_dir, self.label_dir))}
         self.num_classes = len(COLOR_MAP)
+        self.one_hot = one_hot
 
     def _getlist(self, data_dir: pathlib.Path):
         jpg_list = data_dir.glob("*.jpg")
@@ -60,11 +61,14 @@ class RoomDataset(Dataset):
         # 应用图像特定的增强
         image = image_specific_transforms(image=image)['image']
 
-        # 将标签转换为one-hot编码
+        # transform to tensor
         label = torch.from_numpy(label).long().squeeze()
-        label_one_hot = torch.nn.functional.one_hot(label, num_classes=self.num_classes)
-        label_one_hot = label_one_hot.permute(2, 0, 1).float()
-        return image, label_one_hot
+        # 将标签转换为one-hot编码
+        if self.one_hot:
+            label_one_hot = torch.nn.functional.one_hot(label, num_classes=self.num_classes)
+            label_one_hot = label_one_hot.permute(2, 0, 1).float()
+            return image, label_one_hot
+        return image, label
     
     def _visualize(self, idx):
         image = np.array(Image.open(self.data[idx]['image']).convert('RGB'))
