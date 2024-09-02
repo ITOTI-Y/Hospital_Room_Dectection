@@ -38,9 +38,9 @@ class Train():
 
     def train(self):
         # 添加模型结构到tensorboard
-        sample_input = torch.randn(TRAIN_CONFIG.BATCH_SIZE, 3, *MODEL_CONFIG.IMAGE_SIZE).to(self.device)
-        traced_model = torch.jit.trace(self.model, sample_input)
-        self.writer.add_graph(traced_model, sample_input)
+        # sample_input = torch.randn(TRAIN_CONFIG.BATCH_SIZE, 3, *MODEL_CONFIG.IMAGE_SIZE).to(self.device)
+        # traced_model = torch.jit.trace(self.model, sample_input)
+        # self.writer.add_graph(traced_model, sample_input)
 
         for epoch in range(TRAIN_CONFIG.EPOCHS):
             self.logger.info(f'Epoch {epoch}/{TRAIN_CONFIG.EPOCHS}')
@@ -57,8 +57,18 @@ class Train():
 
             if val_loss < self.best_val_loss:
                 self.best_val_loss = val_loss
+                self._save_model(TRAIN_CONFIG.SAVE_MODEL_PATH)
                 self.patience_counter = 0
-                torch.save(self.model.state_dict(), 'best_model.pth')
+            else:
+                self.patience_counter += 1
+
+            if self.patience_counter >= self.patience:
+                self.logger.info(f'Early stopping at epoch {epoch}')
+                break
+
+            self._save_checkpoint(epoch, TRAIN_CONFIG.SAVE_CHECKPOINT_PATH)
+
+        self.writer.close()
 
     def _train_epoch(self, epoch):
         self.model.train()
@@ -119,5 +129,31 @@ class Train():
         iou = np.sum(intersection) / np.sum(union)
         return iou
     
-    def save_model(self):
-        
+    def _save_model(self, path):
+        torch.save(self.model.state_dict(), path)
+        self.logger.info(f'Model saved to {path}')
+
+    def _load_model(self, path):
+        self.model.load_state_dict(torch.load(path))
+        self.logger.info(f'Model loaded from {path}')
+
+    def _save_checkpoint(self, epoch, path):
+        torch.save({
+            'epoch': epoch,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'scheduler_state_dict': self.scheduler.state_dict(),
+            'best_val_loss': self.best_val_loss,
+            'patience_counter': self.patience_counter
+        }, path)
+        self.logger.info(f'Checkpoint saved to {path}')
+
+    def _load_checkpoint(self, path):
+        checkpoint = torch.load(path)
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        self.best_val_loss = checkpoint['best_val_loss']
+        self.patience_counter = checkpoint['patience_counter']
+        self.logger.info(f'Checkpoint loaded from {path}')
+        return checkpoint['epoch']

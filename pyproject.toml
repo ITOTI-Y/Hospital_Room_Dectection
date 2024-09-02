@@ -8,6 +8,7 @@ dependencies = [
     "albumentations>=1.4.14",
     "matplotlib>=3.9.2",
     "scikit-learn>=1.5.1",
+    "tensorboard>=2.17.1",
     "torch>=2.4.0",
     "torchaudio>=2.4.0",
     "torchvision",

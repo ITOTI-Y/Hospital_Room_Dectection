@@ -6,6 +6,8 @@ class Train_Config:
         self.DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.IMAGE_DIR = pathlib.Path('./data/image')
         self.LABEL_DIR = pathlib.Path('./data/label')
+        self.SAVE_MODEL_PATH = pathlib.Path('./models/best_model.pth')
+        self.SAVE_CHECKPOINT_PATH = pathlib.Path('./models/checkpoint.pth')
 
         # LOG CONFIG
         self.LOG_DIR = pathlib.Path('./logs')

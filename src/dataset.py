@@ -47,7 +47,7 @@ class RoomDataset(Dataset):
         return list(jpg_list) + list(png_list)
 
     def __len__(self):
-        return len(self.image_dir)
+        return len(self.data)
     
     def __getitem__(self, idx):
         image = np.array(Image.open(self.data[idx]['image']).convert('RGB'))
