@@ -12,22 +12,23 @@ class Train_Config:
         # LOG CONFIG
         self.LOG_DIR = pathlib.Path('./logs')
         self.LOG_INTERVAL = 10
-
+        
+        # TRAIN CONFIG
         self.TRAIN_SIZE = 0.8
         self.VAL_SIZE = 0.2
         self.SEED = 1
-        self.NUM_WORKERS = 4
+        self.NUM_WORKERS = 8
+        self.BATCH_SIZE = 2
 
         self.LR = 1e-4
         self.LR_FACTOR = 0.1
         self.LR_PATIENCE = 5
         self.LR_VERBOSE = False
         self.LR_MODE = 'min'
-        self.WEIGHT_DECAY = 1e-6
+        self.WEIGHT_DECAY = 1e-4
         
-        self.PATIENCE = 10
-        self.BATCH_SIZE = 2
-        self.EPOCHS = 10
+        self.PATIENCE = 20
+        self.EPOCHS = 200
         self.SHUFFLE = True
 
 class Model_Config:
@@ -38,7 +39,7 @@ class Model_Config:
 class Loss_Config:
     def __init__(self):
         self.SMOOTH = 1e-5
-        self.CE_WEIGHT = 0.5
+        self.CE_WEIGHT = 1
         self.DICE_WEIGHT = 0.5
 
 COLOR_MAP = {
