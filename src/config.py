@@ -33,7 +33,7 @@ class Train_Config:
 
 class Model_Config:
     def __init__(self):
-        self.PRETRAINED_MODEL = 'microsoft/swinv2-tiny-patch4-window8-256'
+        self.PRETRAINED_MODEL = 'microsoft/swinv2-small-patch4-window16-256'
         self.IMAGE_SIZE = (512,512)
 
 class Loss_Config:
