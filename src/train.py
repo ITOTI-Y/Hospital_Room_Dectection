@@ -1,5 +1,6 @@
 import torch
 import logging
+import torchvision
 from tqdm import tqdm
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
@@ -157,3 +158,25 @@ class Train():
         self.patience_counter = checkpoint['patience_counter']
         self.logger.info(f'Checkpoint loaded from {path}')
         return checkpoint['epoch']
+    
+class Predict:
+    def __init__(self, model_path:pathlib.Path, image_path:pathlib.Path):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = get_model()
+        self.model.load_state_dict(torch.load(model_path, weights_only=True))
+        self.image_path = image_path
+
+    def _transform_image(self, image:torch.Tensor):
+        transform = A.Compose([
+            A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
+            A.Resize(),
+            ToTensorV2()
+        ])
+        result = transform(image=image)
+        return result['image']
+
+    def run(self):
+        self.model.eval()
+        with torch.no_grad():
+            image = torchvision.io.read_image(self.image_path).to(self.device)
+            outputs = self.model(image.unsqueeze(0))
