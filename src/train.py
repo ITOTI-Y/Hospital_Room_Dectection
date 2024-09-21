@@ -162,7 +162,7 @@ class Train():
 class Predict:
     def __init__(self, model_path:pathlib.Path, image_path:pathlib.Path):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.model = get_model()
+        self.model = get_model().to(self.device)
         self.model.load_state_dict(torch.load(model_path, weights_only=True))
         self.image_path = image_path
 
@@ -174,9 +174,27 @@ class Predict:
         ])
         result = transform(image=image)
         return result['image']
+    
+    def preprocess_image(self, image_path, device):
+        # Read the image
+        image = torchvision.io.read_image(image_path)
+        
+        # Convert to float and scale to [0, 1]
+        image = image.float() / 255.0
+        
+        # Normalize (you may need to adjust these values based on your model's requirements)
+        normalize = torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                    std=[0.229, 0.224, 0.225])
+        image = normalize(image)
+        
+        # Add batch dimension and move to device
+        image = image.unsqueeze(0).to(device)
+        
+        return image
 
     def run(self):
         self.model.eval()
         with torch.no_grad():
-            image = torchvision.io.read_image(self.image_path).to(self.device)
-            outputs = self.model(image.unsqueeze(0))
+            image = self.preprocess_image(self.image_path, self.device)
+            outputs = self.model(image)
+            pass

@@ -3,7 +3,7 @@ import src.utils
 import torch
 from torch.utils.data import random_split
 from src.config import COLOR_MAP
-from src.predict import Predict
+from src.train import *
 
 CONFIG = src.Train_Config()
 
