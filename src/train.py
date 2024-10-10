@@ -1,9 +1,11 @@
 import torch
 import logging
-import torchvision
+from PIL import Image
 from tqdm import tqdm
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
+import matplotlib.pyplot as plt
+import numpy as np
 from torch.utils.tensorboard import SummaryWriter
 from .dataset import *
 from .config import Train_Config, Model_Config, Loss_Config
@@ -169,32 +171,42 @@ class Predict:
     def _transform_image(self, image:torch.Tensor):
         transform = A.Compose([
             A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            A.Resize(),
+            A.Resize(MODEL_CONFIG.IMAGE_SIZE[0], MODEL_CONFIG.IMAGE_SIZE[1]),
             ToTensorV2()
         ])
-        result = transform(image=image)
+        result = transform(image=np.array(image))
         return result['image']
     
     def preprocess_image(self, image_path, device):
         # Read the image
-        image = torchvision.io.read_image(image_path)
-        
-        # Convert to float and scale to [0, 1]
-        image = image.float() / 255.0
-        
-        # Normalize (you may need to adjust these values based on your model's requirements)
-        normalize = torchvision.transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                                    std=[0.229, 0.224, 0.225])
-        image = normalize(image)
-        
+        image = Image.open(image_path).convert('RGB')
+        image = self._transform_image(image)
         # Add batch dimension and move to device
         image = image.unsqueeze(0).to(device)
         
         return image
+
+    def visualize_results(self, image, outputs):
+        import matplotlib.pyplot as plt
+        
+        image = image.squeeze(0).permute(1, 2, 0).cpu().numpy()  # 将image转化为可视化格式
+        outputs = torch.argmax(outputs, dim=1).squeeze(0).cpu().numpy()  # 将outputs转化为可视化格式
+
+        fig, axs = plt.subplots(1, 2, figsize=(10, 5))
+        
+        axs[0].imshow(image)
+        axs[0].set_title('Input Image')
+        axs[0].axis('off')
+
+        axs[1].imshow(outputs, cmap='gray')  # 假设outputs是单通道图像，使用灰度图显示
+        axs[1].set_title('Model Output')
+        axs[1].axis('off')
+
+        plt.savefig('./data/val_test/1f.jpg')
 
     def run(self):
         self.model.eval()
         with torch.no_grad():
             image = self.preprocess_image(self.image_path, self.device)
             outputs = self.model(image)
-            pass
+            self.visualize_results(image, outputs)

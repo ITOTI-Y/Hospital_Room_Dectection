@@ -22,7 +22,7 @@ class SwinV2Backbone(nn.Module):
 
     def forward(self, pixel_values: torch.Tensor, output_hidden_states: bool = True) -> Dict[str, Any]:
         outputs = self.model(pixel_values=pixel_values, output_hidden_states=output_hidden_states,)
-        return outputs.reshaped_hidden_states[:-1]
+        return outputs
     
 class UniversalChannelAttention(nn.Module):
     def __init__(self,in_channels, reduction_ratio=16):
@@ -92,80 +92,74 @@ class SwinV2Unet(nn.Module):
         y = self.final_upsample(d3, None)
 
         return y
-
-# class Mask2FormerSegmentation(nn.Module):
-#     def __init__(self, backbone_config):
-#         super().__init__()
-#         self.mask2former_config = Mask2FormerConfig(
-#             backbone_config=backbone_config,
-#             num_queries=100,
-#             num_classes=len(COLOR_MAP),
-#             hidden_dim=256,
-#             num_feature_levels=len(backbone_config.depths),
-#         )
-#         self.model = Mask2FormerForUniversalSegmentation(config=self.mask2former_config)
-
-#     def forward(self, 
-#                 pixel_values: torch.Tensor, 
-#                 labels: Optional[torch.Tensor] = None,
-#                 pixel_mask: Optional[torch.LongTensor] = None,
-#                 output_hidden_states: Optional[bool] = None,
-#                 output_attentions: Optional[bool] = None,
-#                 return_dict: Optional[bool] = None):
-        
-#         if labels is not None:
-#             batch_size, num_classes, height, width = labels.shape
-            
-#             class_labels = labels.argmax(dim=1)
-#             mask_labels = labels.transpose(0, 1).reshape(num_classes * batch_size, 1, height, width)
-#             class_labels = class_labels.unsqueeze(1).repeat(1, num_classes, 1, 1).reshape(num_classes * batch_size, height, width)
-            
-#             non_zero_masks = mask_labels.sum(dim=(1, 2, 3)) > 0
-#             mask_labels = mask_labels[non_zero_masks]
-#             class_labels = class_labels[non_zero_masks]
-            
-#             mask_labels = [mask for mask in mask_labels]
-#             class_labels = [cls_label for cls_label in class_labels]
-#         else:
-#             mask_labels = None
-#             class_labels = None
-
-#         return self.model(
-#             pixel_values=pixel_values,
-#             mask_labels=mask_labels,
-#             class_labels=class_labels,
-#             pixel_mask=pixel_mask,
-#             output_hidden_states=output_hidden_states,
-#             output_attentions=output_attentions,
-#             return_dict=return_dict
-#         )
     
-# class SwinV2Mask2FormerModel(nn.Module):
-#     def __init__(self):
-#         super().__init__()
-#         self.backbone = SwinV2Backbone()
-#         self.segmentation_head = Mask2FormerSegmentation(self.backbone.swin_config)
+class SwinV2Wrapper(nn.Module):
+    def __init__(self, swin_model):
+        super().__init__()
+        self.model = swin_model
+        # 修改投影层以匹配Mask2Former期望的通道数和特征图数量
+        self.projections = nn.ModuleList([
+            nn.Conv2d(192, 256, kernel_size=1),
+            nn.Conv2d(384, 256, kernel_size=1),
+            nn.Conv2d(768, 256, kernel_size=1),
+            nn.Conv2d(768, 256, kernel_size=1)
+        ])
 
-#         # 将Swin V2骨干网络设置为Mask2Former的encoder
-#         self.segmentation_head.model.model.pixel_level_module.encoder = self.backbone
-
-#     def forward(self, 
-#                 pixel_values: torch.Tensor, 
-#                 labels: Optional[torch.Tensor] = None,
-#                 pixel_mask: Optional[torch.LongTensor] = None,
-#                 output_hidden_states: Optional[bool] = None,
-#                 output_attentions: Optional[bool] = None,
-#                 return_dict: Optional[bool] = None):
+    def forward(self, pixel_values):
+        outputs = self.model(pixel_values, output_hidden_states=True)
+        hidden_states = outputs.hidden_states[1:]  # 跳过第一个hidden state（输入嵌入）
         
-#         return self.segmentation_head(
-#             pixel_values=pixel_values,
-#             labels=labels,
-#             pixel_mask=pixel_mask,
-#             output_hidden_states=output_hidden_states,
-#             output_attentions=output_attentions,
-#             return_dict=return_dict
-#         )
-    
+        # 调整特征图的形状和通道数
+        feature_maps = []
+        for i, hidden_state in enumerate(hidden_states):
+            # 调整形状
+            b, hw, c = hidden_state.shape
+            h = w = int(hw**0.5)
+            hidden_state = hidden_state.transpose(1, 2).view(b, c, h, w)
+            # 调整通道数
+            feature_maps.append(self.projections[i](hidden_state))
+        
+        # 确保只返回最后四个特征图
+        return feature_maps[-4:]
 
-def get_model() -> SwinV2Unet:
-    return SwinV2Unet()
+class Mask2FormerSegmentation(nn.Module):
+    def __init__(self):
+        super().__init__()
+        
+        # 加载Swin Transformer V2配置
+        self.swin_config = Swinv2Config.from_pretrained(MODEL_CONFIG.PRETRAINED_MODEL)
+        self.swin_config.image_size = MODEL_CONFIG.IMAGE_SIZE[0]
+        
+        # 创建Swin V2模型作为骨干网络
+        swin_model = Swinv2Model.from_pretrained(MODEL_CONFIG.PRETRAINED_MODEL, config=self.swin_config)
+        self.backbone = SwinV2Wrapper(swin_model)
+        
+        # 配置Mask2Former
+        self.mask2former_config = Mask2FormerConfig(
+            num_channels=3,
+            image_size=MODEL_CONFIG.IMAGE_SIZE[0],
+            num_labels=len(COLOR_MAP),
+            hidden_dim=256,  # 修改为256以匹配backbone输出
+            num_queries=100,
+            no_object_weight=0.1,
+            mask_feature_size=32,
+            backbone_config=self.swin_config,
+        )
+        
+        # 创建Mask2Former模型
+        self.mask2former = Mask2FormerForUniversalSegmentation(self.mask2former_config)
+        
+        # 替换Mask2Former的骨干网络为我们的Swin V2
+        self.mask2former.model.pixel_level_module.encoder = self.backbone
+
+    def forward(self, pixel_values: torch.Tensor) -> Dict[str, Any]:
+        outputs = self.mask2former(pixel_values=pixel_values)
+        
+        # 调整输出以匹配SwinV2Unet的格式
+        segmentation = outputs.segmentation
+        
+        # 你可能需要根据具体需求调整输出格式
+        return {"segmentation": segmentation}
+
+def get_model() -> nn.Module:
+    return Mask2FormerSegmentation()
