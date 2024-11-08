@@ -7,13 +7,14 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import numpy as np
 from torch.utils.tensorboard import SummaryWriter
+from typing import List
 from .dataset import *
-from .config import Train_Config, Model_Config, Loss_Config
+from .config import Train_Config, Swin_Model_Config, Loss_Config, COLOR_MAP
 from .model import get_model
 from .loss import *
 
 TRAIN_CONFIG = Train_Config()
-MODEL_CONFIG = Model_Config()
+SWIN_MODEL_CONFIG = Swin_Model_Config()
 
 class Train():
     
@@ -21,13 +22,15 @@ class Train():
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_loader = DataLoader(train_dataset, batch_size=TRAIN_CONFIG.BATCH_SIZE, shuffle=TRAIN_CONFIG.SHUFFLE, num_workers=TRAIN_CONFIG.NUM_WORKERS)
         self.val_loader = DataLoader(val_dataset, batch_size=TRAIN_CONFIG.BATCH_SIZE, shuffle=False, num_workers=TRAIN_CONFIG.NUM_WORKERS)
-        self.model = get_model().to(self.device)
+        self.model = get_model()
+        self.model = self.model.to(self.device)
         self.loss = CombineLoss().to(self.device)
         self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=TRAIN_CONFIG.LR, weight_decay=TRAIN_CONFIG.WEIGHT_DECAY)
         self.scheduler = ReduceLROnPlateau(self.optimizer, mode=TRAIN_CONFIG.LR_MODE, factor=TRAIN_CONFIG.LR_FACTOR, patience=TRAIN_CONFIG.LR_PATIENCE)
         self.best_val_loss = float('inf')
         self.patience = TRAIN_CONFIG.PATIENCE
         self.patience_counter = 0
+        self.num_classes = len(COLOR_MAP)
 
         self.setup_logging()
         self.setup_tensorboard()
@@ -40,10 +43,6 @@ class Train():
         self.writer = SummaryWriter(log_dir=TRAIN_CONFIG.LOG_DIR)
 
     def train(self):
-        # 添加模型结构到tensorboard
-        # sample_input = torch.randn(TRAIN_CONFIG.BATCH_SIZE, 3, *MODEL_CONFIG.IMAGE_SIZE).to(self.device)
-        # traced_model = torch.jit.trace(self.model, sample_input)
-        # self.writer.add_graph(traced_model, sample_input)
 
         for epoch in range(TRAIN_CONFIG.EPOCHS):
             self.logger.info(f'Epoch {epoch}/{TRAIN_CONFIG.EPOCHS}')
@@ -77,11 +76,12 @@ class Train():
         self.model.train()
         total_loss = 0
         with tqdm(self.train_loader, desc='Training', leave=False) as pbar:
-            for i, (image, label) in enumerate(pbar):
-                image, label = image.to(self.device), label.to(self.device)
+            for i, (pixel_values, pixel_mask, mask_labels, class_labels) in enumerate(pbar):
+                pixel_values, pixel_mask, mask_labels, class_labels = pixel_values.to(self.device), pixel_mask.to(self.device), mask_labels.to(self.device), class_labels.to(self.device)
+
                 self.optimizer.zero_grad()
-                outputs = self.model(pixel_values=image)
-                loss = self.loss(outputs, label)
+                outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, mask_labels=mask_labels, class_labels=class_labels)
+                loss = self.loss(outputs, pixel_mask)
                 loss.backward()
                 self.optimizer.step()
                 total_loss += loss.item()
@@ -171,7 +171,7 @@ class Predict:
     def _transform_image(self, image:torch.Tensor):
         transform = A.Compose([
             A.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
-            A.Resize(MODEL_CONFIG.IMAGE_SIZE[0], MODEL_CONFIG.IMAGE_SIZE[1]),
+            A.Resize(SWIN_MODEL_CONFIG.IMAGE_SIZE, SWIN_MODEL_CONFIG.IMAGE_SIZE),
             ToTensorV2()
         ])
         result = transform(image=np.array(image))
@@ -210,3 +210,9 @@ class Predict:
             image = self.preprocess_image(self.image_path, self.device)
             outputs = self.model(image)
             self.visualize_results(image, outputs)
+
+
+class Mask2FormerTrain():
+    def __init__(self, dataset: Mask2FormerDataset):
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.model = get_model().to(self.device)

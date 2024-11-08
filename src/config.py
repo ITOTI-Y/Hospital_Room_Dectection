@@ -1,5 +1,13 @@
 import pathlib
 import torch
+from transformers import SwinConfig, Mask2FormerConfig
+
+class Image_Processor_Config:
+    def __init__(self):
+        self.DO_RESIZE = True
+        self.IMAGE_SIZE = (256, 256)
+        self.NUM_LABELS = len(COLOR_MAP)
+        self.IGNORE_INDEX = 0
 
 class Train_Config:
     def __init__(self):
@@ -18,7 +26,7 @@ class Train_Config:
         self.VAL_SIZE = 0.2
         self.SEED = 1
         self.NUM_WORKERS = 8
-        self.BATCH_SIZE = 2
+        self.BATCH_SIZE = 1 # 暂不支持多张图片
 
         self.LR = 1e-4
         self.LR_FACTOR = 0.1
@@ -31,10 +39,37 @@ class Train_Config:
         self.EPOCHS = 200
         self.SHUFFLE = True
 
-class Model_Config:
+class Swin_Model_Config:
     def __init__(self):
-        self.PRETRAINED_MODEL = 'microsoft/swinv2-small-patch4-window16-256'
-        self.IMAGE_SIZE = (512,512)
+        self.IMAGE_SIZE = Image_Processor_Config().IMAGE_SIZE[0]
+        self.PATCH_SIZE = 4
+        self.NUM_CHANS = 3
+        self.EMBED_DIM = 96
+        self.DEPTHS = [2,2,6,2]
+        self.NUM_HEADS = [3,6,12,24]
+        self.WINDOW_SIZE = 7
+        self.OUT_INDICES = [0,1,2]
+
+    def get_config(self):
+        config = SwinConfig(
+            image_size=self.IMAGE_SIZE,
+            patch_size=self.PATCH_SIZE,
+            num_channels=self.NUM_CHANS,
+            embed_dim=self.EMBED_DIM,
+            depths=self.DEPTHS,
+            num_heads=self.NUM_HEADS,
+            window_size=self.WINDOW_SIZE,
+            out_indices=self.OUT_INDICES,
+        )
+        return config
+    
+class Mask2Former_Model_Config:
+    def __init__(self):
+        self.BACKBONE_CONFIG = Swin_Model_Config().get_config()
+    
+    def get_config(self):
+        config = Mask2FormerConfig().from_backbone_config(self.BACKBONE_CONFIG)
+        return config
 
 class Loss_Config:
     def __init__(self):
@@ -43,6 +78,7 @@ class Loss_Config:
         self.DICE_WEIGHT = 0.5
 
 COLOR_MAP = {
+    (255, 255, 255): 'Background',
     (245, 67, 55): 'Pharmacy', 
     (0, 151, 136): 'Reception desk', 
     (103, 58, 183): 'Emergency Department', 
@@ -95,8 +131,7 @@ COLOR_MAP = {
     (241, 190, 185): 'Family Planning Department', 
     (187, 146, 160): 'Occupational Disease Department', 
     (70, 195, 179): 'Psychology Department', 
-    (187, 151, 247): 'Beauty Department',
-    (255, 255, 255): 'Background'}
+    (187, 151, 247): 'Beauty Department'}
 
 # COLOR_LABEL = {
 #     'f54337': 'Pharmacy', # 药房

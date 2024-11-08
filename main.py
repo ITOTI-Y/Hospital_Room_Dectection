@@ -9,7 +9,8 @@ CONFIG = src.Train_Config()
 
 if __name__ == "__main__":
     # torch.manual_seed(CONFIG.SEED)
-    dataset = src.RoomDataset(one_hot=False)
+    dataset = src.Mask2FormerDataset()
+
     train_dataset, val_dataset = random_split(dataset=dataset, lengths=[CONFIG.TRAIN_SIZE, CONFIG.VAL_SIZE])
     # src.utils.visualize_dataset(dataset)
     
