@@ -5,7 +5,7 @@ from transformers import SwinConfig, Mask2FormerConfig
 class Image_Processor_Config:
     def __init__(self):
         self.DO_RESIZE = True
-        self.IMAGE_SIZE = (256, 256)
+        self.IMAGE_SIZE = (768, 768)
         self.NUM_LABELS = len(COLOR_MAP)
         self.IGNORE_INDEX = 0
 
@@ -18,7 +18,7 @@ class Train_Config:
         self.SAVE_CHECKPOINT_PATH = pathlib.Path('./models/checkpoint.pth')
 
         # LOG CONFIG
-        self.LOG_DIR = pathlib.Path('./logs')
+        self.LOG_DIR = pathlib.Path('/root/tf-logs')
         self.LOG_INTERVAL = 10
         
         # TRAIN CONFIG
@@ -35,7 +35,7 @@ class Train_Config:
         self.LR_MODE = 'min'
         self.WEIGHT_DECAY = 1e-4
         
-        self.PATIENCE = 20
+        self.PATIENCE = 30
         self.EPOCHS = 200
         self.SHUFFLE = True
 
@@ -69,6 +69,7 @@ class Mask2Former_Model_Config:
     
     def get_config(self):
         config = Mask2FormerConfig().from_backbone_config(self.BACKBONE_CONFIG)
+        config.num_labels = len(COLOR_MAP)
         return config
 
 class Loss_Config:

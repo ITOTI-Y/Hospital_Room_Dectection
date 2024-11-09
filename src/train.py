@@ -81,7 +81,7 @@ class Train():
 
                 self.optimizer.zero_grad()
                 outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, mask_labels=mask_labels, class_labels=class_labels)
-                loss = self.loss(outputs, pixel_mask)
+                loss = outputs.loss
                 loss.backward()
                 self.optimizer.step()
                 total_loss += loss.item()
@@ -106,23 +106,15 @@ class Train():
 
         with torch.no_grad():
             with tqdm(self.val_loader, desc='Validation', leave=False) as pbar:
-                for image, label in pbar:
-                    image, label = image.to(self.device), label.to(self.device)
-                    outputs = self.model(pixel_values=image)
-                    loss = self.loss(outputs, label)
+                for pixel_values, pixel_mask, mask_labels, class_labels in pbar:
+                    pixel_values, pixel_mask, mask_labels, class_labels = pixel_values.to(self.device), pixel_mask.to(self.device), mask_labels.to(self.device), class_labels.to(self.device)
+                    outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, mask_labels=mask_labels, class_labels=class_labels)
+                    loss = outputs.loss
                     total_loss += loss.item()
                     pbar.set_postfix({'loss': f'{loss.item():.4f}'})
-
-                    preds = torch.argmax(outputs, dim=1)
-                    all_preds.extend(preds.cpu().numpy())
-                    all_labels.extend(label.cpu().numpy())
         
         avg_loss = total_loss / len(self.val_loader)
         self.writer.add_scalar('Loss/val', avg_loss, epoch)
-
-        # 计算IOU
-        iou = self._compute_iou(all_preds, all_labels)
-        self.writer.add_scalar('IOU/val', iou, epoch)
 
         return avg_loss
     

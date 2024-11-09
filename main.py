@@ -12,8 +12,10 @@ if __name__ == "__main__":
     dataset = src.Mask2FormerDataset()
 
     train_dataset, val_dataset = random_split(dataset=dataset, lengths=[CONFIG.TRAIN_SIZE, CONFIG.VAL_SIZE])
+    src.Train(train_dataset,val_dataset).train()
+
     # src.utils.visualize_dataset(dataset)
     
-    src.Train(train_dataset,val_dataset).train()
+
     # predict = Predict(model_path='./models/best_model.pth', image_path='./data/val_image/1f.jpg')
     # predict.run()
