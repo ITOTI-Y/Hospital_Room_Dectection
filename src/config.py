@@ -6,8 +6,8 @@ class Image_Processor_Config:
     def __init__(self):
         self.DO_RESIZE = True
         self.IMAGE_SIZE = (768, 768)
-        self.NUM_LABELS = len(COLOR_MAP)
         self.IGNORE_INDEX = 0
+        self.NUM_LABELS = len(COLOR_MAP)
 
 class Train_Config:
     def __init__(self):
@@ -79,7 +79,7 @@ class Loss_Config:
         self.DICE_WEIGHT = 0.5
 
 COLOR_MAP = {
-    (255, 255, 255): 'Background',
+    (156, 40, 177): 'Outside',
     (245, 67, 55): 'Pharmacy', 
     (0, 151, 136): 'Reception desk', 
     (103, 58, 183): 'Emergency Department', 
@@ -93,7 +93,6 @@ COLOR_MAP = {
     (76, 176, 80): 'Landscape Space', 
     (255, 235, 60): 'Wall', 
     (121, 85, 71): 'Door', 
-    (156, 40, 177): 'Outside', 
     (140, 195, 75): 'Endoscopy Center', 
     (205, 220, 57): 'Testing Center', 
     (254, 193, 7): 'Gastroenterology', 

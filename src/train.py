@@ -1,13 +1,14 @@
 import torch
 import logging
+import matplotlib.pyplot as plt
+import numpy as np
 from PIL import Image
 from tqdm import tqdm
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torch.utils.data import DataLoader
-import matplotlib.pyplot as plt
-import numpy as np
 from torch.utils.tensorboard import SummaryWriter
-from typing import List
+from typing import List, Dict
+from transformers import Mask2FormerImageProcessor
 from .dataset import *
 from .config import Train_Config, Swin_Model_Config, Loss_Config, COLOR_MAP
 from .model import get_model
@@ -18,7 +19,7 @@ SWIN_MODEL_CONFIG = Swin_Model_Config()
 
 class Train():
     
-    def __init__(self, train_dataset: RoomDataset, val_dataset: RoomDataset):
+    def __init__(self, train_dataset , val_dataset):
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         self.train_loader = DataLoader(train_dataset, batch_size=TRAIN_CONFIG.BATCH_SIZE, shuffle=TRAIN_CONFIG.SHUFFLE, num_workers=TRAIN_CONFIG.NUM_WORKERS)
         self.val_loader = DataLoader(val_dataset, batch_size=TRAIN_CONFIG.BATCH_SIZE, shuffle=False, num_workers=TRAIN_CONFIG.NUM_WORKERS)
@@ -78,7 +79,7 @@ class Train():
         with tqdm(self.train_loader, desc='Training', leave=False) as pbar:
             for i, (pixel_values, pixel_mask, mask_labels, class_labels) in enumerate(pbar):
                 pixel_values, pixel_mask, mask_labels, class_labels = pixel_values.to(self.device), pixel_mask.to(self.device), mask_labels.to(self.device), class_labels.to(self.device)
-
+                # self._debug_image(pixel_values, pixel_mask, mask_labels, class_labels)
                 self.optimizer.zero_grad()
                 outputs = self.model(pixel_values=pixel_values, pixel_mask=pixel_mask, mask_labels=mask_labels, class_labels=class_labels)
                 loss = outputs.loss
@@ -97,12 +98,48 @@ class Train():
         
         avg_loss = total_loss / len(self.train_loader)
         return avg_loss
+
+    def _debug_image(self, pixel_values, pixel_mask, mask_labels, class_labels):
+        import cv2
+        import os
+        # 将pixel_values转换为numpy数组并调整维度顺序
+        img = pixel_values.squeeze(0).cpu().numpy().transpose(1, 2, 0)  # [3, 512, 512] -> [512, 512, 3]
+        img = ((img - img.min()) * 255 / (img.max() - img.min())).astype(np.uint8)
+
+        # 获取mask_labels和class_labels
+        mask_labels = mask_labels.squeeze(0).cpu().numpy()  # [x, 512, 512]
+        class_labels = class_labels.squeeze(0).cpu().numpy()  # [x]
+
+        # 创建 class_id 到颜色的映射
+        # 假设 class_id 从 1 开始，0 为背景
+        color_list = list(COLOR_MAP.keys())
+        class_id_to_color = {idx: color for idx, color in enumerate(color_list)}
+
+        # 创建一个空的掩码图像
+        combined_mask = np.zeros((mask_labels.shape[1], mask_labels.shape[2]), dtype=np.int32)
+
+        # 将每个掩码层对应的类别ID赋值到 combined_mask 中
+        for i in range(mask_labels.shape[0]):
+            combined_mask[mask_labels[i] > 0] = class_labels[i]
+
+        # 创建彩色掩码图像
+        color_mask = np.zeros((combined_mask.shape[0], combined_mask.shape[1], 3), dtype=np.uint8)
+        for class_id, color in class_id_to_color.items():
+            color_mask[combined_mask == class_id] = color
+
+        # 拼接原始图像和分割的图像
+        concatenated = np.concatenate((img, color_mask), axis=1)
+
+        # 保存图像到当前目录
+        save_path = os.path.join('.', 'debug_output.jpg')
+        cv2.imwrite(save_path, cv2.cvtColor(concatenated, cv2.COLOR_RGB2BGR))
+        self.logger.info(f'Debug image saved to {save_path}')
+
+
     
     def _val_epoch(self, epoch):
         self.model.eval()
         total_loss = 0
-        all_preds = []
-        all_labels = []
 
         with torch.no_grad():
             with tqdm(self.val_loader, desc='Validation', leave=False) as pbar:
@@ -204,7 +241,45 @@ class Predict:
             self.visualize_results(image, outputs)
 
 
-class Mask2FormerTrain():
-    def __init__(self, dataset: Mask2FormerDataset):
+class Mask2FormerPredict:
+    def __init__(self, model_path:pathlib.Path):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = get_model().to(self.device)
+        self.model.load_state_dict(torch.load(model_path, weights_only=True))
+        self.image_processor = Mask2FormerImageProcessor(
+            do_resize=IMAGE_PROCESSOR_CONFIG.DO_RESIZE,
+            size=IMAGE_PROCESSOR_CONFIG.IMAGE_SIZE,
+            ignore_index=IMAGE_PROCESSOR_CONFIG.IGNORE_INDEX,
+            num_labels=IMAGE_PROCESSOR_CONFIG.NUM_LABELS,
+        )
+
+    def run(self, image_path:pathlib.Path, save_path:pathlib.Path=None):
+        image = Image.open(image_path).convert('RGB')
+        inputs = self.image_processor(images=image, return_tensors="pt")
+        inputs = inputs.to(self.device)
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+        predict_result = self.image_processor.post_process_instance_segmentation(outputs)
+        if save_path:
+            self._save_image(image, predict_result, save_path)
+        return predict_result
+    
+    def _save_image(self, image:Image.Image, predict_result:List[torch.Tensor], save_path:pathlib.Path):
+        segmentation = predict_result[0].cpu().numpy()
+        original_image = np.array(image)
+        fig, axs = plt.subplots(1, 2, figsize=(12, 6))
+
+        # 显示原始图像
+        axs[0].imshow(original_image)
+        axs[0].axis('off')
+        axs[0].set_title('Original Image')
+
+        # 显示分割结果
+        axs[1].imshow(segmentation)
+        axs[1].axis('off')
+        axs[1].set_title('Segmentation')
+
+        # 调整布局并保存图像
+        plt.tight_layout()
+        plt.savefig(save_path)
+        plt.close()
