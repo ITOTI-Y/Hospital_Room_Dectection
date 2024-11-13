@@ -35,8 +35,8 @@ class Train_Config:
         self.LR_MODE = 'min'
         self.WEIGHT_DECAY = 1e-4
         
-        self.PATIENCE = 30
-        self.EPOCHS = 200
+        self.PATIENCE = 2000
+        self.EPOCHS = 1000
         self.SHUFFLE = True
 
 class Swin_Model_Config:
