@@ -10,7 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 from typing import List, Dict
 from transformers import Mask2FormerImageProcessor
 from .dataset import *
-from .config import Train_Config, Swin_Model_Config, Loss_Config, COLOR_MAP
+from ..config import Train_Config, Swin_Model_Config, Loss_Config, COLOR_MAP
 from .model import get_model
 from .loss import *
 

@@ -4,7 +4,7 @@ import numpy as np
 from typing import Tuple, Generator
 from PIL import Image
 from torch.utils.data import Dataset
-from .config import Train_Config, COLOR_MAP, Swin_Model_Config, Image_Processor_Config
+from ..config import Train_Config, COLOR_MAP, Swin_Model_Config, Image_Processor_Config
 from .utils import *
 import albumentations as A
 from albumentations.pytorch import ToTensorV2

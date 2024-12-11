@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from transformers import Swinv2Config, Swinv2Model, Mask2FormerConfig, Mask2FormerForUniversalSegmentation
-from .config import COLOR_MAP, Mask2Former_Model_Config, Swin_Model_Config
+from ..config import COLOR_MAP, Mask2Former_Model_Config, Swin_Model_Config
 from typing import Dict, Any, Optional
 
 MODEL_CONFIG = Swin_Model_Config()

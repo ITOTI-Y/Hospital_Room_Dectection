@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from .config import Loss_Config
+from ..config import Loss_Config
 
 LOSS_CONFIG = Loss_Config()
 
