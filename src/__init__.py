@@ -2,4 +2,5 @@
 # from .deepl.dataset import *
 # from .deepl.model import *
 # from .deepl.train import *
-from .node.node import *
+from .network.node import *
+from .network.network import *

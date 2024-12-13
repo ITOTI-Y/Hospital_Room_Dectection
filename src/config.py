@@ -78,6 +78,16 @@ class Loss_Config:
         self.CE_WEIGHT = 1
         self.DICE_WEIGHT = 0.5
 
+class Network_Config:
+    def __init__(self):
+        self.AREA_THRESHOLD = 50
+        self.CONNECTION_TYPES = ['Door']
+        self.BAN_TYPES = ['Wall', 'Outside']
+        self.ROOM_TYPES = [v for k,v in COLOR_MAP.items() if v not in self.BAN_TYPES]
+        self.TRANSPORTATION_TYPES = []
+        self.PEDESTRIAN_TYPES = ['Corridor']
+        self.GRID_SIZE = 50
+
 COLOR_MAP = {
     (156, 40, 177): 'Outside',
     (245, 67, 55): 'Pharmacy', 
