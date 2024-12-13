@@ -39,6 +39,11 @@ class Network:
         color_values = np.array(list(self.color_map.keys()))
         new_pixels = color_values[closest_indices]
         new_img_array = new_pixels.reshape(img_array.shape).astype(np.uint8)
+        
+        # 应用中值滤波
+
+        # 保存处理后的图像
+        cv2.imwrite('./debug/processed_image.png', new_img_array)
         self.image = Image.fromarray(new_img_array)
 
     def _create_connection_nodes(self):
