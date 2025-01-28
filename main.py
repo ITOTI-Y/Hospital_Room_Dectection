@@ -1,6 +1,5 @@
 import src
 import torch
-from PIL import Image
 
 if __name__ == "__main__":
     # torch.manual_seed(CONFIG.SEED)
@@ -21,5 +20,5 @@ if __name__ == "__main__":
     # predict.run()
 
     # 节点图
-    node_graph = src.Network(Image.open('./data/label/01_1f.png'))
+    node_graph = src.Network(image_path='./data/label/01_2f.png')
     node_graph.plot()

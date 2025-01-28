@@ -80,12 +80,13 @@ class Loss_Config:
 
 class Network_Config:
     def __init__(self):
-        self.AREA_THRESHOLD = 50
+        self.AREA_THRESHOLD = 60
+        self.SKEWNESS = 20
         self.CONNECTION_TYPES = ['Door']
-        self.BAN_TYPES = ['Wall', 'Outside']
+        self.BAN_TYPES = ['Wall', 'Outside', 'Corridor']
         self.ROOM_TYPES = [v for k,v in COLOR_MAP.items() if v not in self.BAN_TYPES]
         self.TRANSPORTATION_TYPES = []
-        self.PEDESTRIAN_TYPES = ['Corridor']
+        self.PEDESTRIAN_TYPES = ['Corridor','Outside']
         self.GRID_SIZE = 50
 
 COLOR_MAP = {
@@ -141,7 +142,8 @@ COLOR_MAP = {
     (241, 190, 185): 'Family Planning Department', 
     (187, 146, 160): 'Occupational Disease Department', 
     (70, 195, 179): 'Psychology Department', 
-    (187, 151, 247): 'Beauty Department'}
+    (187, 151, 247): 'Beauty Department',
+    (255, 255, 255): 'Empty Room'}
 
 # COLOR_LABEL = {
 #     'f54337': 'Pharmacy', # 药房
