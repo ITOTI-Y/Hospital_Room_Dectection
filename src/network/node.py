@@ -1,6 +1,6 @@
 from typing import Tuple
 class Node:
-    _id_counter = 0
+    _id_counter = 1
     def __init__(self, node_type:str, node_pos:Tuple[int, int]):
         self.type = node_type
         self.pos = node_pos

@@ -20,5 +20,5 @@ if __name__ == "__main__":
     # predict.run()
 
     # 节点图
-    node_graph = src.Network(image_path='./data/label/01_2f.png')
+    node_graph = src.Network(image_path='./data/label/1F-meng.png')
     node_graph.plot()

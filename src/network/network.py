@@ -19,51 +19,106 @@ class Network:
         Args:
             image (Image.Image): 输入的图像
         """
-        self.image = preprocess_image(Image.open(image_path))
+        self.image = np.asarray(Image.open(image_path))
+        self.id_map = np.zeros_like(self.image, dtype=int)
         self.height = self.image.shape[0]
         self.width = self.image.shape[1]
         self.color_map = COLOR_MAP
         self.types_map = {v:k for k,v in COLOR_MAP.items()}
         self.graph = nx.Graph()
+        self._create_room_nodes()
         self._create_connection_nodes()
-        self._create_pedestrian_nodes()
-        pass
 
-
-    def _create_connection_nodes(self):
+    def _create_room_nodes(self):
         """
-        创建连接节点
+        Create Room Nodes
         """
-        img_cv = np.array(self.image)
+        img = self.image.copy()
         for conn_type in CONFIG.ROOM_TYPES:
             try:
                 conn_type_color = self.types_map[conn_type]
             except KeyError:
                 print(f"Color for {conn_type} not found in COLOR_MAP")
                 continue
-        
-            # 创建掩码
-            mask = cv2.inRange(img_cv, np.array(conn_type_color), np.array(conn_type_color))
-            DebugImage(mask, suffix=conn_type)
+
+            # 创建掩码,提取对应区域
+            mask = cv2.inRange(img, np.array(conn_type_color), np.array(conn_type_color))
 
             # 形态学操作
             mask = morphology_operation(mask)
-            DebugImage(mask, suffix=conn_type)
 
             # 查找连通组件
             retval, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=4)
-            skewness = np.max(stats[:, 2:4], axis=1) / np.min(stats[:, 2:4], axis=1)
-            stats = np.concatenate([stats, skewness.reshape(-1, 1)], axis=1)
-            
-            stats = stats[stats[:, cv2.CC_STAT_AREA] > CONFIG.AREA_THRESHOLD]
-            stats = stats[stats[:, 5] < CONFIG.SKEWNESS]
-            if len(stats) <= 1:
+            if retval <= 1:
                 continue
-            for i in range(1, retval): # 从1开始，0是背景
+            for i in range(1, retval):
                 centroid = centroids[i]
                 position = (int(centroid[0]), int(centroid[1]))
                 node = Node(conn_type, position)
                 self.graph.add_node(node)
+                self.id_map[mask != 0] = node.id
+
+    def _create_connection_nodes(self):
+        """
+        创建连接节点
+        """
+        img = self.image.copy()
+        for conn_type in CONFIG.CONNECTION_TYPES:
+            try:
+                conn_type_color = self.types_map[conn_type]
+            except KeyError:
+                print(f"Color for {conn_type} not found in COLOR_MAP")
+                continue
+
+            # 创建掩码,提取对应区域
+            mask = cv2.inRange(img, np.array(conn_type_color), np.array(conn_type_color))
+
+            # 形态学操作
+            mask = morphology_operation(mask)
+
+            # 查找连通组件
+            retval, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=4)
+            if retval <= 1:
+                continue
+            for i in range(1, retval):
+                centroid = centroids[i]
+
+
+
+    # def _create_connection_nodes(self):
+    #     """
+    #     创建连接节点
+    #     """
+    #     img_cv = np.array(self.image)
+    #     for conn_type in CONFIG.ROOM_TYPES:
+    #         try:
+    #             conn_type_color = self.types_map[conn_type]
+    #         except KeyError:
+    #             print(f"Color for {conn_type} not found in COLOR_MAP")
+    #             continue
+        
+    #         # 创建掩码
+    #         mask = cv2.inRange(img_cv, np.array(conn_type_color), np.array(conn_type_color))
+    #         DebugImage(mask, suffix=conn_type)
+
+    #         # 形态学操作
+    #         mask = morphology_operation(mask)
+    #         DebugImage(mask, suffix=conn_type)
+
+    #         # 查找连通组件
+    #         retval, labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=4)
+    #         skewness = np.max(stats[:, 2:4], axis=1) / np.min(stats[:, 2:4], axis=1)
+    #         stats = np.concatenate([stats, skewness.reshape(-1, 1)], axis=1)
+            
+    #         stats = stats[stats[:, cv2.CC_STAT_AREA] > CONFIG.AREA_THRESHOLD]
+    #         stats = stats[stats[:, 5] < CONFIG.SKEWNESS]
+    #         if len(stats) <= 1:
+    #             continue
+    #         for i in range(1, retval): # 从1开始，0是背景
+    #             centroid = centroids[i]
+    #             position = (int(centroid[0]), int(centroid[1]))
+    #             node = Node(conn_type, position)
+    #             self.graph.add_node(node)
 
     def _create_pedestrian_nodes(self):
         """
@@ -121,6 +176,9 @@ class Network:
         ax.imshow(self.image)
         pos = {node:node.pos for node in self.graph.nodes}
         labels = {node:node.type for node in self.graph.nodes}
+        # 设置中文字体
+        plt.rcParams['font.sans-serif'] = ['SimHei']  # 使用SimHei字体
+        plt.rcParams['axes.unicode_minus'] = False  # 解决负号'-'显示为方块的问题
         nx.draw(self.graph, pos, labels=labels, with_labels=True, 
                 node_size=50, node_color='red', font_size=8, 
                 font_weight='bold', ax=ax)
