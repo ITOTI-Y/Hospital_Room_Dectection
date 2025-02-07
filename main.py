@@ -20,5 +20,6 @@ if __name__ == "__main__":
     # predict.run()
 
     # 节点图
-    node_graph = src.Network(image_path='./data/label/1F-meng.png')
-    node_graph.plot()
+    network = src.Network()
+    result_graph = network.run('./data/label/1F-meng.png')
+    network.plot_plotly()

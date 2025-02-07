@@ -80,15 +80,83 @@ class Loss_Config:
 
 class Network_Config:
     def __init__(self):
-        self.AREA_THRESHOLD = 60
-        self.SKEWNESS = 20
+        self.AREA_THRESHOLD = 60 # 面积阈值
+        self.SKEWNESS = 20 # 偏度
         self.CONNECTION_TYPES = ['门']
         self.BAN_TYPES = ['墙', '室外', '走廊']
-        self.ROOM_TYPES = [v for k,v in COLOR_MAP.items() if v not in self.BAN_TYPES and v not in self.CONNECTION_TYPES]
-        self.TRANSPORTATION_TYPES = ['电梯', '扶梯']
-        self.PEDESTRIAN_TYPES = ['走廊','室外']
-        self.GRID_SIZE = 50
+        self.ROOM_TYPES = [v['name'] for k,v in COLOR_MAP.items() if v['name'] not in self.BAN_TYPES and v['name'] not in self.CONNECTION_TYPES] # 房间区域
+        self.TRANSPORTATION_TYPES = ['电梯', '扶梯'] # 交通区域
+        self.PEDESTRIAN_TYPES = ['走廊'] # 人行区域
+        self.OUTSIDE_TYPES = ['室外'] # 室外区域
+        self.GRID_SIZE = 40 # 网格大小
+        self.OUTSIDE_ID = -1 # 室外区域ID
+        self.OUTSIDE_TIMES = 2 # 室外网格间距倍数，同时影响室外时间
+        self.BACKGROUND_ID = 0 # 背景区域ID
+        self.PEDESTRIAN_ID = 255 # 人行区域ID
+        self.PEDESTRAIN_TIME = 1 # 人行时间
+        self.CONNECTION_TIME = 1 # 连接时间 - 门
 
+COLOR_MAP = {
+    (244, 67, 54): {'name':'药房', 'time': 1},
+    (0, 150, 136): {'name':'挂号处', 'time': 1},
+    (103, 58, 183): {'name':'急诊科', 'time': 1},
+    (145, 102, 86): {'name': '中心供应室', 'time': 1},
+    (33, 150, 243): {'name': '门诊治疗', 'time': 1},
+    (3, 169, 244): {'name': '放射科', 'time': 1},
+    (0, 188, 212): {'name': '儿科单元', 'time': 1},
+    (207, 216, 220): {'name': '走廊', 'time': 1},
+    (117, 117, 117): {'name': '楼梯', 'time': 1},
+    (189, 189, 189): {'name': '电梯', 'time': 1},
+    (158, 158, 158): {'name': '扶梯', 'time': 1},
+    (76, 175, 80): {'name': '绿化', 'time': 1},
+    (255, 235, 59): {'name': '墙', 'time': 1},
+    (121, 85, 72): {'name': '门', 'time': 1},
+    (156, 39, 176): {'name': '室外', 'time': 1},
+    (139, 195, 74): {'name': '内镜中心', 'time': 1},
+    (205, 220, 57): {'name': '检验中心', 'time': 1},
+    (255, 193, 7): {'name': '消化内科', 'time': 1},
+    (255, 152, 0): {'name': '内分泌科', 'time': 1},
+    (254, 87, 34): {'name': '呼吸科', 'time': 1},
+    (169, 238, 90): {'name': '心血管内科', 'time': 1},
+    (88, 67, 60): {'name': '采血处', 'time': 1},
+    (239, 199, 78): {'name': '眼科', 'time': 1},
+    (253, 186, 87): {'name': '中医科', 'time': 1},
+    (250, 133, 96): {'name': '口腔科', 'time': 1},
+    (197, 254, 130): {'name': '耳鼻喉科', 'time': 1},
+    (124, 165, 185): {'name': '超声科', 'time': 1},
+    (173, 133, 11): {'name': '功能检查科', 'time': 1},
+    (119, 90, 10): {'name': '病理科', 'time': 1},
+    (250, 146, 138): {'name': '骨科', 'time': 1},
+    (255, 128, 171): {'name': '肾内科', 'time': 1},
+    (33, 250, 230): {'name': '康复医学科', 'time': 1},
+    (141, 78, 255): {'name': '血液科', 'time': 1},
+    (82, 108, 255): {'name': '皮肤科', 'time': 1},
+    (226, 58, 255): {'name': '妇科', 'time': 1},
+    (100, 139, 55): {'name': '产科', 'time': 1},
+    (113, 134, 91): {'name': '手术室', 'time': 1},
+    (175, 207, 142): {'name': '门诊手术室', 'time': 1},
+    (179, 116, 190): {'name': '中庭', 'time': 1},
+    (232, 137, 248): {'name': '风湿免疫科', 'time': 1},
+    (63, 100, 23): {'name': '神经内科', 'time': 1},
+    (182, 198, 9): {'name': '神经外科', 'time': 1},
+    (240, 222, 165): {'name': '胸外科', 'time': 1},
+    (221, 173, 229): {'name': '结直肠外科', 'time': 1},
+    (166, 45, 36): {'name': '泌尿外科', 'time': 1},
+    (187, 24, 80): {'name': '普外科', 'time': 1},
+    (7, 91, 82): {'name': '特需门诊', 'time': 1},
+    (150, 133, 179): {'name': '透析中心', 'time': 1},
+    (115, 124, 177): {'name': '中西医结合科', 'time': 1},
+    (195, 127, 122): {'name': '全科门诊', 'time': 1},
+    (48, 122, 113): {'name': '生殖医学科', 'time': 1},
+    (112, 40, 236): {'name': '肿瘤科', 'time': 1},
+    (142, 157, 246): {'name': '胃肠外科', 'time': 1},
+    (241, 190, 186): {'name': '计划生育科', 'time': 1},
+    (186, 146, 160): {'name': '职业病科', 'time': 1},
+    (71, 195, 180): {'name': '心理科', 'time': 1},
+    (187, 152, 247): {'name': '美容科', 'time': 1},
+    (254, 210, 145): {'name': '介入科', 'time': 1},
+    (255, 255, 255): {'name': '空房间', 'time': 1}
+}
 
 # COLOR_MAP = {
 #     (244, 67, 54): 'Pharmacy',
@@ -152,180 +220,65 @@ class Network_Config:
 #     (255, 255, 255): 'Empty Room'
 # }
 
-COLOR_MAP = {
-    (244, 67, 54): '药房',
-    (0, 150, 136): '挂号处',
-    (103, 58, 183): '急诊科',
-    (145, 102, 86): '中心供应室',
-    (33, 150, 243): '门诊治疗',
-    (3, 169, 244): '放射科',
-    (0, 188, 212): '儿科单元',
-    (207, 216, 220): '走廊',
-    (117, 117, 117): '楼梯',
-    (189, 189, 189): '电梯',
-    (158, 158, 158): '扶梯',
-    (76, 175, 80): '绿化',
-    (255, 235, 59): '墙',
-    (121, 85, 72): '门',
-    (156, 39, 176): '室外',
-    (139, 195, 74): '内镜中心',
-    (205, 220, 57): '检验中心',
-    (255, 193, 7): '消化内科',
-    (255, 152, 0): '内分泌科',
-    (254, 87, 34): '呼吸科',
-    (169, 238, 90): '心血管内科',
-    (88, 67, 60): '采血处',
-    (239, 199, 78): '眼科',
-    (253, 186, 87): '中医科',
-    (250, 133, 96): '口腔科',
-    (197, 254, 130): '耳鼻喉科',
-    (124, 165, 185): '超声科',
-    (173, 133, 11): '功能检查科',
-    (119, 90, 10): '病理科',
-    (250, 146, 138): '骨科',
-    (255, 128, 171): '肾内科',
-    (33, 250, 230): '康复医学科',
-    (141, 78, 255): '血液科',
-    (82, 108, 255): '皮肤科',
-    (226, 58, 255): '妇科',
-    (100, 139, 55): '产科',
-    (113, 134, 91): '手术室',
-    (175, 207, 142): '门诊手术室',
-    (179, 116, 190): '中庭',
-    (232, 137, 248): '风湿免疫科',
-    (63, 100, 23): '神经内科',
-    (182, 198, 9): '神经外科',
-    (240, 222, 165): '胸外科',
-    (221, 173, 229): '结直肠外科',
-    (166, 45, 36): '泌尿外科',
-    (187, 24, 80): '普外科',
-    (7, 91, 82): '特需门诊',
-    (150, 133, 179): '透析中心',
-    (115, 124, 177): '中西医结合科',
-    (195, 127, 122): '全科门诊',
-    (48, 122, 113): '生殖医学科',
-    (112, 40, 236): '肿瘤科',
-    (142, 157, 246): '胃肠外科',
-    (241, 190, 186): '计划生育科',
-    (186, 146, 160): '职业病科',
-    (71, 195, 180): '心理科',
-    (187, 152, 247): '美容科',
-    (254, 210, 145): '介入科',
-    (255, 255, 255): '空房间'
-}
-
 # COLOR_MAP = {
-#     (156, 40, 177): 'Outside',
-#     (245, 67, 55): 'Pharmacy', 
-#     (0, 151, 136): 'Reception desk', 
-#     (103, 58, 183): 'Emergency Department', 
-#     (33, 150, 243): 'Outpatient Treatment', 
-#     (3, 169, 245): 'Radiology', 
-#     (0, 188, 213): 'Pediatric Unit', 
-#     (207, 216, 221): 'Corridor', 
-#     (117, 117, 117): 'Stairs', 
-#     (189, 189, 189): 'Elevator', 
-#     (158, 158, 158): 'Escalator', 
-#     (76, 176, 80): 'Landscape Space', 
-#     (255, 235, 60): 'Wall', 
-#     (121, 85, 71): 'Door', 
-#     (140, 195, 75): 'Endoscopy Center', 
-#     (205, 220, 57): 'Testing Center', 
-#     (254, 193, 7): 'Gastroenterology', 
-#     (255, 152, 1): 'Endocrinology', 
-#     (254, 87, 33): 'Respiratory Medicine', 
-#     (170, 238, 91): 'Cardiovascular Medicine', 
-#     (239, 199, 78): 'Ophthalmology', 
-#     (254, 186, 87): 'Chinese medicine', 
-#     (251, 133, 97): 'Oral Medicine', 
-#     (198, 254, 131): 'Otorhinolaryngology', 
-#     (124, 165, 185): 'Ultrasound Department', 
-#     (173, 133, 10): 'Functional Inspection Department', 
-#     (255, 212, 149): 'Rehabilitation Medicine Department', 
-#     (250, 145, 139): 'Orthopedics', 
-#     (255, 128, 171): 'Nephrology', 
-#     (33, 250, 231): 'Physical Medicine and Rehabilitation', 
-#     (141, 78, 255): 'Hematology', 
-#     (82, 108, 255): 'Dermatology', 
-#     (226, 58, 255): 'Gynecology', 
-#     (100, 139, 56): 'Obstetrics', 
-#     (179, 115, 189): 'Courtyard', 
-#     (233, 136, 249): 'Rheumatology Department', 
-#     (63, 100, 23): 'Neurology', 
-#     (182, 199, 9): 'Neurosurgery', 
-#     (241, 222, 166): 'Thoracic Surgery', 
-#     (222, 173, 229): 'Colorectal Surgery', 
-#     (165, 45, 36): 'Urology', 
-#     (187, 24, 81): 'General Surgery', 
-#     (7, 91, 83): 'Special Outpatient Clinic', 
-#     (150, 133, 178): 'Dialysis Center', 
-#     (114, 124, 177): 'Integrated Traditional Chinese and Western Medicine Department', 
-#     (195, 127, 122): 'General Outpatient Clinic', 
-#     (48, 122, 113): 'Reproductive Medicine Department', 
-#     (112, 40, 236): 'Oncology', 
-#     (142, 158, 246): 'Gastrointestinal Surgery', 
-#     (241, 190, 185): 'Family Planning Department', 
-#     (187, 146, 160): 'Occupational Disease Department', 
-#     (70, 195, 179): 'Psychology Department', 
-#     (187, 151, 247): 'Beauty Department',
-#     (255, 255, 255): 'Empty Room'}
-
-# COLOR_LABEL = {
-#     'f54337': 'Pharmacy', # 药房
-#     # 'ea1e63': 'Chinese Pharmacy',
-#     '009788': 'Reception desk', # 挂号处
-#     '673ab7': 'Emergency Department',
-#     # '3f51b5': 'Infectious Disease Clinic',
-#     '2196f3': 'Outpatient Treatment', # 门诊治疗
-#     '03a9f5': 'Radiology', # 放射科
-#     '00bcd5':'Pediatric Unit', # 儿科
-#     'cfd8dd': 'Corridor', # 走廊
-#     '757575': 'Stairs', # 楼梯
-#     'bdbdbd': 'Elevator', # 电梯
-#     '9e9e9e': 'Escalator', # 扶梯
-#     '4cb050': 'Landscape Space', # 景观空间
-#     'ffeb3c': 'Wall', # 墙
-#     '795547': 'Door', # 门
-#     '9c28b1': 'Outside', # 室外
-#     '8cc34b': 'Endoscopy Center', # 内镜中心
-#     'cddc39': 'Testing Center', # 检验中心
-#     'fec107': 'Gastroenterology', # 肠胃科
-#     'ff9801': 'Endocrinology', # 内分泌科
-#     'fe5721': 'Respiratory Medicine', # 呼吸内科
-#     'aaee5b': 'Cardiovascular Medicine', # 心血管内科
-#     # '607d8b': 'Health Examination Department',
-#     'efc74e': 'Ophthalmology', # 眼科
-#     'feba57': 'Chinese medicine', # 中医科
-#     'fb8561': 'Oral Medicine', # 口腔科
-#     'c6fe83': 'Otorhinolaryngology', # 耳鼻喉科
-#     '7ca5b9': 'Ultrasound Department', # 超声科
-#     'ad850a': 'Functional Inspection Department', # 功能检查科
-#     'ffd495': 'Rehabilitation Medicine Department', # 康复医学科
-#     'fa918b': 'Orthopedics', # 骨科
-#     'ff80ab': 'Nephrology', # 肾内科
-#     '21fae7': 'Physical Medicine and Rehabilitation', # 理疗科
-#     '8d4eff': 'Hematology', # 血液科
-#     '526cff': 'Dermatology', # 皮肤科
-#     'e23aff': 'Gynecology', # 妇科
-#     '648b38': 'Obstetrics', # 产科
-#     'b373bd': 'Courtyard', # 中庭
-#     'e988f9': 'Rheumatology Department', # 风湿免疫科
-#     '3f6417': 'Neurology', # 神经内科
-#     'b6c709': 'Neurosurgery', # 神经外科
-#     'f1dea6': 'Thoracic Surgery', # 胸外科
-#     'deade5': 'Colorectal Surgery', # 肛肠外科
-#     'a52d24': 'Urology', # 泌尿外科
-#     'bb1851': 'General Surgery', # 普外科
-#     '075b53': 'Special Outpatient Clinic', # 专家门诊
-#     '9685b2': 'Dialysis Center', # 透析中心
-#     '727cb1': 'Integrated Traditional Chinese and Western Medicine Department', # 中西医结合科
-#     'c37f7a': 'General Outpatient Clinic', # 全科门诊
-#     '307a71': 'Reproductive Medicine Department', # 生殖医学科
-#     '7028ec': 'Oncology', # 肿瘤科
-#     '8e9ef6': 'Gastrointestinal Surgery', # 肝胆外科
-#     'f1beb9': 'Family Planning Department', # 计划生育科
-#     'bb92a0': 'Occupational Disease Department', # 职业病科
-#     '46c3b3': 'Psychology Department', # 心理科
-#     'bb97f7': 'Beauty Department', # 美容科
+#     (244, 67, 54): {'name':'药房', 'time': 1},
+#     (0, 150, 136): {'name':'挂号处', 'time': 1},
+#     (103, 58, 183): {'name':'急诊科', 'time': 1},
+#     (145, 102, 86): '中心供应室',
+#     (33, 150, 243): '门诊治疗',
+#     (3, 169, 244): '放射科',
+#     (0, 188, 212): '儿科单元',
+#     (207, 216, 220): '走廊',
+#     (117, 117, 117): '楼梯',
+#     (189, 189, 189): '电梯',
+#     (158, 158, 158): '扶梯',
+#     (76, 175, 80): '绿化',
+#     (255, 235, 59): '墙',
+#     (121, 85, 72): '门',
+#     (156, 39, 176): '室外',
+#     (139, 195, 74): '内镜中心',
+#     (205, 220, 57): '检验中心',
+#     (255, 193, 7): '消化内科',
+#     (255, 152, 0): '内分泌科',
+#     (254, 87, 34): '呼吸科',
+#     (169, 238, 90): '心血管内科',
+#     (88, 67, 60): '采血处',
+#     (239, 199, 78): '眼科',
+#     (253, 186, 87): '中医科',
+#     (250, 133, 96): '口腔科',
+#     (197, 254, 130): '耳鼻喉科',
+#     (124, 165, 185): '超声科',
+#     (173, 133, 11): '功能检查科',
+#     (119, 90, 10): '病理科',
+#     (250, 146, 138): '骨科',
+#     (255, 128, 171): '肾内科',
+#     (33, 250, 230): '康复医学科',
+#     (141, 78, 255): '血液科',
+#     (82, 108, 255): '皮肤科',
+#     (226, 58, 255): '妇科',
+#     (100, 139, 55): '产科',
+#     (113, 134, 91): '手术室',
+#     (175, 207, 142): '门诊手术室',
+#     (179, 116, 190): '中庭',
+#     (232, 137, 248): '风湿免疫科',
+#     (63, 100, 23): '神经内科',
+#     (182, 198, 9): '神经外科',
+#     (240, 222, 165): '胸外科',
+#     (221, 173, 229): '结直肠外科',
+#     (166, 45, 36): '泌尿外科',
+#     (187, 24, 80): '普外科',
+#     (7, 91, 82): '特需门诊',
+#     (150, 133, 179): '透析中心',
+#     (115, 124, 177): '中西医结合科',
+#     (195, 127, 122): '全科门诊',
+#     (48, 122, 113): '生殖医学科',
+#     (112, 40, 236): '肿瘤科',
+#     (142, 157, 246): '胃肠外科',
+#     (241, 190, 186): '计划生育科',
+#     (186, 146, 160): '职业病科',
+#     (71, 195, 180): '心理科',
+#     (187, 152, 247): '美容科',
+#     (254, 210, 145): '介入科',
+#     (255, 255, 255): '空房间'
 # }
 
