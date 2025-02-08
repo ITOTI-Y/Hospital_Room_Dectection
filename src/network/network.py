@@ -2,6 +2,7 @@ import networkx as nx
 import numpy as np
 import matplotlib.pyplot as plt
 import cv2
+import json
 import plotly.graph_objects as go
 from PIL import Image
 from scipy.spatial import KDTree, distance
@@ -22,8 +23,6 @@ class Network:
         """
         self.color_map = COLOR_MAP
         self.types_map = {v['name']: k for k, v in COLOR_MAP.items()}
-        self.graph = nx.Graph()
-        self.id_to_node = {}
 
     def add_node(self, node: Node):
         """
@@ -299,6 +298,8 @@ class Network:
         """
         运行节点图
         """
+        self.graph = nx.Graph()
+        self.id_to_node = {}
         self.image = np.asarray(Image.open(image_path))
         self.id_map = np.zeros_like(self.image, dtype=int)
         self.height = self.image.shape[0]
@@ -312,41 +313,6 @@ class Network:
         self._connect_pedestrian_connection(outside=outside)
         return self.graph
 
-    # def plot(self, save: bool = False):
-    #     """
-    #     可视化节点图
-    #     """
-    #     # 将图片尺寸从像素转换为英寸（考虑 DPI）
-    #     dpi = 100
-    #     width_inches = self.width / dpi
-    #     height_inches = self.height / dpi
-
-    #     # 创建指定尺寸的图形
-    #     fig = plt.figure(figsize=(width_inches, height_inches), dpi=dpi)
-    #     # 移除图形周围的空白边距
-    #     ax = plt.Axes(fig, [0., 0., 1., 1.])
-    #     ax.set_axis_off()
-    #     fig.add_axes(ax)
-
-    #     # 显示图像和节点
-    #     ax.imshow(self.image)
-    #     pos = {node:node.pos for node in self.graph.nodes}
-    #     labels = {node:node.type for node in self.graph.nodes}
-    #     # 设置中文字体
-    #     plt.rcParams['font.sans-serif'] = ['SimHei']  # 使用SimHei字体
-    #     plt.rcParams['axes.unicode_minus'] = False  # 解决负号'-'显示为方块的问题
-    #     nx.draw(self.graph, pos, labels=labels, with_labels=True,
-    #             node_size=50, node_color='red', font_size=8,
-    #             font_weight='bold', ax=ax)
-
-    #     if save:
-    #         plt.savefig('./debug/network.png',
-    #                     dpi=dpi,
-    #                     bbox_inches='tight',
-    #                     pad_inches=0)
-    #         plt.close()
-    #     else:
-    #         plt.show()
     def plot(self, save: bool = False):
         """
         可视化节点图 (3D)
@@ -426,6 +392,117 @@ class Network:
         node_z = []
         node_text = []
         for node in self.graph.nodes():
+            x, y, z = pos[node]
+            node_x.append(x)
+            node_y.append(y)
+            node_z.append(z)
+            node_text.append(f"{node.type}")
+
+        node_trace = go.Scatter3d(
+            x=node_x, y=node_y, z=node_z,
+            mode='markers+text',  # 同时显示标记和文本
+            hoverinfo='text',
+            marker=dict(
+                showscale=True,
+                colorscale='YlGnBu',
+                reversescale=True,
+                color=[],
+                size=10,
+                colorbar=dict(
+                    thickness=15,
+                    title='Node Connections',  # 只需要设置 title
+                    xanchor='left',
+                ),
+                line_width=2),
+            text=node_text,       # 设置节点文本
+            textposition="top center")  # 文本位置
+
+        fig = go.Figure(data=[edge_trace, node_trace],
+                        layout=go.Layout(
+            title='Network Graph',
+            showlegend=False,
+            hovermode='closest',
+            margin=dict(b=20, l=5, r=5, t=40),
+            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
+            scene=dict(  # 设置3D场景
+                xaxis=dict(title='X'),
+                yaxis=dict(title='Y'),
+                zaxis=dict(title='Z'),
+            )
+        ))
+
+        if save:
+            fig.write_html('./debug/network_plotly.html')  # 保存为 HTML
+        else:
+            fig.show()
+
+class SuperNetwork:
+    def __init__(self, tolerance:int = 30):
+        self.super_graph = nx.Graph()
+        self.vertical_connection_types = CONFIG.VERTICAL_TYPES
+        self.tolerance = tolerance
+        self.networks = []
+    
+    def add_network(self, network:nx.Graph):
+        self.networks.append(network)
+        self.super_graph.add_nodes_from(network.nodes)
+        self.super_graph.add_edges_from(network.edges)
+
+    def connect_floors(self):
+        """
+        _summary_: 连接楼层
+        """
+        all_vertical_nodes = [node for node in self.super_graph.nodes if node.type in self.vertical_connection_types]
+        if not all_vertical_nodes:
+            return
+        
+        vertical_node_position = np.array([node.pos for node in all_vertical_nodes])
+        tree = KDTree(vertical_node_position)
+
+        for network in self.networks:
+            vertical_nodes = [node for node in network.nodes if node.type in self.vertical_connection_types]
+
+            for v_node in vertical_nodes:
+                zlevel = v_node.pos[2]
+                distances, indices = tree.query(v_node.pos, k=2)
+                for dis, j in zip(distances, indices):
+                    if dis <= self.tolerance and all_vertical_nodes[j] != v_node:
+                        self.super_graph.add_edge(v_node, all_vertical_nodes[j])
+
+    def run(self, image_paths: list, zlevels: list):
+        if len(image_paths) != len(zlevels):
+            raise ValueError("Length of image_paths and zlevels should be the same.")
+        
+        for image_path, zlevel in zip(image_paths, zlevels):
+            network = Network()
+            self.add_network(network.run(image_path, zlevel=zlevel)) # 默认不连接室外节点
+        self.connect_floors()
+        return self.super_graph
+
+    def plot_plotly(self, save: bool = False):
+        pos = {node: node.pos for node in self.super_graph.nodes()}
+        edge_x = []
+        edge_y = []
+        edge_z = []
+        for edge in self.super_graph.edges():
+            x0, y0, z0 = pos[edge[0]]
+            x1, y1, z1 = pos[edge[1]]
+            edge_x.extend([x0, x1, None])  # None 用于分隔线段
+            edge_y.extend([y0, y1, None])
+            edge_z.extend([z0, z1, None])
+
+        edge_trace = go.Scatter3d(
+            x=edge_x, y=edge_y, z=edge_z,
+            line=dict(width=0.5, color='#888'),
+            hoverinfo='none',
+            mode='lines')
+
+        node_x = []
+        node_y = []
+        node_z = []
+        node_text = []
+        for node in self.super_graph.nodes():
             x, y, z = pos[node]
             node_x.append(x)
             node_y.append(y)

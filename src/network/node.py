@@ -13,7 +13,7 @@ class Node:
         Node._id_counter += 1
 
     def __repr__(self):
-        return f"Node(id={self.id}, type={self.type}, pos={self.pos})"
+        return f"Node(id={self.id}, type={self.type}, pos={self.pos}, time={self.time}, door={self.door})"
 
     def __hash__(self):
         return hash(self.id)

@@ -1,5 +1,9 @@
 import src
+from src import Node
 import torch
+import os
+import networkx as nx
+import json
 
 if __name__ == "__main__":
     # torch.manual_seed(CONFIG.SEED)
@@ -20,6 +24,8 @@ if __name__ == "__main__":
     # predict.run()
 
     # 节点图
-    network = src.Network()
-    result_graph = network.run('./data/label/1F-meng.png')
-    network.plot_plotly()
+    image_paths = [os.path.join('./data/label', image) for image in os.listdir('./data/label')]
+    super_network = src.SuperNetwork(tolerance=30) # tolerance: 表示两层节点之间的识别距离
+    super_network.run(image_paths=image_paths, zlevels = [-20, 0, 20, 40, 60])
+    super_network.plot_plotly()
+    pass

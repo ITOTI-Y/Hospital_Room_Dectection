@@ -84,8 +84,8 @@ class Network_Config:
         self.SKEWNESS = 20 # 偏度
         self.CONNECTION_TYPES = ['门']
         self.BAN_TYPES = ['墙', '室外', '走廊']
-        self.ROOM_TYPES = [v['name'] for k,v in COLOR_MAP.items() if v['name'] not in self.BAN_TYPES and v['name'] not in self.CONNECTION_TYPES] # 房间区域
-        self.TRANSPORTATION_TYPES = ['电梯', '扶梯'] # 交通区域
+        self.ROOM_TYPES = [v['name'] for k, v in COLOR_MAP.items() if v['name'] not in self.BAN_TYPES and v['name'] not in self.CONNECTION_TYPES] # 房间区域
+        self.VERTICAL_TYPES = ['电梯', '扶梯', '楼梯'] # 垂直交通区域
         self.PEDESTRIAN_TYPES = ['走廊'] # 人行区域
         self.OUTSIDE_TYPES = ['室外'] # 室外区域
         self.GRID_SIZE = 40 # 网格大小
