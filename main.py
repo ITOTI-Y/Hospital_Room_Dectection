@@ -26,6 +26,7 @@ if __name__ == "__main__":
     # 节点图
     image_paths = [os.path.join('./data/label', image) for image in os.listdir('./data/label')]
     super_network = src.SuperNetwork(tolerance=30) # tolerance: 表示两层节点之间的识别距离
-    super_network.run(image_paths=image_paths, zlevels = [-20, 0, 20, 40, 60])
-    super_network.plot_plotly()
+    super_network.run(image_paths=image_paths, zlevels = [-10, 0, 10, 20, 30])
+    super_network.plot_plotly(save=True)
+    src.calculate_room_travel_times(super_network.super_graph)
     pass

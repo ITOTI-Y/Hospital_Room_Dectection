@@ -112,6 +112,38 @@ class Network:
                 node.time = COLOR_MAP[conn_type_color]['time']
                 self.add_node(node)
                 self.id_map[(labels == i)] = node.id
+    
+    def _create_vertical_nodes(self, zlevel: int):
+        """
+        Create Room Nodes
+        """
+        img = self.image.copy()
+        for conn_type in CONFIG.VERTICAL_TYPES:
+            try:
+                conn_type_color = self.types_map[conn_type]
+            except KeyError:
+                print(f"Color for {conn_type} not found in COLOR_MAP")
+                continue
+
+            # 创建掩码,提取对应区域
+            mask = cv2.inRange(img, np.array(conn_type_color),
+                               np.array(conn_type_color))
+
+            # 形态学操作
+            mask = morphology_operation(mask)
+
+            # 查找连通组件
+            retval, labels, stats, centroids = cv2.connectedComponentsWithStats(
+                mask, connectivity=4)
+            if retval <= 1:
+                continue
+            for i in range(1, retval):
+                centroid = centroids[i]
+                position = (int(centroid[0]), int(centroid[1]), zlevel)
+                node = Node(conn_type, position)
+                node.time = COLOR_MAP[conn_type_color]['time']
+                self.add_node(node)
+                self.id_map[(labels == i)] = node.id
 
     def _create_connection_nodes(self, zlevel: int):
         """
@@ -306,6 +338,7 @@ class Network:
         self.width = self.image.shape[1]
         self._create_outside_mask()
         self._create_room_nodes(zlevel=zlevel)
+        self._create_vertical_nodes(zlevel=zlevel)
         self._create_pedestrian_nodes(zlevel=zlevel)
         if outside:
             self._create_outside_nodes(zlevel=zlevel)
@@ -547,3 +580,38 @@ class SuperNetwork:
             fig.write_html('./debug/network_plotly.html')  # 保存为 HTML
         else:
             fig.show()
+
+def calculate_room_travel_times(graph: nx.Graph):
+    """
+    计算房间之间的通行时间
+    """
+    room_nodes = [node for node in graph.nodes if node.type in CONFIG.ROOM_TYPES]
+
+    room_graph = graph
+
+    room_type_times ={}
+
+    for start_node in room_nodes:
+        room_type1 = start_node.type
+
+        lengths = nx.single_source_dijkstra_path_length(room_graph, start_node, weight=lambda u, v, data: 0)
+
+        if room_type1 not in room_type_times:
+            room_type_times[room_type1] = {}
+        
+        for target_node in room_nodes:
+            room_type2 = target_node.type
+
+            if target_node == start_node:
+                room_type_times[room_type1][room_type2] = start_node.time
+                continue
+
+            try:
+                path = nx.dijkstra_path(room_graph, start_node, target_node, weight=lambda u, v, data: 0)
+                total_time = sum(node.time for node in path)
+                room_type_times[room_type1][room_type2] = total_time
+            
+            except nx.NetworkXNoPath:
+                room_type_times[room_type1][room_type2] = np.inf
+    
+    return room_type_times
