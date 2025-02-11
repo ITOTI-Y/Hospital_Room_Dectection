@@ -83,7 +83,7 @@ class Network_Config:
         self.AREA_THRESHOLD = 60 # 面积阈值
         self.SKEWNESS = 20 # 偏度
         self.CONNECTION_TYPES = ['门']
-        self.BAN_TYPES = ['墙', '室外', '走廊', '电梯', '扶梯', '楼梯', '空房间', '绿化', '中庭'] # 禁止区域
+        self.BAN_TYPES = ['墙','栏杆', '室外', '走廊', '电梯', '扶梯', '楼梯', '空房间', '绿化', '中庭'] # 禁止区域
         self.ROOM_TYPES = [v['name'] for k, v in COLOR_MAP.items() if v['name'] not in self.BAN_TYPES and v['name'] not in self.CONNECTION_TYPES] # 房间区域
         self.VERTICAL_TYPES = ['电梯', '扶梯', '楼梯'] # 垂直交通区域
         self.PEDESTRIAN_TYPES = ['走廊'] # 人行区域
@@ -155,6 +155,9 @@ COLOR_MAP = {
     (71, 195, 180): {'name': '心理科', 'time': 1},
     (187, 152, 247): {'name': '美容科', 'time': 1},
     (254, 210, 145): {'name': '介入科', 'time': 1},
+    (251, 242, 159): {'name': '栏杆', 'time': 1},
+    (240, 61, 123): {'name': 'NICU', 'time': 1},
+    (250, 162, 193): {'name': 'ICU', 'time': 1},
     (255, 255, 255): {'name': '空房间', 'time': 1}
 }
 
