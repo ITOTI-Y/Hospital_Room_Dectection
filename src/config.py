@@ -80,6 +80,7 @@ class Loss_Config:
 
 class Network_Config:
     def __init__(self):
+        self.IMAGE_ROTATE = 180
         self.AREA_THRESHOLD = 60 # 面积阈值
         self.SKEWNESS = 20 # 偏度
         self.CONNECTION_TYPES = ['门']

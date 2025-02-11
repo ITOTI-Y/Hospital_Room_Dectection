@@ -3,6 +3,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import cv2
 import json
+import os
 import plotly.graph_objects as go
 from PIL import Image
 from scipy.spatial import KDTree, distance
@@ -332,7 +333,7 @@ class Network:
         """
         self.graph = nx.Graph()
         self.id_to_node = {}
-        self.image = np.asarray(Image.open(image_path))
+        self.image = np.asarray(Image.open(image_path).rotate(CONFIG.IMAGE_ROTATE))
         self.id_map = np.zeros_like(self.image, dtype=int)
         self.height = self.image.shape[0]
         self.width = self.image.shape[1]
@@ -613,5 +614,8 @@ def calculate_room_travel_times(graph: nx.Graph):
             
             except nx.NetworkXNoPath:
                 room_type_times[room_type1][room_type2] = np.inf
+    os.makedirs('./result', exist_ok=True)
+    with open('./result/reuslt.json', 'w') as f:
+        json.dump(room_type_times, f)
     
     return room_type_times

@@ -29,4 +29,3 @@ if __name__ == "__main__":
     super_network.run(image_paths=image_paths, zlevels = [-10, 0, 10, 20, 30])
     super_network.plot_plotly(save=True)
     src.calculate_room_travel_times(super_network.super_graph)
-    pass
