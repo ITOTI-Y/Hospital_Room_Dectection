@@ -615,7 +615,7 @@ def calculate_room_travel_times(graph: nx.Graph):
             except nx.NetworkXNoPath:
                 room_type_times[room_type1][room_type2] = np.inf
     os.makedirs('./result', exist_ok=True)
-    with open('./result/reuslt.json', 'w') as f:
-        json.dump(room_type_times, f)
+    with open('./result/result.json', 'w', encoding='utf-8') as f:
+        json.dump(room_type_times, f, ensure_ascii=False)
     
     return room_type_times
