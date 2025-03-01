@@ -1,85 +1,86 @@
 import pathlib
-import torch
-from transformers import SwinConfig, Mask2FormerConfig
+# import torch
+# from transformers import SwinConfig, Mask2FormerConfig
 
-class Image_Processor_Config:
-    def __init__(self):
-        self.DO_RESIZE = True
-        self.IMAGE_SIZE = (768, 768)
-        self.IGNORE_INDEX = 0
-        self.NUM_LABELS = len(COLOR_MAP)
+# class Image_Processor_Config:
+#     def __init__(self):
+#         self.DO_RESIZE = True
+#         self.IMAGE_SIZE = (768, 768)
+#         self.IGNORE_INDEX = 0
+#         self.NUM_LABELS = len(COLOR_MAP)
 
-class Train_Config:
-    def __init__(self):
-        self.DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.IMAGE_DIR = pathlib.Path('./data/image')
-        self.LABEL_DIR = pathlib.Path('./data/label')
-        self.SAVE_MODEL_PATH = pathlib.Path('./models/best_model.pth')
-        self.SAVE_CHECKPOINT_PATH = pathlib.Path('./models/checkpoint.pth')
+# class Train_Config:
+#     def __init__(self):
+#         self.DEVICE = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+#         self.IMAGE_DIR = pathlib.Path('./data/image')
+#         self.LABEL_DIR = pathlib.Path('./data/label')
+#         self.SAVE_MODEL_PATH = pathlib.Path('./models/best_model.pth')
+#         self.SAVE_CHECKPOINT_PATH = pathlib.Path('./models/checkpoint.pth')
 
-        # LOG CONFIG
-        self.LOG_DIR = pathlib.Path('/root/tf-logs')
-        self.LOG_INTERVAL = 10
+#         # LOG CONFIG
+#         self.LOG_DIR = pathlib.Path('/root/tf-logs')
+#         self.LOG_INTERVAL = 10
         
-        # TRAIN CONFIG
-        self.TRAIN_SIZE = 0.8
-        self.VAL_SIZE = 0.2
-        self.SEED = 1
-        self.NUM_WORKERS = 8
-        self.BATCH_SIZE = 1 # 暂不支持多张图片
+#         # TRAIN CONFIG
+#         self.TRAIN_SIZE = 0.8
+#         self.VAL_SIZE = 0.2
+#         self.SEED = 1
+#         self.NUM_WORKERS = 8
+#         self.BATCH_SIZE = 1 # 暂不支持多张图片
 
-        self.LR = 1e-4
-        self.LR_FACTOR = 0.1
-        self.LR_PATIENCE = 5
-        self.LR_VERBOSE = False
-        self.LR_MODE = 'min'
-        self.WEIGHT_DECAY = 1e-4
+#         self.LR = 1e-4
+#         self.LR_FACTOR = 0.1
+#         self.LR_PATIENCE = 5
+#         self.LR_VERBOSE = False
+#         self.LR_MODE = 'min'
+#         self.WEIGHT_DECAY = 1e-4
         
-        self.PATIENCE = 2000
-        self.EPOCHS = 1000
-        self.SHUFFLE = True
+#         self.PATIENCE = 2000
+#         self.EPOCHS = 1000
+#         self.SHUFFLE = True
 
-class Swin_Model_Config:
-    def __init__(self):
-        self.IMAGE_SIZE = Image_Processor_Config().IMAGE_SIZE[0]
-        self.PATCH_SIZE = 4
-        self.NUM_CHANS = 3
-        self.EMBED_DIM = 96
-        self.DEPTHS = [2,2,6,2]
-        self.NUM_HEADS = [3,6,12,24]
-        self.WINDOW_SIZE = 7
-        self.OUT_INDICES = [0,1,2]
+# class Swin_Model_Config:
+#     def __init__(self):
+#         self.IMAGE_SIZE = Image_Processor_Config().IMAGE_SIZE[0]
+#         self.PATCH_SIZE = 4
+#         self.NUM_CHANS = 3
+#         self.EMBED_DIM = 96
+#         self.DEPTHS = [2,2,6,2]
+#         self.NUM_HEADS = [3,6,12,24]
+#         self.WINDOW_SIZE = 7
+#         self.OUT_INDICES = [0,1,2]
 
-    def get_config(self):
-        config = SwinConfig(
-            image_size=self.IMAGE_SIZE,
-            patch_size=self.PATCH_SIZE,
-            num_channels=self.NUM_CHANS,
-            embed_dim=self.EMBED_DIM,
-            depths=self.DEPTHS,
-            num_heads=self.NUM_HEADS,
-            window_size=self.WINDOW_SIZE,
-            out_indices=self.OUT_INDICES,
-        )
-        return config
+#     def get_config(self):
+#         config = SwinConfig(
+#             image_size=self.IMAGE_SIZE,
+#             patch_size=self.PATCH_SIZE,
+#             num_channels=self.NUM_CHANS,
+#             embed_dim=self.EMBED_DIM,
+#             depths=self.DEPTHS,
+#             num_heads=self.NUM_HEADS,
+#             window_size=self.WINDOW_SIZE,
+#             out_indices=self.OUT_INDICES,
+#         )
+#         return config
     
-class Mask2Former_Model_Config:
-    def __init__(self):
-        self.BACKBONE_CONFIG = Swin_Model_Config().get_config()
+# class Mask2Former_Model_Config:
+#     def __init__(self):
+#         self.BACKBONE_CONFIG = Swin_Model_Config().get_config()
     
-    def get_config(self):
-        config = Mask2FormerConfig().from_backbone_config(self.BACKBONE_CONFIG)
-        config.num_labels = len(COLOR_MAP)
-        return config
+#     def get_config(self):
+#         config = Mask2FormerConfig().from_backbone_config(self.BACKBONE_CONFIG)
+#         config.num_labels = len(COLOR_MAP)
+#         return config
 
-class Loss_Config:
-    def __init__(self):
-        self.SMOOTH = 1e-5
-        self.CE_WEIGHT = 1
-        self.DICE_WEIGHT = 0.5
+# class Loss_Config:
+#     def __init__(self):
+#         self.SMOOTH = 1e-5
+#         self.CE_WEIGHT = 1
+#         self.DICE_WEIGHT = 0.5
 
 class Network_Config:
     def __init__(self):
+        self.RESULT_PATH = pathlib.Path(__file__).parent.parent / 'result'
         self.IMAGE_ROTATE = 180
         self.AREA_THRESHOLD = 60 # 面积阈值
         self.SKEWNESS = 20 # 偏度

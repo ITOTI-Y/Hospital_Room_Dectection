@@ -5,6 +5,7 @@ import cv2
 import json
 import os
 import plotly.graph_objects as go
+from pathlib import Path
 from PIL import Image
 from scipy.spatial import KDTree, distance
 from src.config import COLOR_MAP, Network_Config
@@ -467,7 +468,7 @@ class Network:
         ))
 
         if save:
-            fig.write_html('./debug/network_plotly.html')  # 保存为 HTML
+            fig.write_html(CONFIG.RESULT_PATH / '2D_network_plotly.html')  # 保存为 HTML
         else:
             fig.show()
 
@@ -578,7 +579,7 @@ class SuperNetwork:
         ))
 
         if save:
-            fig.write_html('./debug/network_plotly.html')  # 保存为 HTML
+            fig.write_html(CONFIG.RESULT_PATH / '3D_network_plotly.html')  # 保存为 HTML
         else:
             fig.show()
 
@@ -614,8 +615,34 @@ def calculate_room_travel_times(graph: nx.Graph):
             
             except nx.NetworkXNoPath:
                 room_type_times[room_type1][room_type2] = np.inf
-    os.makedirs('./result', exist_ok=True)
-    with open('./result/result.json', 'w', encoding='utf-8') as f:
-        json.dump(room_type_times, f, ensure_ascii=False)
+    
+    # 保存为CSV文件
+    os.makedirs(CONFIG.RESULT_PATH, exist_ok=True)
+    
+    # 获取所有唯一的房间类型
+    all_room_types = sorted(list(set(node.type for node in room_nodes)))
+    
+    with open(CONFIG.RESULT_PATH / 'result.csv', 'w', newline='', encoding='utf-8') as f:
+        import csv
+        writer = csv.writer(f)
+        
+        # 写入表头
+        header = ['房间类型'] + all_room_types
+        writer.writerow(header)
+        
+        # 写入数据行
+        for start_type in all_room_types:
+            row = [start_type]
+            for end_type in all_room_types:
+                if start_type in room_type_times and end_type in room_type_times[start_type]:
+                    value = room_type_times[start_type][end_type]
+                    # 如果是无穷大，写入特殊标记
+                    if value == np.inf:
+                        row.append('∞')
+                    else:
+                        row.append(value)
+                else:
+                    row.append('N/A')
+            writer.writerow(row)
     
     return room_type_times

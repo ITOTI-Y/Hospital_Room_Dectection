@@ -1,10 +1,5 @@
 import src
-from src import Node
-import torch
 import os
-import networkx as nx
-import json
-
 import src.network
 
 if __name__ == "__main__":
@@ -19,5 +14,5 @@ if __name__ == "__main__":
     super_network.run(image_paths=image_paths, zlevels = [-10, 0, 10, 20, 30])
     super_network.plot_plotly(save=True)
 
-    # 计算节点之间的距离，输出json文件
+    # 计算节点之间的距离，输出csv文件
     src.calculate_room_travel_times(super_network.super_graph)
