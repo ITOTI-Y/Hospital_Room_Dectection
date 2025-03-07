@@ -375,9 +375,25 @@ class Network:
         x = [pos[node][0] for node in self.graph.nodes()]
         y = [pos[node][1] for node in self.graph.nodes()]
         z = [pos[node][2] for node in self.graph.nodes()]
+        
+        # 根据节点类型获取节点大小
+        node_sizes = []
+        for node in self.graph.nodes():
+            if node.type in CONFIG.PEDESTRIAN_TYPES:
+                node_sizes.append(CONFIG.NODE_SIZE_PEDESTRIAN * 10)  # 放大倍数，使其在matplotlib中可见
+            elif node.type in CONFIG.CONNECTION_TYPES:
+                node_sizes.append(CONFIG.NODE_SIZE_CONNECTION * 10)
+            elif node.type in CONFIG.VERTICAL_TYPES:
+                node_sizes.append(CONFIG.NODE_SIZE_VERTICAL * 10)
+            elif node.type in CONFIG.ROOM_TYPES:
+                node_sizes.append(CONFIG.NODE_SIZE_ROOM * 10)
+            elif node.type in CONFIG.OUTSIDE_TYPES:
+                node_sizes.append(CONFIG.NODE_SIZE_OUTSIDE * 10)
+            else:
+                node_sizes.append(CONFIG.NODE_SIZE_DEFAULT * 10)
 
         # 绘制节点
-        ax.scatter(x, y, z, c='red', s=50)  # 使用 scatter 绘制散点图
+        ax.scatter(x, y, z, c='red', s=node_sizes, alpha=CONFIG.NODE_OPACITY)  # 使用可变大小和统一透明度的节点
 
         # 绘制边 (需要遍历边列表)
         for edge in self.graph.edges():
@@ -406,71 +422,148 @@ class Network:
 
     def plot_plotly(self, save: bool = False):
         pos = {node: node.pos for node in self.graph.nodes()}
-        edge_x = []
-        edge_y = []
-        edge_z = []
+        
+        # 按类型分组节点
+        node_groups = {}
+        for node_type in set([node.type for node in self.graph.nodes()]):
+            node_groups[node_type] = {
+                'x': [], 'y': [], 'z': [], 'text': [], 'sizes': []
+            }
+        
+        # 填充分组数据
+        for node in self.graph.nodes():
+            x, y, z = pos[node]
+            node_groups[node.type]['x'].append(x)
+            node_groups[node.type]['y'].append(y)
+            node_groups[node.type]['z'].append(z)
+            
+            # 根据配置决定是否显示人行区域节点的标签
+            if node.type in CONFIG.PEDESTRIAN_TYPES and not CONFIG.SHOW_PEDESTRIAN_LABELS:
+                node_groups[node.type]['text'].append("")
+            else:
+                node_groups[node.type]['text'].append(f"{node.type}")
+            
+            # 根据节点类型设置大小
+            if node.type in CONFIG.PEDESTRIAN_TYPES:
+                node_groups[node.type]['sizes'].append(CONFIG.NODE_SIZE_PEDESTRIAN)
+            elif node.type in CONFIG.CONNECTION_TYPES:
+                node_groups[node.type]['sizes'].append(CONFIG.NODE_SIZE_CONNECTION)
+            elif node.type in CONFIG.VERTICAL_TYPES:
+                node_groups[node.type]['sizes'].append(CONFIG.NODE_SIZE_VERTICAL)
+            elif node.type in CONFIG.ROOM_TYPES:
+                node_groups[node.type]['sizes'].append(CONFIG.NODE_SIZE_ROOM)
+            elif node.type in CONFIG.OUTSIDE_TYPES:
+                node_groups[node.type]['sizes'].append(CONFIG.NODE_SIZE_OUTSIDE)
+            else:
+                node_groups[node.type]['sizes'].append(CONFIG.NODE_SIZE_DEFAULT)
+        
+        # 分类连接线（水平和垂直）
+        horizontal_edges = {'x': [], 'y': [], 'z': []}
+        vertical_edges = {'x': [], 'y': [], 'z': []}
+        
         for edge in self.graph.edges():
             x0, y0, z0 = pos[edge[0]]
             x1, y1, z1 = pos[edge[1]]
-            edge_x.extend([x0, x1, None])  # None 用于分隔线段
-            edge_y.extend([y0, y1, None])
-            edge_z.extend([z0, z1, None])
-
-        edge_trace = go.Scatter3d(
-            x=edge_x, y=edge_y, z=edge_z,
-            line=dict(width=0.5, color='#888'),
+            
+            # 判断是否为垂直连接线（通过检查z坐标是否相同）
+            if abs(z0 - z1) > 0.01:  # 允许一点误差
+                vertical_edges['x'].extend([x0, x1, None])
+                vertical_edges['y'].extend([y0, y1, None])
+                vertical_edges['z'].extend([z0, z1, None])
+            else:
+                horizontal_edges['x'].extend([x0, x1, None])
+                horizontal_edges['y'].extend([y0, y1, None])
+                horizontal_edges['z'].extend([z0, z1, None])
+        
+        # 创建水平连接线轨迹
+        horizontal_edge_trace = go.Scatter3d(
+            x=horizontal_edges['x'],
+            y=horizontal_edges['y'],
+            z=horizontal_edges['z'],
+            line=dict(width=CONFIG.EDGE_WIDTH, color=CONFIG.HORIZONTAL_EDGE_COLOR),
             hoverinfo='none',
-            mode='lines')
-
-        node_x = []
-        node_y = []
-        node_z = []
-        node_text = []
-        for node in self.graph.nodes():
-            x, y, z = pos[node]
-            node_x.append(x)
-            node_y.append(y)
-            node_z.append(z)
-            node_text.append(f"{node.type}")
-
-        node_trace = go.Scatter3d(
-            x=node_x, y=node_y, z=node_z,
-            mode='markers+text',  # 同时显示标记和文本
-            hoverinfo='text',
-            marker=dict(
-                showscale=True,
-                colorscale='YlGnBu',
-                reversescale=True,
-                color=[],
-                size=10,
-                colorbar=dict(
-                    thickness=15,
-                    title='Node Connections',  # 只需要设置 title
-                    xanchor='left',
+            mode='lines',
+            name='水平连接'  # 添加图例名称
+        )
+        
+        # 创建垂直连接线轨迹
+        vertical_edge_trace = go.Scatter3d(
+            x=vertical_edges['x'],
+            y=vertical_edges['y'],
+            z=vertical_edges['z'],
+            line=dict(width=CONFIG.EDGE_WIDTH, color=CONFIG.VERTICAL_EDGE_COLOR),
+            hoverinfo='none',
+            mode='lines',
+            name='垂直连接'  # 添加图例名称
+        )
+        
+        # 为每种节点类型创建轨迹
+        node_traces = []
+        for node_type, data in node_groups.items():
+            if not data['x']:  # 跳过空分组
+                continue
+                
+            node_trace = go.Scatter3d(
+                x=data['x'],
+                y=data['y'],
+                z=data['z'],
+                mode='markers+text',
+                hoverinfo='text',
+                name=node_type,  # 添加图例名称
+                marker=dict(
+                    size=data['sizes'],
+                    sizemode='diameter',  # 确保缩放时节点大小保持不变
+                    opacity=CONFIG.NODE_OPACITY,
+                    color=self.get_color_for_type(node_type),  # 使用类型对应的颜色
+                    line_width=2
                 ),
-                line_width=2),
-            text=node_text,       # 设置节点文本
-            textposition="top center")  # 文本位置
-
-        fig = go.Figure(data=[edge_trace, node_trace],
-                        layout=go.Layout(
-            title='Network Graph',
-            showlegend=False,
-            hovermode='closest',
-            margin=dict(b=20, l=5, r=5, t=40),
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            scene=dict(  # 设置3D场景
-                xaxis=dict(title='X'),
-                yaxis=dict(title='Y'),
-                zaxis=dict(title='Z'),
+                text=data['text'],
+                textposition="top center"
             )
-        ))
-
+            node_traces.append(node_trace)
+        
+        # 创建图形
+        fig = go.Figure(
+            data=[horizontal_edge_trace, vertical_edge_trace] + node_traces,
+            layout=go.Layout(
+                title='2D Network Graph',
+                showlegend=True,  # 显示图例
+                hovermode='closest',
+                margin=dict(b=20, l=5, r=5, t=40),
+                legend=dict(
+                    itemsizing='constant',  # 图例项大小一致
+                    font=dict(size=10),  # 图例文字大小
+                ),
+                scene=dict(
+                    xaxis=dict(title='X'),
+                    yaxis=dict(title='Y'),
+                    zaxis=dict(title='Z'),
+                )
+            )
+        )
+        
         if save:
             fig.write_html(CONFIG.RESULT_PATH / '2D_network_plotly.html')  # 保存为 HTML
         else:
             fig.show()
+            
+        return fig
+        
+    def get_color_for_type(self, node_type):
+        """根据节点类型获取对应的颜色"""
+        if not CONFIG.NODE_COLOR:
+            return '#1f77b4'
+        try:
+            # 尝试从COLOR_MAP获取颜色
+            for color_tuple, info in COLOR_MAP.items():
+                if info['name'] == node_type:
+                    # 将RGB元组转为十六进制颜色
+                    return f'rgb{color_tuple}'
+        except:
+            pass
+            
+        # 默认颜色
+        return '#1f77b4'
 
 class SuperNetwork:
     def __init__(self, tolerance:int = 30):
@@ -517,71 +610,147 @@ class SuperNetwork:
 
     def plot_plotly(self, save: bool = False):
         pos = {node: node.pos for node in self.super_graph.nodes()}
-        edge_x = []
-        edge_y = []
-        edge_z = []
+        
+        # 按类型分组节点
+        node_groups = {}
+        for node_type in set([node.type for node in self.super_graph.nodes()]):
+            node_groups[node_type] = {
+                'x': [], 'y': [], 'z': [], 'text': [], 'sizes': []
+            }
+        
+        # 填充分组数据
+        for node in self.super_graph.nodes():
+            x, y, z = pos[node]
+            node_groups[node.type]['x'].append(x)
+            node_groups[node.type]['y'].append(y)
+            node_groups[node.type]['z'].append(z)
+            
+            # 根据配置决定是否显示人行区域节点的标签
+            if node.type in CONFIG.PEDESTRIAN_TYPES and not CONFIG.SHOW_PEDESTRIAN_LABELS:
+                node_groups[node.type]['text'].append("")
+            else:
+                node_groups[node.type]['text'].append(f"{node.type}")
+            
+            # 根据节点类型设置大小
+            if node.type in CONFIG.PEDESTRIAN_TYPES:
+                node_groups[node.type]['sizes'].append(CONFIG.NODE_SIZE_PEDESTRIAN)
+            elif node.type in CONFIG.CONNECTION_TYPES:
+                node_groups[node.type]['sizes'].append(CONFIG.NODE_SIZE_CONNECTION)
+            elif node.type in CONFIG.VERTICAL_TYPES:
+                node_groups[node.type]['sizes'].append(CONFIG.NODE_SIZE_VERTICAL)
+            elif node.type in CONFIG.ROOM_TYPES:
+                node_groups[node.type]['sizes'].append(CONFIG.NODE_SIZE_ROOM)
+            elif node.type in CONFIG.OUTSIDE_TYPES:
+                node_groups[node.type]['sizes'].append(CONFIG.NODE_SIZE_OUTSIDE)
+            else:
+                node_groups[node.type]['sizes'].append(CONFIG.NODE_SIZE_DEFAULT)
+        
+        # 分类连接线（水平和垂直）
+        horizontal_edges = {'x': [], 'y': [], 'z': []}
+        vertical_edges = {'x': [], 'y': [], 'z': []}
+        
         for edge in self.super_graph.edges():
             x0, y0, z0 = pos[edge[0]]
             x1, y1, z1 = pos[edge[1]]
-            edge_x.extend([x0, x1, None])  # None 用于分隔线段
-            edge_y.extend([y0, y1, None])
-            edge_z.extend([z0, z1, None])
-
-        edge_trace = go.Scatter3d(
-            x=edge_x, y=edge_y, z=edge_z,
-            line=dict(width=0.5, color='#888'),
+            
+            # 判断是否为垂直连接线（通过检查z坐标是否相同）
+            if abs(z0 - z1) > 0.01:  # 允许一点误差
+                vertical_edges['x'].extend([x0, x1, None])
+                vertical_edges['y'].extend([y0, y1, None])
+                vertical_edges['z'].extend([z0, z1, None])
+            else:
+                horizontal_edges['x'].extend([x0, x1, None])
+                horizontal_edges['y'].extend([y0, y1, None])
+                horizontal_edges['z'].extend([z0, z1, None])
+        
+        # 创建水平连接线轨迹
+        horizontal_edge_trace = go.Scatter3d(
+            x=horizontal_edges['x'],
+            y=horizontal_edges['y'],
+            z=horizontal_edges['z'],
+            line=dict(width=CONFIG.EDGE_WIDTH, color=CONFIG.HORIZONTAL_EDGE_COLOR),
             hoverinfo='none',
-            mode='lines')
-
-        node_x = []
-        node_y = []
-        node_z = []
-        node_text = []
-        for node in self.super_graph.nodes():
-            x, y, z = pos[node]
-            node_x.append(x)
-            node_y.append(y)
-            node_z.append(z)
-            node_text.append(f"{node.type}")
-
-        node_trace = go.Scatter3d(
-            x=node_x, y=node_y, z=node_z,
-            mode='markers+text',  # 同时显示标记和文本
-            hoverinfo='text',
-            marker=dict(
-                showscale=True,
-                colorscale='YlGnBu',
-                reversescale=True,
-                color=[],
-                size=10,
-                colorbar=dict(
-                    thickness=15,
-                    title='Node Connections',  # 只需要设置 title
-                    xanchor='left',
+            mode='lines',
+            name='水平连接'  # 添加图例名称
+        )
+        
+        # 创建垂直连接线轨迹
+        vertical_edge_trace = go.Scatter3d(
+            x=vertical_edges['x'],
+            y=vertical_edges['y'],
+            z=vertical_edges['z'],
+            line=dict(width=CONFIG.EDGE_WIDTH, color=CONFIG.VERTICAL_EDGE_COLOR),
+            hoverinfo='none',
+            mode='lines',
+            name='垂直连接'  # 添加图例名称
+        )
+        
+        # 为每种节点类型创建轨迹
+        node_traces = []
+        for node_type, data in node_groups.items():
+            if not data['x']:  # 跳过空分组
+                continue
+                
+            node_trace = go.Scatter3d(
+                x=data['x'],
+                y=data['y'],
+                z=data['z'],
+                mode='markers+text',
+                hoverinfo='text',
+                name=node_type,  # 添加图例名称
+                marker=dict(
+                    size=data['sizes'],
+                    sizemode='diameter',  # 确保缩放时节点大小保持不变
+                    opacity=CONFIG.NODE_OPACITY,
+                    color=self.get_color_for_type(node_type),  # 使用类型对应的颜色
+                    line_width=2
                 ),
-                line_width=2),
-            text=node_text,       # 设置节点文本
-            textposition="top center")  # 文本位置
-
-        fig = go.Figure(data=[edge_trace, node_trace],
-                        layout=go.Layout(
-            title='Network Graph',
-            showlegend=False,
-            hovermode='closest',
-            margin=dict(b=20, l=5, r=5, t=40),
-            xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            yaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-            scene=dict(  # 设置3D场景
-                xaxis=dict(title='X'),
-                yaxis=dict(title='Y'),
-                zaxis=dict(title='Z'),
+                text=data['text'],
+                textposition="top center"
             )
-        ))
-
+            node_traces.append(node_trace)
+        
+        # 创建图形
+        fig = go.Figure(
+            data=[horizontal_edge_trace, vertical_edge_trace] + node_traces,
+            layout=go.Layout(
+                title='3D Network Graph',
+                showlegend=True,  # 显示图例
+                hovermode='closest',
+                margin=dict(b=20, l=5, r=5, t=40),
+                legend=dict(
+                    itemsizing='constant',  # 图例项大小一致
+                    font=dict(size=10),  # 图例文字大小
+                ),
+                scene=dict(
+                    xaxis=dict(title='X'),
+                    yaxis=dict(title='Y'),
+                    zaxis=dict(title='Z'),
+                )
+            )
+        )
+        
         if save:
             fig.write_html(CONFIG.RESULT_PATH / '3D_network_plotly.html')  # 保存为 HTML
         else:
             fig.show()
+            
+        return fig
+        
+    def get_color_for_type(self, node_type):
+        """根据节点类型获取对应的颜色"""
+        if not CONFIG.NODE_COLOR:
+            return '#1f77b4'
+        try:
+            # 尝试从COLOR_MAP获取颜色
+            for color_tuple, info in COLOR_MAP.items():
+                if info['name'] == node_type:
+                    # 将RGB元组转为十六进制颜色
+                    return f'rgb{color_tuple}'
+        except:
+            pass
+        # 默认颜色
+        return '#1f77b4'
 
 def calculate_room_travel_times(graph: nx.Graph):
     """

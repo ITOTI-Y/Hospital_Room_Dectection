@@ -98,6 +98,28 @@ class Network_Config:
         self.PEDESTRAIN_TIME = 1 # 人行时间
         self.CONNECTION_TIME = 1 # 连接时间 - 门
 
+        # 节点颜色配置
+        self.NODE_COLOR = True # 是否使用COLOR_MAP中的颜色
+        
+        # 节点大小配置
+        self.NODE_SIZE_DEFAULT = 10 # 默认节点大小
+        self.NODE_SIZE_PEDESTRIAN = 5 # 人行区域节点大小
+        self.NODE_SIZE_CONNECTION = 8 # 连接节点大小
+        self.NODE_SIZE_VERTICAL = 10 # 垂直交通节点大小
+        self.NODE_SIZE_ROOM = 7 # 房间节点大小
+        self.NODE_SIZE_OUTSIDE = 4 # 室外节点大小
+        
+        # 节点透明度配置 - 使用单一透明度值
+        self.NODE_OPACITY = 0.8 # 统一节点透明度
+        
+        # 节点标签显示配置
+        self.SHOW_PEDESTRIAN_LABELS = False # 是否显示人行区域节点的标签
+        
+        # 连接线配置
+        self.HORIZONTAL_EDGE_COLOR = "#1f77b4"  # 水平连接线颜色
+        self.VERTICAL_EDGE_COLOR = "#ff7f0e"    # 垂直连接线颜色
+        self.EDGE_WIDTH = 0.5                   # 连接线宽度
+
 COLOR_MAP = {
     (244, 67, 54): {'name':'药房', 'time': 1},
     (0, 150, 136): {'name':'挂号处', 'time': 1},

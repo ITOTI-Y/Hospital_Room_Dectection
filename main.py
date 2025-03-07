@@ -4,9 +4,9 @@ import src.network
 
 if __name__ == "__main__":
     # 单层节点图
-    network = src.Network()
-    network.run(image_path = './data/label/1F-meng.png', zlevel=0)
-    network.plot_plotly(save=True)
+    # network = src.Network()
+    # network.run(image_path = './data/label/1F-meng.png', zlevel=0)
+    # network.plot_plotly(save=True)
 
     # 多层节点图
     super_network = src.SuperNetwork(tolerance=30) # tolerance: 表示两层节点之间的识别距离
