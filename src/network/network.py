@@ -433,7 +433,7 @@ class Network:
         # 填充分组数据
         for node in self.graph.nodes():
             x, y, z = pos[node]
-            node_groups[node.type]['x'].append(x)
+            node_groups[node.type]['x'].append(self.width - x if CONFIG.IMAGE_MIRROR else x)
             node_groups[node.type]['y'].append(y)
             node_groups[node.type]['z'].append(z)
             
@@ -467,11 +467,17 @@ class Network:
             
             # 判断是否为垂直连接线（通过检查z坐标是否相同）
             if abs(z0 - z1) > 0.01:  # 允许一点误差
-                vertical_edges['x'].extend([x0, x1, None])
+                if CONFIG.IMAGE_MIRROR:
+                    vertical_edges['x'].extend([self.width - x0, self.width - x1, None])
+                else:
+                    vertical_edges['x'].extend([x0, x1, None])
                 vertical_edges['y'].extend([y0, y1, None])
                 vertical_edges['z'].extend([z0, z1, None])
             else:
-                horizontal_edges['x'].extend([x0, x1, None])
+                if CONFIG.IMAGE_MIRROR:
+                    horizontal_edges['x'].extend([self.width - x0, self.width - x1, None])
+                else:
+                    horizontal_edges['x'].extend([x0, x1, None])
                 horizontal_edges['y'].extend([y0, y1, None])
                 horizontal_edges['z'].extend([z0, z1, None])
         
@@ -541,7 +547,7 @@ class Network:
                 )
             )
         )
-        
+
         if save:
             fig.write_html(CONFIG.RESULT_PATH / '2D_network_plotly.html')  # 保存为 HTML
         else:
@@ -561,74 +567,270 @@ class Network:
                     return f'rgb{color_tuple}'
         except:
             pass
-            
         # 默认颜色
         return '#1f77b4'
 
 class SuperNetwork:
-    def __init__(self, tolerance:int = 30):
+    def __init__(self, tolerance:int = None, base_floor:int = 0, floor_height:int = 10):
+        """
+        初始化SuperNetwork对象
+        
+        Args:
+            tolerance (int, optional): 不同楼层垂直连接的容差值，如果为None则自动计算
+            base_floor (int, optional): 起始楼层编号，默认为0
+            floor_height (int, optional): 楼层间的默认高度，默认为10
+        """
         self.super_graph = nx.Graph()
         self.vertical_connection_types = CONFIG.VERTICAL_TYPES
         self.tolerance = tolerance
         self.networks = []
+        self.base_floor = base_floor
+        self.floor_height = floor_height
+        self.floor_map = {}  # 用于存储楼层和对应的z坐标
+        self.width = None
+        self.height = None
     
     def add_network(self, network:nx.Graph):
         self.networks.append(network)
         self.super_graph.add_nodes_from(network.nodes)
         self.super_graph.add_edges_from(network.edges)
 
+    def detect_floor_from_filename(self, filename):
+        """
+        从文件名中检测楼层信息
+        
+        Args:
+            filename (str): 图像文件名
+            
+        Returns:
+            int: 检测到的楼层编号，如果无法检测则返回None
+        """
+        import re
+        # 尝试匹配常见的楼层表示方式，如"1F"、"B1"、"L2"等
+        floor_patterns = {
+            r'-(\d+)[Ff]': lambda x: -int(x),  # 匹配 -1F, -2f 等(负楼层)
+            r'(\d+)[Ff]': lambda x: int(x),  # 匹配 1F, 2f 等
+            r'[Bb](\d+)': lambda x: -int(x),  # 匹配 B1, b2 等(负楼层)
+            r'[Ll](\d+)': lambda x: int(x),  # 匹配 L1, l2 等
+            r'[Ff](\d+)': lambda x: int(x),  # 匹配 F1, f2 等
+        }
+        
+        # 确保正确处理文件路径，无论是正斜杠还是反斜杠
+        basename = os.path.basename(filename.replace('\\', '/'))
+        for pattern, convert in floor_patterns.items():
+            match = re.search(pattern, basename)
+            if match:
+                return convert(match.group(1))
+        return None
+    
+    def auto_detect_floors(self, image_paths):
+        """
+        自动检测图像文件对应的楼层
+        
+        Args:
+            image_paths (list): 图像文件路径列表
+            
+        Returns:
+            dict: 文件路径到楼层编号的映射
+        """
+        floors = {}
+        
+        # 尝试从文件名检测楼层信息
+        for path in image_paths:
+            floor = self.detect_floor_from_filename(path)
+            if floor is not None:
+                floors[path] = floor
+        
+        # 如果没有从所有文件中检测到楼层信息，则按顺序分配楼层
+        if len(floors) < len(image_paths):
+            unassigned_paths = [p for p in image_paths if p not in floors]
+            # 如果没有检测到任何楼层，从base_floor开始
+            start_floor = self.base_floor if not floors else max(floors.values()) + 1
+            for i, path in enumerate(unassigned_paths):
+                floors[path] = start_floor + i
+        
+        return floors
+    
+    def calculate_floor_z_levels(self, floor_to_path):
+        """
+        计算每个楼层对应的z坐标
+        
+        Args:
+            floor_to_path (dict): 楼层编号到文件路径的映射
+            
+        Returns:
+            dict: 楼层编号到z坐标的映射
+        """
+        # 按照楼层编号从小到大排序
+        sorted_floors = sorted(floor_to_path.keys())
+        
+        # 计算相邻楼层之间的高度差
+        if len(sorted_floors) <= 1:
+            # 如果只有一个楼层，使用默认高度
+            z_levels = {sorted_floors[0]: sorted_floors[0] * self.floor_height}
+        else:
+            # 使用相等的高度差
+            z_levels = {floor: floor * self.floor_height for floor in sorted_floors}
+        
+        return z_levels
+    
+    def auto_calculate_tolerance(self):
+        """
+        自动计算不同楼层垂直连接的容差值
+        
+        Returns:
+            int: 计算得到的容差值
+        """
+        # 获取所有垂直连接节点的位置
+        vertical_nodes = [node for node in self.super_graph.nodes if node.type in self.vertical_connection_types]
+        
+        if not vertical_nodes or len(vertical_nodes) < 2:
+            # 如果没有足够的垂直连接节点，使用默认值
+            return 30
+        
+        # 计算垂直连接节点的平均间距
+        positions = np.array([node.pos[:2] for node in vertical_nodes])  # 只考虑x,y坐标
+        
+        # 使用KDTree计算每个点到最近点的距离
+        tree = KDTree(positions)
+        distances, _ = tree.query(positions, k=2)  # k=2表示每个点自身和最近的另一个点
+        
+        # 取第二列(最近点的距离)，计算均值作为容差基准
+        avg_distance = np.mean(distances[:, 1])
+        
+        # 添加一个安全系数(例如1.2)，确保能够正确连接
+        return int(avg_distance * 1.2)
+    
     def connect_floors(self):
         """
-        _summary_: 连接楼层
+        连接不同楼层之间的垂直交通节点，确保仅连接相同类型的节点
         """
         all_vertical_nodes = [node for node in self.super_graph.nodes if node.type in self.vertical_connection_types]
         if not all_vertical_nodes:
             return
         
-        vertical_node_position = np.array([node.pos for node in all_vertical_nodes])
-        tree = KDTree(vertical_node_position)
-
-        for network in self.networks:
-            vertical_nodes = [node for node in network.nodes if node.type in self.vertical_connection_types]
-
-            for v_node in vertical_nodes:
-                zlevel = v_node.pos[2]
-                distances, indices = tree.query(v_node.pos, k=2)
-                for dis, j in zip(distances, indices):
-                    if dis <= self.tolerance and all_vertical_nodes[j] != v_node:
-                        self.super_graph.add_edge(v_node, all_vertical_nodes[j])
-
-    def run(self, image_paths: list, zlevels: list):
-        if len(image_paths) != len(zlevels):
-            raise ValueError("Length of image_paths and zlevels should be the same.")
+        # 如果tolerance未指定，自动计算
+        if self.tolerance is None:
+            self.tolerance = self.auto_calculate_tolerance()
+            print(f"自动计算的楼层连接容差: {self.tolerance}")
         
+        # 按照节点类型分组
+        type_to_nodes = {}
+        for node in all_vertical_nodes:
+            if node.type not in type_to_nodes:
+                type_to_nodes[node.type] = []
+            type_to_nodes[node.type].append(node)
+        
+        # 对每种类型的节点建立KDTree
+        connected_pairs = set()  # 用于记录已连接的节点对
+        
+        # 为每种垂直交通节点类型分别构建连接
+        for node_type, nodes in type_to_nodes.items():
+            if len(nodes) < 2:
+                continue
+                
+            # 构建KDTree，仅使用x和y坐标
+            positions_xy = np.array([node.pos[:2] for node in nodes])
+            tree = KDTree(positions_xy)
+            
+            # 为每个节点查找可能的垂直连接
+            for i, node in enumerate(nodes):
+                # 查询容差范围内的所有点
+                indices = tree.query_ball_point(node.pos[:2], r=self.tolerance)
+                
+                for idx in indices:
+                    target_node = nodes[idx]
+                    # 避免自连接
+                    if target_node == node:
+                        continue
+                        
+                    # 确保不同高度的节点才连接
+                    if abs(target_node.pos[2] - node.pos[2]) < 0.01:  # 允许一点误差
+                        continue
+                        
+                    # 创建唯一标识这对节点的键
+                    node_pair = tuple(sorted([hash(node), hash(target_node)]))
+                    if node_pair not in connected_pairs:
+                        self.super_graph.add_edge(node, target_node)
+                        connected_pairs.add(node_pair)
+        
+        print(f"已连接 {len(connected_pairs)} 对垂直交通节点")
+
+    def run(self, image_paths: list, zlevels: list = None):
+        """
+        运行多楼层网络构建
+        
+        Args:
+            image_paths (list): 图像文件路径列表
+            zlevels (list, optional): 每个图像对应的z坐标，如果为None则自动计算
+        """
+        if zlevels is None:
+            # 自动计算楼层和Z坐标
+            floor_to_path = self.auto_detect_floors(image_paths)
+            path_to_floor = {v: k for k, v in floor_to_path.items()}
+            
+            # 计算每个楼层的z坐标
+            self.floor_map = self.calculate_floor_z_levels(path_to_floor)
+            
+            # 按照image_paths顺序获取对应的z坐标
+            zlevels = [v for k,v in self.floor_map.items()]
+
+            print("自动计算的楼层z坐标:")
+            for path, z in zip(image_paths, zlevels):
+                print(f"  {os.path.basename(path)}: z = {z}")
+        else:
+            if len(image_paths) != len(zlevels):
+                raise ValueError("image_paths和zlevels的长度必须相同")
+        
+        # 构建各楼层网络
         for image_path, zlevel in zip(image_paths, zlevels):
             network = Network()
             self.add_network(network.run(image_path, zlevel=zlevel)) # 默认不连接室外节点
+            if self.width is None and self.height is None:
+                self.width = network.width
+                self.height = network.height
+            else:
+                if self.width != network.width or self.height != network.height:
+                    raise ValueError("所有图片的宽度和高必须相同")
         self.connect_floors()
         return self.super_graph
 
     def _create_floor_selection_controls(self, all_z_levels, min_z, max_z):
         """
-        创建Z轴楼层选择控件
+        创建楼层选择控件
         
         Args:
-            all_z_levels: 所有可用的Z坐标值（楼层）
-            min_z: Z坐标的最小值
-            max_z: Z坐标的最大值
+            all_z_levels (list): 所有z坐标
+            min_z (float): 最小z坐标
+            max_z (float): 最大z坐标
             
         Returns:
-            dict: 包含sliders和updatemenus的字典
+            dict: 控件配置
         """
-        # 创建楼层选择滑块
+        # 创建楼层标签映射
+        floor_labels = {}
+        
+        # 如果存在floor_map，使用它来显示实际楼层号
+        if hasattr(self, 'floor_map') and self.floor_map:
+            for z in all_z_levels:
+                # 找到最接近z值的楼层编号
+                closest_floor = min(self.floor_map.items(), key=lambda x: abs(x[1] - z))[0]
+                floor_prefix = "B" if closest_floor < 0 else ""
+                floor_num = abs(closest_floor)
+                floor_labels[z] = f"{floor_prefix}{floor_num}F"
+        else:
+            # 否则使用z坐标作为标签
+            for z in all_z_levels:
+                floor_labels[z] = f"Z={z}"
+        
         sliders = [
             dict(
                 active=0,
-                currentvalue={"prefix": "Z轴范围: "},
+                currentvalue={"prefix": "当前楼层: "},
                 pad={"t": 50},
                 steps=[
                     dict(
-                        label=f"{z_level}",
+                        label=floor_labels[z_level],
                         method="relayout",
                         args=[
                             {"scene.zaxis.range": [z_level - 0.5, z_level + 0.5]}
@@ -654,9 +856,18 @@ class SuperNetwork:
             )
         ]
         
-        return {"sliders": sliders,}
+        return {"sliders": sliders}
         
     def plot_plotly(self, save: bool = False):
+        """
+        使用Plotly绘制3D网络图
+        
+        Args:
+            save (bool, optional): 是否保存图像文件. Defaults to False.
+            
+        Returns:
+            plotly.graph_objects.Figure: Plotly图形对象
+        """
         pos = {node: node.pos for node in self.super_graph.nodes()}
         
         # 获取所有独特的Z坐标值（楼层）
@@ -673,6 +884,8 @@ class SuperNetwork:
         # 填充分组数据
         for node in self.super_graph.nodes():
             x, y, z = pos[node]
+            if CONFIG.IMAGE_MIRROR:
+                x = self.width - x
             node_groups[node.type]['x'].append(x)
             node_groups[node.type]['y'].append(y)
             node_groups[node.type]['z'].append(z)
@@ -707,11 +920,17 @@ class SuperNetwork:
             
             # 判断是否为垂直连接线（通过检查z坐标是否相同）
             if abs(z0 - z1) > 0.01:  # 允许一点误差
-                vertical_edges['x'].extend([x0, x1, None])
+                if CONFIG.IMAGE_MIRROR:
+                    vertical_edges['x'].extend([self.width - x0, self.width - x1, None])
+                else:
+                    vertical_edges['x'].extend([x0, x1, None])
                 vertical_edges['y'].extend([y0, y1, None])
                 vertical_edges['z'].extend([z0, z1, None])
             else:
-                horizontal_edges['x'].extend([x0, x1, None])
+                if CONFIG.IMAGE_MIRROR:
+                    horizontal_edges['x'].extend([self.width - x0, self.width - x1, None])
+                else:
+                    horizontal_edges['x'].extend([x0, x1, None])
                 horizontal_edges['y'].extend([y0, y1, None])
                 horizontal_edges['z'].extend([z0, z1, None])
         
@@ -802,7 +1021,7 @@ class SuperNetwork:
         
     def get_color_for_type(self, node_type):
         """根据节点类型获取对应的颜色"""
-        if not CONFIG.NODE_COLOR:
+        if not COLOR_MAP:
             return '#1f77b4'
         try:
             # 尝试从COLOR_MAP获取颜色

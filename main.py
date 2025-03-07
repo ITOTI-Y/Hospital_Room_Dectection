@@ -9,9 +9,9 @@ if __name__ == "__main__":
     # network.plot_plotly(save=True)
 
     # 多层节点图
-    super_network = src.SuperNetwork(tolerance=30) # tolerance: 表示两层节点之间的识别距离
+    super_network = src.SuperNetwork(base_floor=-1) # tolerance: 表示两层节点之间的识别距离
     image_paths = [os.path.join('./data/label', image) for image in os.listdir('./data/label')]
-    super_network.run(image_paths=image_paths, zlevels = [-10, 0, 10, 20, 30])
+    super_network.run(image_paths=image_paths)
     super_network.plot_plotly(save=True)
 
     # 计算节点之间的距离，输出csv文件

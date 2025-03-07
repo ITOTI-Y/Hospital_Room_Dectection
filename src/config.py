@@ -98,6 +98,9 @@ class Network_Config:
         self.PEDESTRAIN_TIME = 1 # 人行时间
         self.CONNECTION_TIME = 1 # 连接时间 - 门
 
+        # Network 配置
+        self.IMAGE_MIRROR = True # 是否镜像图片
+
         # 节点颜色配置
         self.NODE_COLOR = True # 是否使用COLOR_MAP中的颜色
         
