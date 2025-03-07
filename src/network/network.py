@@ -608,8 +608,60 @@ class SuperNetwork:
         self.connect_floors()
         return self.super_graph
 
+    def _create_floor_selection_controls(self, all_z_levels, min_z, max_z):
+        """
+        创建Z轴楼层选择控件
+        
+        Args:
+            all_z_levels: 所有可用的Z坐标值（楼层）
+            min_z: Z坐标的最小值
+            max_z: Z坐标的最大值
+            
+        Returns:
+            dict: 包含sliders和updatemenus的字典
+        """
+        # 创建楼层选择滑块
+        sliders = [
+            dict(
+                active=0,
+                currentvalue={"prefix": "Z轴范围: "},
+                pad={"t": 50},
+                steps=[
+                    dict(
+                        label=f"{z_level}",
+                        method="relayout",
+                        args=[
+                            {"scene.zaxis.range": [z_level - 0.5, z_level + 0.5]}
+                        ]
+                    ) for z_level in all_z_levels
+                ],
+                name="Z轴楼层选择"
+            ),
+            dict(
+                active=len(all_z_levels),
+                currentvalue={"prefix": "显示全部楼层: "},
+                pad={"t": 100},
+                steps=[
+                    dict(
+                        label="全部",
+                        method="relayout",
+                        args=[
+                            {"scene.zaxis.range": [min_z - 5, max_z + 5]}
+                        ]
+                    )
+                ],
+                name="显示全部楼层"
+            )
+        ]
+        
+        return {"sliders": sliders,}
+        
     def plot_plotly(self, save: bool = False):
         pos = {node: node.pos for node in self.super_graph.nodes()}
+        
+        # 获取所有独特的Z坐标值（楼层）
+        all_z_levels = sorted(list(set([node.pos[2] for node in self.super_graph.nodes()])))
+        min_z, max_z = min(all_z_levels), max(all_z_levels)
         
         # 按类型分组节点
         node_groups = {}
@@ -710,6 +762,9 @@ class SuperNetwork:
             )
             node_traces.append(node_trace)
         
+        # 获取楼层选择控件
+        floor_controls = self._create_floor_selection_controls(all_z_levels, min_z, max_z)
+        
         # 创建图形
         fig = go.Figure(
             data=[horizontal_edge_trace, vertical_edge_trace] + node_traces,
@@ -725,11 +780,19 @@ class SuperNetwork:
                 scene=dict(
                     xaxis=dict(title='X'),
                     yaxis=dict(title='Y'),
-                    zaxis=dict(title='Z'),
-                )
+                    zaxis=dict(
+                        title='Z',
+                        range=[min_z, max_z]  # 初始Z轴范围
+                    ),
+                    camera=dict(
+                        eye=dict(x=1.5, y=1.5, z=1.5)  # 设置初始视角
+                    )
+                ),
+                # 添加楼层选择控件
+                sliders=floor_controls["sliders"],
             )
         )
-        
+
         if save:
             fig.write_html(CONFIG.RESULT_PATH / '3D_network_plotly.html')  # 保存为 HTML
         else:
