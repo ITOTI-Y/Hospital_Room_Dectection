@@ -1040,47 +1040,59 @@ def calculate_room_travel_times(graph: nx.Graph):
     """
     room_nodes = [node for node in graph.nodes if node.type in CONFIG.ROOM_TYPES]
 
-    room_graph = graph
+    room_graph = graph # 使用完整的图进行路径查找
 
     room_type_times ={}
+
+    # 定义权重函数：边的权重等于目标节点的通行时间
+    weight_func = lambda u, v, data: v.time
 
     for start_node in room_nodes:
         room_type1 = start_node.type
 
-        lengths = nx.single_source_dijkstra_path_length(room_graph, start_node, weight=lambda u, v, data: 0)
+        # 使用Dijkstra计算从start_node到所有其他节点的最短路径长度（基于时间）
+        # lengths 字典包含 target_node -> path_length 的映射
+        # path_length 是从 start_node 到 target_node 的路径上所有节点的时间总和（不包括 start_node.time）
+        try:
+            lengths = nx.single_source_dijkstra_path_length(room_graph, start_node, weight=weight_func)
+        except nx.NetworkXNoPath:
+            # 如果 start_node 无法到达任何其他节点（例如图不连通），则跳过
+            continue
 
         if room_type1 not in room_type_times:
             room_type_times[room_type1] = {}
-        
+
         for target_node in room_nodes:
             room_type2 = target_node.type
 
             if target_node == start_node:
+                # 到自身的通行时间就是节点自身的通行时间
                 room_type_times[room_type1][room_type2] = start_node.time
                 continue
 
-            try:
-                path = nx.dijkstra_path(room_graph, start_node, target_node, weight=lambda u, v, data: 0)
-                total_time = sum(node.time for node in path)
+            # 检查 target_node 是否可达
+            if target_node in lengths:
+                # 总时间 = Dijkstra路径长度 (不含起点) + 起点时间
+                total_time = lengths[target_node] + start_node.time
                 room_type_times[room_type1][room_type2] = total_time
-            
-            except nx.NetworkXNoPath:
+            else:
+                # 如果 target_node 不可达，设置时间为无穷大
                 room_type_times[room_type1][room_type2] = np.inf
-    
+
     # 保存为CSV文件
     os.makedirs(CONFIG.RESULT_PATH, exist_ok=True)
-    
+
     # 获取所有唯一的房间类型
     all_room_types = sorted(list(set(node.type for node in room_nodes)))
-    
+
     with open(CONFIG.RESULT_PATH / 'result.csv', 'w', newline='', encoding='utf-8') as f:
         import csv
         writer = csv.writer(f)
-        
+
         # 写入表头
         header = ['房间类型'] + all_room_types
         writer.writerow(header)
-        
+
         # 写入数据行
         for start_type in all_room_types:
             row = [start_type]
@@ -1093,7 +1105,8 @@ def calculate_room_travel_times(graph: nx.Graph):
                     else:
                         row.append(value)
                 else:
+                    # 如果没有计算出时间（例如某个类型没有节点），则标记为N/A
                     row.append('N/A')
             writer.writerow(row)
-    
+
     return room_type_times
