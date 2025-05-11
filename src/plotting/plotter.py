@@ -343,7 +343,10 @@ class PlotlyPlotter(BasePlotter):
             scene=dict(
                 xaxis=dict(
                     title='X', autorange='reversed' if self.config.IMAGE_MIRROR else True),
-                yaxis=dict(title='Y'),
+                yaxis=dict(
+                    title='Y',
+                    autorange='reversed', # 反转Y轴
+                ),
                 zaxis=dict(title='Z (楼层)', range=[min_z - 1, max_z + 1]),
                 aspectmode='data',  # 'data' is often good for spatial data
                 camera=dict(eye=dict(x=1.25, y=1.25, z=1.25))

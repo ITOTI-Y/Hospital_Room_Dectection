@@ -155,6 +155,12 @@ def run_multi_floor_example(app_config: NetworkConfig, app_color_map: Dict):
         # Run the SuperNetwork generation
         super_graph = super_network_builder.run(image_file_paths=image_file_paths_str)
 
+        ground_floor_z_for_travel_calc = super_network_builder.designated_ground_floor_z
+        if ground_floor_z_for_travel_calc is not None:
+             logger.info(f"Using designated ground floor Z={ground_floor_z_for_travel_calc:.2f} for travel time 'OutDoor' filtering.")
+        else:
+             logger.warning("Could not determine designated ground floor Z from SuperNetwork. 'OutDoor' filtering in travel times may be affected.")
+
         logger.info(f"SuperNetwork generated with {super_graph.number_of_nodes()} nodes and {super_graph.number_of_edges()} edges.")
         logger.info(f"Detected image dimensions for SuperNetwork: Width={super_network_builder.width}, Height={super_network_builder.height}")
 
@@ -179,7 +185,8 @@ def run_multi_floor_example(app_config: NetworkConfig, app_color_map: Dict):
             graph=super_graph,
             config=app_config,
             output_dir=travel_times_output_dir,
-            output_filename="super_network_travel_times.csv" # Specific name for super_network results
+            output_filename="super_network_travel_times.csv", # Specific name for super_network results
+            ground_floor_z=ground_floor_z_for_travel_calc
         )
 
     except Exception as e:

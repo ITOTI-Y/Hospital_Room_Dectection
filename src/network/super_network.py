@@ -113,6 +113,8 @@ class SuperNetwork:
         self.config = config
         self.color_map_data = color_map_data
         self.super_graph: nx.Graph = nx.Graph()
+        self.designated_ground_floor_number: Optional[int] = None
+        self.designated_ground_floor_z: Optional[float] = None
 
         self.num_processes: int = num_processes if num_processes is not None else (
             os.cpu_count() or 1)
@@ -132,58 +134,97 @@ class SuperNetwork:
         self.height: Optional[int] = None
 
     def _prepare_floor_data(self, image_file_paths: List[pathlib.Path],
-                            z_levels_override: Optional[List[float]] = None) \
+                           z_levels_override: Optional[List[float]] = None) \
             -> List[Tuple[pathlib.Path, float, bool]]:
         """
         Determines floor numbers and Z-levels for each image path.
+        Also determines if outside nodes should be processed for that floor.
+        Outside nodes are processed ONLY for the designated ground/first floor.
 
         Returns:
-            A list of tuples: (image_path, z_level, process_outside_flag)
+            A list of tuples: (image_path, z_level, process_outside_nodes_flag)
         """
         image_paths_as_pathlib = [pathlib.Path(p) for p in image_file_paths]
-
-        self.path_to_floor_map, floor_to_path_map = self.floor_manager.auto_assign_floors(
-            image_paths_as_pathlib)
-
+        
+        self.path_to_floor_map, floor_to_path_map = self.floor_manager.auto_assign_floors(image_paths_as_pathlib)
+        
         if z_levels_override and len(z_levels_override) == len(image_paths_as_pathlib):
-            # Assign override Z-levels based on sorted floor numbers to maintain consistency
-            # This assumes z_levels_override is provided in an order that corresponds to
-            # how image_paths_as_pathlib would be sorted if floors were known.
-            # A safer way is to map z_levels_override via path if a mapping is provided.
-            # For now, let's assume z_levels_override corresponds to the sorted order of detected floors.
-            sorted_paths_by_floor = sorted(
-                self.path_to_floor_map.keys(), key=lambda p: self.path_to_floor_map[p])
-            temp_path_to_z = {path: z for path, z in zip(
-                sorted_paths_by_floor, z_levels_override)}
-            self.floor_z_map = {
-                self.path_to_floor_map[p]: temp_path_to_z[p] for p in sorted_paths_by_floor}
+            # ... (z_levels_override 逻辑保持不变) ...
+            sorted_paths_by_floor = sorted(self.path_to_floor_map.keys(), key=lambda p: self.path_to_floor_map[p])
+            temp_path_to_z = {path: z for path, z in zip(sorted_paths_by_floor, z_levels_override)} # Make sure this aligns correctly
+            self.floor_z_map = {self.path_to_floor_map[p]: temp_path_to_z.get(p) for p in self.path_to_floor_map.keys() if temp_path_to_z.get(p) is not None}
 
         else:
-            self.floor_z_map = self.floor_manager.calculate_z_levels(
-                floor_to_path_map)
+            self.floor_z_map = self.floor_manager.calculate_z_levels(floor_to_path_map)
 
         if not self.floor_z_map:
+            # logger.error("Could not determine Z-levels for floors.") # Ensure logger is available
             raise ValueError("Could not determine Z-levels for floors.")
 
-        # Prepare task list with (path, z_level, process_outside_flag)
         floor_tasks_data = []
-        # Determine min and max floor numbers for process_outside logic
-        all_floor_nums = list(self.floor_z_map.keys())
-        min_floor_num = min(all_floor_nums) if all_floor_nums else 0
-        max_floor_num = max(all_floor_nums) if all_floor_nums else 0
+        all_floor_nums = list(self.floor_z_map.keys()) # These are the actual floor numbers (e.g., -1, 0, 1, 2)
+
+        if not all_floor_nums:
+            return []
+
+        # Determine the ground floor number for processing outside nodes.
+        # Strategy: Lowest non-negative floor number. If all are negative, no ground floor with outside.
+        # If you have a specific config for ground floor, use that.
+        # Example: self.config.GROUND_FLOOR_NUMBER (e.g., 1 or 0)
+        
+        # Let's find the designated ground floor number.
+        # Assuming '1' is the typical first/ground floor if positive floors exist.
+        # If '0' exists and is the lowest non-negative, it's the ground floor.
+        # Otherwise, if only positive floors, the smallest positive is ground.
+        # If only negative floors, then no outside nodes unless specifically handled.
+        
+        designated_ground_floor_num: Optional[int] = self.config.GROUND_FLOOR_NUMBER_FOR_OUTSIDE
+        
+        if designated_ground_floor_num is None: # If not set in config, try auto-detection
+            positive_or_zero_floors = sorted([fn for fn in all_floor_nums if fn >= 0])
+            if 0 in all_floor_nums:
+                designated_ground_floor_num = 0
+            elif 1 in all_floor_nums and not positive_or_zero_floors : # Check if 1 is the only positive candidate
+                 if not any(0 <= fn < 1 for fn in all_floor_nums): # Ensure no 0.x floors if 1 is chosen
+                    designated_ground_floor_num = 1
+            elif positive_or_zero_floors:
+                designated_ground_floor_num = positive_or_zero_floors[0]
+        
+        # logger.info(f"Designated ground floor for outside nodes: {designated_ground_floor_num}")
 
         for p_path, floor_num in self.path_to_floor_map.items():
-            z_level = self.floor_z_map[floor_num]
-            # Process outside nodes for ground floor (min_floor_num) and top floor (max_floor_num) by default,
-            # or if DEFAULT_OUTSIDE_PROCESSING_IN_SUPERNETWORK is True for all.
-            # This logic can be customized.
-            process_outside = self.config.DEFAULT_OUTSIDE_PROCESSING_IN_SUPERNETWORK or \
-                (floor_num == min_floor_num or floor_num == max_floor_num)
-            floor_tasks_data.append((p_path, z_level, process_outside))
+            z_level = self.floor_z_map.get(floor_num)
+            if z_level is None:
+                # logger.warning(f"Z-level for floor {floor_num} (path {p_path}) not found. Skipping task.")
+                continue
 
-        # Sort tasks by Z-level to ensure somewhat deterministic ID assignment progression,
-        # though ESTIMATED_MAX_NODES_PER_FLOOR should handle variations.
-        floor_tasks_data.sort(key=lambda item: item[1])
+            # Process outside nodes ONLY if the current floor is the designated ground floor
+            # AND if there's at least one "OUTSIDE_TYPE" defined in config.
+            process_outside = False
+            if designated_ground_floor_num is not None and floor_num == designated_ground_floor_num \
+               and self.config.OUTSIDE_TYPES:
+                process_outside = True
+            
+            # Override via config if a global "always process outside" is set (though less likely now)
+            if self.config.DEFAULT_OUTSIDE_PROCESSING_IN_SUPERNETWORK: # This flag might be re-purposed or removed
+                # If this flag is true, it might override the ground-floor-only logic.
+                # For "only on ground floor", this should typically be false.
+                # Let's assume the ground_floor_num logic is primary.
+                # So, if DEFAULT_OUTSIDE_PROCESSING_IN_SUPERNETWORK is true, it processes for all.
+                # If false (typical for this new requirement), then only for designated_ground_floor_num.
+                if self.config.DEFAULT_OUTSIDE_PROCESSING_IN_SUPERNETWORK:
+                    process_outside = True 
+                # else: it remains as determined by ground_floor_num logic
+
+            # logger.debug(f"Floor task: Path={p_path.name}, FloorNum={floor_num}, Z={z_level:.2f}, ProcessOutside={process_outside}")
+            floor_tasks_data.append((p_path, z_level, process_outside))
+        
+        floor_tasks_data.sort(key=lambda item: item[1]) # Sort by Z-level
+        
+        self.designated_ground_floor_number = designated_ground_floor_num
+        if self.designated_ground_floor_number is not None:
+            self.designated_ground_floor_z = self.floor_z_map.get(self.designated_ground_floor_number)
+
         return floor_tasks_data
 
     def run(self,

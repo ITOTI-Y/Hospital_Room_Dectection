@@ -1,7 +1,7 @@
 """Configuration module for the network generation project."""
 
 import pathlib
-from typing import Dict, Tuple, List, Any
+from typing import Dict, Tuple, List, Any, Optional
 
 # Global COLOR_MAP - Consider encapsulating or making it part of a config loader
 COLOR_MAP: Dict[Tuple[int, int, int], Dict[str, Any]] = {
@@ -120,6 +120,7 @@ class NetworkConfig:
         # Should be an overestimate to avoid ID collisions.
         self.ESTIMATED_MAX_NODES_PER_FLOOR: int = 10000
         self.DEFAULT_OUTSIDE_PROCESSING_IN_SUPERNETWORK: bool = False # Default for processing outside nodes per floor in SuperNetwork
+        self.GROUND_FLOOR_NUMBER_FOR_OUTSIDE: Optional[int] = None # Or 0, or None to rely on auto-detection
 
         # Morphology Kernel
         self.MORPHOLOGY_KERNEL_SIZE: Tuple[int, int] = (5, 5)
