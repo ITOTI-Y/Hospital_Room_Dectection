@@ -71,19 +71,19 @@ class NetworkConfig:
         self.AREA_THRESHOLD: int = 60  # Minimum area for a component to be considered a node
 
         # Node Type Definitions (derived from COLOR_MAP)
-        all_type_names: List[str] = [v['name'] for v in color_map_data.values()]
+        self.ALL_TYPES: List[str] = [v['name'] for v in color_map_data.values()]
 
         self.CONNECTION_TYPES: List[str] = ['门']
         _ban_type_base: List[str] = ['墙', '栏杆', '室外', '走廊', '电梯', '扶梯', '楼梯', '空房间', '绿化', '中庭']
-        self.BAN_TYPES: List[str] = [name for name in _ban_type_base if name in all_type_names]
+        self.BAN_TYPES: List[str] = [name for name in _ban_type_base if name in self.ALL_TYPES]
 
         self.ROOM_TYPES: List[str] = [
             v['name'] for v in color_map_data.values()
             if v['name'] not in self.BAN_TYPES and v['name'] not in self.CONNECTION_TYPES
         ]
-        self.VERTICAL_TYPES: List[str] = [name for name in ['电梯', '扶梯', '楼梯'] if name in all_type_names]
-        self.PEDESTRIAN_TYPES: List[str] = [name for name in ['走廊'] if name in all_type_names]
-        self.OUTSIDE_TYPES: List[str] = [name for name in ['室外'] if name in all_type_names]
+        self.VERTICAL_TYPES: List[str] = [name for name in ['电梯', '扶梯', '楼梯'] if name in self.ALL_TYPES]
+        self.PEDESTRIAN_TYPES: List[str] = [name for name in ['走廊'] if name in self.ALL_TYPES]
+        self.OUTSIDE_TYPES: List[str] = [name for name in ['室外'] if name in self.ALL_TYPES]
 
         # Grid and Special IDs for pixel-level identification in id_map
         self.GRID_SIZE: int = 40  # Base grid size for mesh node generation

@@ -72,7 +72,6 @@ def calculate_room_travel_times(
             # If ground_floor_z is None, no out_door_nodes are added from this path based on current logic.
             # If you want a fallback, it would be here. For "only ground floor", this is correct.
 
-    # --- 修改点: 为每个位置节点生成唯一名称 ---
     location_nodes: List[Node] = room_nodes + out_door_nodes
     # Map Node object to its unique name
     location_names_map: Dict[Node, str] = {}
@@ -85,10 +84,9 @@ def calculate_room_travel_times(
         location_areas_map[unique_name] = node_obj.area
 
     for node_obj in out_door_nodes:  # These are already filtered for ground floor
-        unique_name = f"OutDoor_{node_obj.id}"
+        unique_name = f"门_{node_obj.id}"
         location_names_map[node_obj] = unique_name
         location_areas_map[unique_name] = node_obj.area
-    # --- End修改点 ---
 
     if not location_nodes:
         logger.warning(

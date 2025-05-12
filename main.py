@@ -22,6 +22,9 @@ from src.network.super_network import SuperNetwork
 from src.plotting.plotter import PlotlyPlotter
 from src.analysis.travel_time import calculate_room_travel_times
 
+# Analysis modules
+from src.analysis.process_flow import PathFinder
+
 # --- Global Logger Setup ---
 def setup_logging(level=logging.INFO, log_file: Optional[pathlib.Path] = None):
     """
@@ -192,37 +195,42 @@ def run_multi_floor_example(app_config: NetworkConfig, app_color_map: Dict):
     except Exception as e:
         logger.error(f"Error in multi-floor example: {e}", exc_info=True)
 
-
-if __name__ == "__main__":
-    # --- Setup Logging ---
-    # Create a log directory if it doesn't exist (for file logging)
+def initialize_setup():
     log_dir = pathlib.Path("./logs")
     log_dir.mkdir(parents=True, exist_ok=True)
-    # Setup logging to console and a file
     setup_logging(level=logging.INFO, log_file=log_dir / "application.log")
     
     main_logger = logging.getLogger(__name__) # Logger for this main script
     main_logger.info("Application started.")
 
-    # --- Load Configuration ---
-    # COLOR_MAP is imported directly, NetworkConfig uses it by default
-    # If COLOR_MAP were in a separate file, it would be loaded here.
     app_config = NetworkConfig(color_map_data=COLOR_MAP)
     app_color_map_data = COLOR_MAP # Pass explicitly if needed, or rely on config's internal copy
 
     main_logger.info(f"Results will be saved in: {app_config.RESULT_PATH}")
     main_logger.info(f"Debug images (if any) will be saved in: {app_config.DEBUG_PATH}")
 
+    return main_logger, app_config, app_color_map_data
 
-    # --- Run Examples ---
-    # You can choose to run one or both examples.
+
+
+if __name__ == "__main__":
+    main_logger, app_config, app_color_map_data = initialize_setup()
 
     # Example 1: Single-floor network (optional)
     # main_logger.info("Attempting to run single-floor example...")
     # run_single_floor_example(app_config, app_color_map_data)
     
     # Example 2: Multi-floor SuperNetwork (primary use case)
-    main_logger.info("Attempting to run multi-floor SuperNetwork example...")
-    run_multi_floor_example(app_config, app_color_map_data)
+    # main_logger.info("Attempting to run multi-floor SuperNetwork example...")
+    # run_multi_floor_example(app_config, app_color_map_data)
+
+    # Example 3: Process Flow
+    main_logger.info("Attempting to run process flow example...")
+    workflow_list = ['大门', '妇科', '采血处', '超声科', '妇科', '门诊药房', '入口']
+    finder = PathFinder(config=app_config)
+    flows = finder.generate_flows(workflow_list)
+    for flow in flows:
+        total_time = finder.calculate_flow_total_time(flow)
+
 
     main_logger.info("Application finished.")
