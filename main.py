@@ -8,6 +8,7 @@ This script demonstrates how to:
 4. Build a multi-floor super-network.
 5. Plot the generated network(s) using Plotly.
 6. Calculate and save room-to-room/out-door travel times.
+7. Generate and evaluate workflow paths.
 """
 import logging
 import sys
@@ -24,6 +25,17 @@ from src.analysis.travel_time import calculate_room_travel_times
 
 # Analysis modules
 from src.analysis.process_flow import PathFinder
+from src.analysis.word_detect import WordDetect
+
+# Optimization modules
+from src.optimization.optimizer import (
+    PhysicalLocation,
+    FunctionalAssignment,
+    WorkflowDefinition,
+    LayoutObjectiveCalculator, # Not directly used by main, but optimizer uses it
+    LayoutOptimizer,
+    EvaluatedWorkflowOutcome
+)
 
 # --- Global Logger Setup ---
 def setup_logging(level=logging.INFO, log_file: Optional[pathlib.Path] = None):
@@ -195,6 +207,94 @@ def run_multi_floor_example(app_config: NetworkConfig, app_color_map: Dict):
     except Exception as e:
         logger.error(f"Error in multi-floor example: {e}", exc_info=True)
 
+def run_layout_optimization_example(app_config: NetworkConfig):
+    main_logger = logging.getLogger(__name__)
+    main_logger.info("--- Running Facility Layout Optimization Example ---")
+
+    # 1. Initialize PathFinder (it loads the travel_times.csv)
+    # This CSV represents the fixed physical network.
+    try:
+        path_finder = PathFinder(config=app_config) # Assumes CSV is at default path
+        if path_finder.travel_times_df is None:
+            main_logger.error("Failed to load travel times data in PathFinder. Optimization cannot proceed.")
+            return
+    except Exception as e:
+        main_logger.error(f"Error initializing PathFinder: {e}", exc_info=True)
+        return
+
+    # 2. Define Workflows
+    # These are sequences of *functional types*.
+    word_detect = WordDetect(config=app_config)
+    workflow_defs = [
+        WorkflowDefinition(workflow_id='WF_OutpatientA',
+                           functional_sequence=word_detect.detect_nearest_word(['挂号收费', '全科', '内诊药房', '挂号收费']),
+                           weight=1.0),
+        WorkflowDefinition(workflow_id='WF_RadiologyVisit',
+                           functional_sequence=word_detect.detect_nearest_word(['挂号收费', '放射科', '全科']),
+                           weight=0.8),
+        WorkflowDefinition(workflow_id='WF_EmergencyToWard',
+                           functional_sequence=word_detect.detect_nearest_word(['急诊科', '放射科', '手术室']),
+                           weight=0.5),
+        WorkflowDefinition(workflow_id='WF_TestUnroutable',
+                           functional_sequence=word_detect.detect_nearest_word(['大门', '妇科', '采血处', '超声科', '妇科', '门诊药房', '入口']), 
+                           weight=1.2),
+    ]
+    main_logger.info(f"Defined {len(workflow_defs)} workflows for optimization.")
+
+    # 3. Create Initial FunctionalAssignment
+    # This typically comes from the default `name_to_ids_map` in PathFinder,
+    # which reflects the "as-is" layout from the original drawings.
+    initial_assignment_map = path_finder.name_to_ids_map
+    if not initial_assignment_map:
+        main_logger.error("PathFinder's name_to_ids_map is empty. Cannot create initial assignment.")
+        return
+    initial_functional_assignment = FunctionalAssignment(initial_assignment_map)
+    main_logger.info("Initial functional assignment created based on PathFinder's default map.")
+
+    # 4. Initialize and Run Optimizer
+    optimizer = LayoutOptimizer(
+        path_finder=path_finder,
+        workflow_definitions=workflow_defs,
+        config=app_config,
+        area_tolerance_ratio=0.3 # TODO: Allow up to 30% area difference for swaps
+    )
+
+    best_assignment, best_objective, best_outcomes = optimizer.run_optimization(
+        initial_assignment=initial_functional_assignment,
+        max_iterations=50 # TODO: Adjust as needed
+    )
+
+    # 5. Report Results
+    main_logger.info("\n--- Optimization Results ---")
+    main_logger.info(f"Final Optimized Objective Value: {best_objective:.2f}")
+
+    main_logger.info("\nFinal Functional Assignment (Functional Type -> [Physical Name_IDs]):")
+    for func_type, phys_ids in sorted(best_assignment.assignment_map.items()):
+        original_ids_for_type = sorted(initial_assignment_map.get(func_type, []))
+        current_ids_for_type = sorted(phys_ids) # Should already be sorted if FunctionalAssignment does it
+        
+        changed_marker = ""
+        if set(original_ids_for_type) != set(current_ids_for_type): # Compare as sets for content
+            changed_marker = " << MODIFIED"
+            main_logger.info(f"  Function: {func_type}{changed_marker}")
+            main_logger.info(f"    Original Locations: {original_ids_for_type}")
+            main_logger.info(f"    New Locations     : {current_ids_for_type}")
+        else:
+            # Use debug for unchanged to reduce log noise, or info if you want to see all
+            main_logger.debug(f"  Function: {func_type} -> Locations: {current_ids_for_type} (Unchanged)")
+
+
+    main_logger.info("\nDetails of Optimized Workflows:")
+    for outcome in best_outcomes:
+        flow_details = "N/A"
+        if outcome.shortest_flow:
+            seq = outcome.shortest_flow.actual_node_id_sequence
+            if seq:
+                flow_details = f"[{seq[0]} ... {seq[-1]}] (len: {len(seq)})"
+        main_logger.info(f"  Workflow: {outcome.workflow_definition.workflow_id} "
+                         f"(Weight: {outcome.workflow_definition.weight:.1f}) - "
+                         f"Optimized Time: {outcome.time:.2f} - Path: {flow_details}")
+
 def initialize_setup():
     log_dir = pathlib.Path("./logs")
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -216,21 +316,31 @@ def initialize_setup():
 if __name__ == "__main__":
     main_logger, app_config, app_color_map_data = initialize_setup()
 
-    # Example 1: Single-floor network (optional)
+    # ---- Example 1: Single-floor network (optional) ----
     # main_logger.info("Attempting to run single-floor example...")
     # run_single_floor_example(app_config, app_color_map_data)
     
-    # Example 2: Multi-floor SuperNetwork (primary use case)
+    # ---- Example 2: Multi-floor SuperNetwork (primary use case) ----
     # main_logger.info("Attempting to run multi-floor SuperNetwork example...")
     # run_multi_floor_example(app_config, app_color_map_data)
 
-    # Example 3: Process Flow
-    main_logger.info("Attempting to run process flow example...")
-    workflow_list = ['大门', '妇科', '采血处', '超声科', '妇科', '门诊药房', '入口']
-    finder = PathFinder(config=app_config)
-    flows = finder.generate_flows(workflow_list)
-    for flow in flows:
-        total_time = finder.calculate_flow_total_time(flow)
+    # ---- Example 3: Process Flow ----
+    # main_logger.info("Attempting to run process flow example...")
+    # workflow_list = ['大门', '妇科', '采血处', '超声科', '妇科', '门诊药房', '入口']
+    # finder = PathFinder(config=app_config)
+    # flows = finder.generate_flows(workflow_list)
+    # for flow in flows:
+    #     total_time = finder.calculate_flow_total_time(flow)
+
+    # ---- Example 4: Layout Optimization ----
+    travel_times_csv_path = app_config.RESULT_PATH / 'super_network_travel_times.csv'
+    if not travel_times_csv_path.exists():
+        main_logger.warning(f"{travel_times_csv_path} not found.")
+        main_logger.warning("Please ensure `super_network_travel_times.csv` is generated first "
+                            "(e.g., by running `run_multi_floor_example`).")
+        main_logger.warning("Skipping layout optimization example.")
+    else:
+        run_layout_optimization_example(app_config)
 
 
     main_logger.info("Application finished.")
