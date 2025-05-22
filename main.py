@@ -227,13 +227,13 @@ def run_layout_optimization_example(app_config: NetworkConfig):
     word_detect = WordDetect(config=app_config)
     workflow_defs = [
         WorkflowDefinition(workflow_id='WF_OutpatientA',
-                           functional_sequence=word_detect.detect_nearest_word(['挂号收费', '全科', '内诊药房', '挂号收费']),
+                           functional_sequence=word_detect.detect_nearest_word(['入口','挂号收费', '全科', '内诊药房', '挂号收费','出口']),
                            weight=1.0),
         WorkflowDefinition(workflow_id='WF_RadiologyVisit',
-                           functional_sequence=word_detect.detect_nearest_word(['挂号收费', '放射科', '全科']),
+                           functional_sequence=word_detect.detect_nearest_word(['入口','挂号收费', '放射科', '全科','出口']),
                            weight=0.8),
         WorkflowDefinition(workflow_id='WF_EmergencyToWard',
-                           functional_sequence=word_detect.detect_nearest_word(['急诊科', '放射科', '手术室']),
+                           functional_sequence=word_detect.detect_nearest_word(['入口','急诊科', '放射科', '手术室','出口']),
                            weight=0.5),
         WorkflowDefinition(workflow_id='WF_TestUnroutable',
                            functional_sequence=word_detect.detect_nearest_word(['大门', '妇科', '采血处', '超声科', '妇科', '门诊药房', '入口']), 
@@ -321,8 +321,8 @@ if __name__ == "__main__":
     # run_single_floor_example(app_config, app_color_map_data)
     
     # ---- Example 2: Multi-floor SuperNetwork (primary use case) ----
-    # main_logger.info("Attempting to run multi-floor SuperNetwork example...")
-    # run_multi_floor_example(app_config, app_color_map_data)
+    main_logger.info("Attempting to run multi-floor SuperNetwork example...")
+    run_multi_floor_example(app_config, app_color_map_data)
 
     # ---- Example 3: Process Flow ----
     # main_logger.info("Attempting to run process flow example...")
@@ -333,14 +333,14 @@ if __name__ == "__main__":
     #     total_time = finder.calculate_flow_total_time(flow)
 
     # ---- Example 4: Layout Optimization ----
-    travel_times_csv_path = app_config.RESULT_PATH / 'super_network_travel_times.csv'
-    if not travel_times_csv_path.exists():
-        main_logger.warning(f"{travel_times_csv_path} not found.")
-        main_logger.warning("Please ensure `super_network_travel_times.csv` is generated first "
-                            "(e.g., by running `run_multi_floor_example`).")
-        main_logger.warning("Skipping layout optimization example.")
-    else:
-        run_layout_optimization_example(app_config)
+    # travel_times_csv_path = app_config.RESULT_PATH / 'super_network_travel_times.csv'
+    # if not travel_times_csv_path.exists():
+    #     main_logger.warning(f"{travel_times_csv_path} not found.")
+    #     main_logger.warning("Please ensure `super_network_travel_times.csv` is generated first "
+    #                         "(e.g., by running `run_multi_floor_example`).")
+    #     main_logger.warning("Skipping layout optimization example.")
+    # else:
+    #     run_layout_optimization_example(app_config)
 
 
     main_logger.info("Application finished.")
