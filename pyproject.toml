@@ -13,6 +13,7 @@ dependencies = [
     "plotly>=6.0.0",
     "scikit-learn>=1.5.1",
     "sentence-transformers>=4.1.0",
+    "snakeviz>=2.2.2",
 ]
 
 [[tool.uv.index]]
