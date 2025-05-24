@@ -12,6 +12,11 @@ from joblib import Parallel, delayed
 from src.analysis.process_flow import PeopleFlow, PathFinder
 from src.config import NetworkConfig
 
+# Code Time Profiling
+import cProfile
+import pstats
+profiler = cProfile.Profile()
+
 logger = logging.getLogger(__name__)
 
 
@@ -138,6 +143,26 @@ class FunctionalAssignment:
 
     def __repr__(self) -> str:
         return f"FunctionalAssignment(map_size={len(self.assignment_map)})"
+    
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, FunctionalAssignment):
+            return NotImplemented
+        # Compare the assignment maps. Order of physical IDs in lists might matter
+        # or might not. If order doesn't matter, sort lists before comparing or compare sets.
+        # Assuming order might matter, or lists are consistently sorted:
+        if len(self.assignment_map) != len(other.assignment_map):
+            return False
+        for func_type, phys_ids_self in self.assignment_map.items():
+            phys_ids_other = other.assignment_map.get(func_type)
+            if phys_ids_other is None:
+                return False
+            # If order of IDs in the list doesn't matter for equality of assignment
+            if sorted(phys_ids_self) != sorted(phys_ids_other):
+                return False
+            # If order *does* matter (and lists are not guaranteed to be sorted elsewhere)
+            # if phys_ids_self != phys_ids_other:
+            # return False
+        return True
 
 
 class WorkflowDefinition:
@@ -278,12 +303,31 @@ class LayoutObjectiveCalculator:
                     # but here it's likely CPU bound due to DataFrame lookups.
                     # 'threading' backend is limited by GIL for CPU-bound tasks in CPython.
                     # 'loky' or 'multiprocessing' are better for CPU-bound.
+                    def _calculate_batch_flow_times(flows_batch: List[PeopleFlow], path_finder: PathFinder) -> List[Tuple[float, str, List[str]]]:
+                        results = []
+                        for flow in flows_batch:
+                            time = path_finder.calculate_flow_total_time(flow)
+                            results.append(
+                                (time, flow.identify, flow.actual_node_id_sequence))
+                        return results
+
+                    batch_size = 400
+                    flow_batches = [generated_flows[i:i + batch_size]
+                                    for i in range(0, len(generated_flows), batch_size)]
+
+                    profiler.enable()
+                    batch_results = []
                     with Parallel(n_jobs=self.n_jobs_for_flows, backend='loky') as parallel:
-                        results = parallel(
-                            delayed(_calculate_flow_time_joblib_task)(
-                                flow, self.path_finder)
-                            for flow in generated_flows
-                        )
+                        results_from_parallel = parallel(delayed(_calculate_batch_flow_times)(batch, self.path_finder)
+                                                         for batch in flow_batches
+                                                         )
+                    for single_batch_result in results_from_parallel:
+                        batch_results.extend(single_batch_result)
+                    results = batch_results
+                    profiler.disable()
+                    stats = pstats.Stats(profiler).sort_stats('cumulative')
+                    stats.print_stats(20)
+                    pass
                     # results is a list of (time, flow_identify, flow_sequence)
 
                 except Exception as e:  # Catch potential joblib/pickling errors

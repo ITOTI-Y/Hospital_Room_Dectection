@@ -386,10 +386,6 @@ if __name__ == "__main__":
                             "(e.g., by running `run_multi_floor_example`).")
         main_logger.warning("Skipping layout optimization example.")
     else:
-        profiler = cProfile.Profile()
-        profiler.enable()
         run_layout_optimization_example(app_config)
-        profiler.disable()
-        profiler.dump_stats("layout_opt.prof")
 
     main_logger.info("Application finished.")
