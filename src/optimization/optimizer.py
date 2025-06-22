@@ -6,6 +6,7 @@ to physical locations to minimize total travel times for defined workflows.
 import copy
 import logging
 from typing import List, Dict, Optional, Tuple, Set, Any, Sequence
+import pandas as pd
 import os
 from joblib import Parallel, delayed
 
@@ -54,8 +55,7 @@ class PhysicalLocation:
 
 class FunctionalAssignment:
     """Manages the assignment of functional types to lists of physical locations.
-
-    This class represents the current "layout" by defining which physical
+     This class represents the current "layout" by defining which physical
     locations (Name_IDs) are currently serving each functional type.
     It supports creating new assignment states by swapping the functional roles
     of two physical locations.
@@ -103,65 +103,64 @@ class FunctionalAssignment:
         Returns:
             A new FunctionalAssignment object with the swapped roles.
         """
-        new_map = self.get_map_copy()
+        new_map = self.get_map_copy()  # Start with a copy of the current assignment
 
         func_type_at_A = self.get_functional_type_at_physical_id(phys_loc_A_id)
         func_type_at_B = self.get_functional_type_at_physical_id(phys_loc_B_id)
 
-        # Remove A from its current function's list (if any) and add B instead.
-        if func_type_at_A:
+        # Handle func_type_at_A (moving func_type_at_A from A to B, if B is involved)
+        if func_type_at_A is not None:
             if phys_loc_A_id in new_map.get(func_type_at_A, []):
                 new_map[func_type_at_A].remove(phys_loc_A_id)
-            if func_type_at_A not in new_map:
-                new_map[func_type_at_A] = []  # Should not happen if found
-            new_map[func_type_at_A].append(phys_loc_B_id)
-            if not new_map[func_type_at_A]:  # If list became empty
-                del new_map[func_type_at_A]
+            # If B is now supposed to host what A had
+            if func_type_at_B != func_type_at_A:  # Avoid issues if A and B had same func type initially
+                if func_type_at_A not in new_map:  # Should not be needed if remove was successful
+                    new_map[func_type_at_A] = []
+                # Add B to host A's original function
+                if phys_loc_B_id not in new_map[func_type_at_A]:
+                    new_map[func_type_at_A].append(phys_loc_B_id)
 
-        # Remove B from its current function's list (if any) and add A instead.
-        if func_type_at_B:
-            # Check if B was already moved (e.g. A and B had same func type)
+        # Handle func_type_at_B (moving func_type_at_B from B to A, if A is involved)
+        if func_type_at_B is not None:
             if phys_loc_B_id in new_map.get(func_type_at_B, []):
-                if func_type_at_A == func_type_at_B:
-                    pass
-                else:
-                    new_map[func_type_at_B].remove(phys_loc_B_id)
-
+                new_map[func_type_at_B].remove(phys_loc_B_id)
+            # If A is now supposed to host what B had
+            # if func_type_at_A != func_type_at_B: # Redundant due to first block, but helps clarity
             if func_type_at_B not in new_map:
                 new_map[func_type_at_B] = []
-            new_map[func_type_at_B].append(phys_loc_A_id)
-            if not new_map[func_type_at_B]:
-                del new_map[func_type_at_B]
+            # Add A to host B's original function
+            if phys_loc_A_id not in new_map[func_type_at_B]:
+                new_map[func_type_at_B].append(phys_loc_A_id)
 
+        # Clean up: remove empty lists and ensure lists are sorted and unique
+        # Iterate over a copy of keys for safe deletion
         for func_type in list(new_map.keys()):
             if new_map[func_type]:
                 new_map[func_type] = sorted(list(set(new_map[func_type])))
             else:
+                # Remove function type if it no longer has any locations
                 del new_map[func_type]
 
         return FunctionalAssignment(new_map)
 
     def __repr__(self) -> str:
         return f"FunctionalAssignment(map_size={len(self.assignment_map)})"
-    
+
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, FunctionalAssignment):
             return NotImplemented
-        # Compare the assignment maps. Order of physical IDs in lists might matter
-        # or might not. If order doesn't matter, sort lists before comparing or compare sets.
-        # Assuming order might matter, or lists are consistently sorted:
-        if len(self.assignment_map) != len(other.assignment_map):
+
+        # Check if the keys (functional types) are the same
+        if set(self.assignment_map.keys()) != set(other.assignment_map.keys()):
             return False
+
+        # Check if the lists of physical IDs for each functional type are the same
+        # Comparing sorted lists ensures that order of IDs within the list doesn't affect equality
         for func_type, phys_ids_self in self.assignment_map.items():
+            # Already know func_type exists in other due to key check
             phys_ids_other = other.assignment_map.get(func_type)
-            if phys_ids_other is None:
-                return False
-            # If order of IDs in the list doesn't matter for equality of assignment
             if sorted(phys_ids_self) != sorted(phys_ids_other):
                 return False
-            # If order *does* matter (and lists are not guaranteed to be sorted elsewhere)
-            # if phys_ids_self != phys_ids_other:
-            # return False
         return True
 
 
@@ -241,39 +240,127 @@ def _calculate_flow_time_joblib_task(flow_to_process: PeopleFlow, path_finder_in
     # and to allow the main thread to update the original flow objects.
     return time, flow_to_process.identify, flow_to_process.actual_node_id_sequence
 
+def _calculate_batch_flow_times(flows_batch, path_finder):
+    results = []
+    for flow in flows_batch:
+        time = path_finder.calculate_flow_total_time(flow)
+        results.append((time, flow.identify, flow.actual_node_id_sequence))
+    return results
 
 class LayoutObjectiveCalculator:
-    """Calculates the overall objective value for a given functional assignment.
-
-    The objective is typically the sum of weighted average travel times for all defined workflows.
+    """
+    Calculates the overall objective value for a given functional assignment.
+    Supports incremental calculation.
     """
 
     def __init__(self,
                  workflow_definitions: Sequence[WorkflowDefinition],
                  path_finder: PathFinder,
-                 n_jobs_for_flows: int = -1):  # Default to all cores for flow calculation
+                 n_jobs_for_flows: int = -1):
         self.workflow_definitions: Sequence[WorkflowDefinition] = workflow_definitions
         self.path_finder: PathFinder = path_finder
-        self.n_jobs_for_flows: int = n_jobs_for_flows if n_jobs_for_flows != 0 else 1
-        if self.n_jobs_for_flows == -1:  # Check if os.cpu_count() is available
+
+        if n_jobs_for_flows == 0:
+            self.n_jobs_for_flows = 1
+        elif n_jobs_for_flows == -1:
             cpu_count = os.cpu_count()
             self.n_jobs_for_flows = cpu_count if cpu_count is not None else 1
-        elif self.n_jobs_for_flows == 0:  # Explicitly set to 1 if 0 is passed.
-            self.n_jobs_for_flows = 1
+        else:
+            self.n_jobs_for_flows = n_jobs_for_flows
 
-    def evaluate(self, assignment: FunctionalAssignment) -> Tuple[float, List[EvaluatedWorkflowOutcome]]:
-        """Evaluates the given FunctionalAssignment.
+        logger.info(
+            f"LayoutObjectiveCalculator initialized with n_jobs_for_flows={self.n_jobs_for_flows}")
 
-        Args:
-            assignment: The FunctionalAssignment to evaluate.
+        self.cached_evaluated_outcomes: Optional[List[EvaluatedWorkflowOutcome]] = None
+        self.cached_total_objective_value: Optional[float] = None
+        # Stores the FunctionalAssignment object
+        self.cached_assignment_obj: Optional[FunctionalAssignment] = None
 
-        Returns:
-            A tuple containing:
-                - total_objective_value (float): The sum of weighted average travel times.
-                  Can be float('inf') if any critical workflow is unroutable.
-                - evaluated_outcomes (List[EvaluatedWorkflowOutcome]): A list of outcomes
-                  for each workflow definition.
-        """
+    def _evaluate_single_workflow_flows(self,
+                                        generated_flows: List[PeopleFlow],
+                                        workflow_id_for_logging: str
+                                        ) -> Tuple[float, Optional[PeopleFlow], int, Optional[List[float]]]:
+        # ... (Implementation from the previous response, unchanged) ...
+        workflow_average_time: float = float('inf')
+        shortest_flow: Optional[PeopleFlow] = None
+        shortest_time_val: float = float('inf')
+        valid_flow_times: List[float] = []
+        num_paths_considered: int = 0
+
+        if not generated_flows:
+            logger.debug(
+                f"Single WF Eval: Workflow '{workflow_id_for_logging}' generated no flows. Avg Time is Inf.")
+            return float('inf'), None, 0, None
+
+        try:
+            parallel_results_wf: List[Tuple[Optional[float], Any, List[str]]] = [
+            ]
+            backend_to_use = 'loky'
+            if self.n_jobs_for_flows > 1 and len(generated_flows) > 1:
+                batch_size = 600
+                batch_results = []
+                flow_batches = [generated_flows[i:i + batch_size] for i in range(0, len(generated_flows), batch_size)]
+                # Ensure _calculate_batch_flow_times is globally defined or properly imported
+                with Parallel(n_jobs=self.n_jobs_for_flows, backend=backend_to_use) as parallel:
+                    results_from_parallel = parallel(
+                        delayed(_calculate_batch_flow_times)(
+                            flow_batch, self.path_finder)
+                        for flow_batch in flow_batches
+                    )
+                for single_batch_result in results_from_parallel:
+                    batch_results.extend(single_batch_result)
+                parallel_results_wf = batch_results
+            else:
+                for flow in generated_flows:
+                    parallel_results_wf.append(
+                        _calculate_flow_time_joblib_task(flow, self.path_finder))
+        except Exception as e:
+            logger.error(
+                f"Error during parallel flow calculation for single workflow '{workflow_id_for_logging}': {e}. Falling back to sequential.", exc_info=True)
+            parallel_results_wf = [_calculate_flow_time_joblib_task(
+                flow, self.path_finder) for flow in generated_flows]
+
+        all_paths_routable = True
+        temp_flow_times: List[float] = []
+        flow_map_for_update: Dict[Tuple[Any, Tuple[str, ...]], PeopleFlow] = {
+            (f.identify, tuple(f.actual_node_id_sequence)): f for f in generated_flows
+        }
+
+        for flow_time, flow_id, flow_seq_list in parallel_results_wf:
+            flow_seq_tuple = tuple(flow_seq_list)
+            original_flow = flow_map_for_update.get((flow_id, flow_seq_tuple))
+            if original_flow:
+                original_flow.update_total_time(
+                    flow_time if flow_time is not None else float('inf'))
+
+            if flow_time is None:
+                all_paths_routable = False
+                break
+            temp_flow_times.append(flow_time)
+            if original_flow and flow_time < shortest_time_val:
+                shortest_time_val = flow_time
+                shortest_flow = original_flow
+
+        if all_paths_routable:
+            if temp_flow_times:
+                valid_flow_times = temp_flow_times
+                workflow_average_time = sum(
+                    valid_flow_times) / len(valid_flow_times)
+                num_paths_considered = len(valid_flow_times)
+        else:
+            workflow_average_time = float('inf')
+            shortest_flow = None
+            valid_flow_times = []
+            num_paths_considered = 0
+
+        return workflow_average_time, shortest_flow, num_paths_considered, (valid_flow_times if workflow_average_time != float('inf') else None)
+
+    def _perform_full_evaluation(self,
+                                 current_assignment: FunctionalAssignment
+                                 ) -> Tuple[float, List[EvaluatedWorkflowOutcome]]:
+        # ... (Implementation from the previous response, unchanged) ...
+        logger.debug(
+            f"Performing full evaluation for assignment (map_size={len(current_assignment.assignment_map)}).")
         total_weighted_time: float = 0.0
         evaluated_outcomes: List[EvaluatedWorkflowOutcome] = []
 
@@ -281,212 +368,223 @@ class LayoutObjectiveCalculator:
             generated_flows = self.path_finder.generate_flows(
                 workflow_names=wf_def.functional_sequence,
                 workflow_identifier=wf_def.workflow_id,
-                custom_assignment_map=assignment.get_map_copy()
+                custom_assignment_map=current_assignment.get_map_copy()
             )
 
-            workflow_average_time: float = float('inf')
-            shortest_flow_for_wf: Optional[PeopleFlow] = None
-            shortest_time_val_for_wf: float = float('inf')
-            valid_flow_times_for_wf: List[float] = []
-            num_paths_considered_for_wf: int = 0
-
-            if not generated_flows:
-                logger.debug(
-                    f"Workflow '{wf_def.workflow_id}' generated no flows for current assignment. Avg Time is Inf.")
-            else:
-                # Use joblib to parallelize the calculation of total_time for each flow
-                # The _calculate_flow_time_joblib_task helper will be used.
-                # PathFinder instance needs to be passed to the helper.
-                try:
-                    # Using 'loky' backend which is robust for multiprocessing
-                    # prefer='threads' could be used if tasks are I/O bound and GIL is an issue,
-                    # but here it's likely CPU bound due to DataFrame lookups.
-                    # 'threading' backend is limited by GIL for CPU-bound tasks in CPython.
-                    # 'loky' or 'multiprocessing' are better for CPU-bound.
-                    def _calculate_batch_flow_times(flows_batch: List[PeopleFlow], path_finder: PathFinder) -> List[Tuple[float, str, List[str]]]:
-                        results = []
-                        for flow in flows_batch:
-                            time = path_finder.calculate_flow_total_time(flow)
-                            results.append(
-                                (time, flow.identify, flow.actual_node_id_sequence))
-                        return results
-
-                    batch_size = 400
-                    flow_batches = [generated_flows[i:i + batch_size]
-                                    for i in range(0, len(generated_flows), batch_size)]
-
-                    profiler.enable()
-                    batch_results = []
-                    with Parallel(n_jobs=self.n_jobs_for_flows, backend='loky') as parallel:
-                        results_from_parallel = parallel(delayed(_calculate_batch_flow_times)(batch, self.path_finder)
-                                                         for batch in flow_batches
-                                                         )
-                    for single_batch_result in results_from_parallel:
-                        batch_results.extend(single_batch_result)
-                    results = batch_results
-                    profiler.disable()
-                    stats = pstats.Stats(profiler).sort_stats('cumulative')
-                    stats.print_stats(20)
-                    pass
-                    # results is a list of (time, flow_identify, flow_sequence)
-
-                except Exception as e:  # Catch potential joblib/pickling errors
-                    logger.error(
-                        f"Error during parallel flow calculation for workflow '{wf_def.workflow_id}': {e}. Falling back to sequential.")
-                    results = [_calculate_flow_time_joblib_task(
-                        flow, self.path_finder) for flow in generated_flows]
-
-                all_paths_routable = True
-                temp_flow_times: List[float] = []
-
-                # Create a mapping from (identify, tuple(sequence)) to original flow object for quick lookup
-                flow_map_for_update: Dict[Tuple[Any, Tuple[str, ...]], PeopleFlow] = {
-                    (f.identify, tuple(f.actual_node_id_sequence)): f for f in generated_flows
-                }
-
-                for current_flow_time, flow_identify, flow_sequence_list in results:
-                    # Ensure hashable for dict key
-                    flow_sequence_tuple = tuple(flow_sequence_list)
-                    original_flow_obj = flow_map_for_update.get(
-                        (flow_identify, flow_sequence_tuple))
-
-                    if original_flow_obj:
-                        # Update the total_time on the original PeopleFlow object
-                        # Note: _calculate_flow_time_joblib_task already calls calculate_flow_total_time
-                        # which updates the flow object passed to it (which is a copy in multiprocessing).
-                        # So, we need to update the original object in the main process's list.
-                        original_flow_obj.update_total_time(
-                            current_flow_time if current_flow_time is not None else float('inf'))
-                    else:
-                        logger.warning(
-                            f"Could not find original flow for id {flow_identify} and sequence {flow_sequence_list} after parallel processing.")
-                        # This should ideally not happen if identifiers are unique and sequences match.
-
-                    if current_flow_time is None:
-                        logger.debug(f"Flow identified by '{flow_identify}' (sequence: {'->'.join(flow_sequence_list[:2])}... ) "
-                                     f"for workflow '{wf_def.workflow_id}' is unroutable. "
-                                     f"Workflow average time will be Inf (strict mode).")
-                        all_paths_routable = False
-                        break  # Strict mode
-
-                    temp_flow_times.append(current_flow_time)
-                    if original_flow_obj and current_flow_time < shortest_time_val_for_wf:
-                        shortest_time_val_for_wf = current_flow_time
-                        shortest_flow_for_wf = original_flow_obj
-
-                if all_paths_routable:
-                    if temp_flow_times:
-                        valid_flow_times_for_wf = temp_flow_times
-                        workflow_average_time = sum(
-                            valid_flow_times_for_wf) / len(valid_flow_times_for_wf)
-                        num_paths_considered_for_wf = len(
-                            valid_flow_times_for_wf)
-                    else:
-                        logger.warning(
-                            f"Workflow '{wf_def.workflow_id}': all_paths_routable is True, but temp_flow_times is empty.")
-                        workflow_average_time = float('inf')
-                else:
-                    workflow_average_time = float('inf')
-                    shortest_flow_for_wf = None
-                    valid_flow_times_for_wf = []
-                    num_paths_considered_for_wf = 0
+            wf_avg_time, wf_shortest_flow, wf_num_paths, wf_all_times = \
+                self._evaluate_single_workflow_flows(
+                    generated_flows, wf_def.workflow_id)
 
             outcome = EvaluatedWorkflowOutcome(
                 workflow_definition=wf_def,
-                average_time=workflow_average_time,
-                shortest_flow=shortest_flow_for_wf,
-                num_paths_considered=num_paths_considered_for_wf,
-                all_path_times=valid_flow_times_for_wf if workflow_average_time != float(
-                    'inf') else None
+                average_time=wf_avg_time,
+                shortest_flow=wf_shortest_flow,
+                num_paths_considered=wf_num_paths,
+                all_path_times=wf_all_times
             )
             evaluated_outcomes.append(outcome)
 
-            if workflow_average_time == float('inf'):
-                total_weighted_time = float('inf')
-
             if total_weighted_time != float('inf'):
-                total_weighted_time += workflow_average_time * wf_def.weight
+                if wf_avg_time == float('inf'):
+                    total_weighted_time = float('inf')
+                else:
+                    total_weighted_time += wf_avg_time * wf_def.weight
 
         return total_weighted_time, evaluated_outcomes
+
+    def evaluate(self,
+                 assignment_to_evaluate: FunctionalAssignment,
+                 base_assignment_for_cache: Optional[FunctionalAssignment] = None,
+                 changed_locations: Optional[Tuple[str, str]] = None
+                 ) -> Tuple[float, List[EvaluatedWorkflowOutcome]]:
+        """Evaluates the given FunctionalAssignment.
+
+        If `base_assignment_for_cache` and `changed_locations` are provided, and
+        `base_assignment_for_cache` matches the internally cached assignment object,
+        an incremental update is attempted. Otherwise, a full evaluation is performed.
+        """
+        can_do_incremental = (
+            base_assignment_for_cache is not None and
+            changed_locations is not None and
+            self.cached_assignment_obj is not None and
+            self.cached_evaluated_outcomes is not None and
+            # Use the __eq__ method of FunctionalAssignment for comparison
+            self.cached_assignment_obj == base_assignment_for_cache
+        )
+
+        if not can_do_incremental:
+            if base_assignment_for_cache is not None and changed_locations is not None and self.cached_assignment_obj is not None:
+                # More specific logging if an attempt at incremental was made but failed due to cache mismatch
+                logger.debug(
+                    "Cache mismatch for incremental: `base_assignment_for_cache` does not match `cached_assignment_obj`. Performing full evaluation.")
+            else:
+                logger.debug(
+                    "Performing full evaluation (no valid base for incremental or cache empty).")
+            total_objective, outcomes = self._perform_full_evaluation(
+                assignment_to_evaluate)
+        else:
+            # Incremental calculation
+            logger.debug(
+                f"Attempting incremental evaluation. Changed locations: {changed_locations}")
+            loc_A_id, loc_B_id = changed_locations
+
+            func_type_at_A_prev = base_assignment_for_cache.get_functional_type_at_physical_id(
+                loc_A_id)
+            func_type_at_B_prev = base_assignment_for_cache.get_functional_type_at_physical_id(
+                loc_B_id)
+            func_type_at_A_curr = assignment_to_evaluate.get_functional_type_at_physical_id(
+                loc_A_id)
+            func_type_at_B_curr = assignment_to_evaluate.get_functional_type_at_physical_id(
+                loc_B_id)
+
+            affected_functional_types: Set[str] = set()
+            if func_type_at_A_prev:
+                affected_functional_types.add(func_type_at_A_prev)
+            if func_type_at_B_prev:
+                affected_functional_types.add(func_type_at_B_prev)
+            if func_type_at_A_curr:
+                affected_functional_types.add(func_type_at_A_curr)
+            if func_type_at_B_curr:
+                affected_functional_types.add(func_type_at_B_curr)
+
+            logger.debug(f"Swap details for incremental: LocA ({loc_A_id}): {func_type_at_A_prev} -> {func_type_at_A_curr}. "
+                         f"LocB ({loc_B_id}): {func_type_at_B_prev} -> {func_type_at_B_curr}.")
+            logger.debug(
+                f"Functional types triggering re-evaluation: {affected_functional_types}")
+
+            new_evaluated_outcomes: List[EvaluatedWorkflowOutcome] = []
+
+            for i, wf_def in enumerate(self.workflow_definitions):
+                workflow_is_potentially_affected = any(
+                    func_step in affected_functional_types for func_step in wf_def.functional_sequence
+                )
+
+                if workflow_is_potentially_affected:
+                    # logger.debug(f"Workflow '{wf_def.workflow_id}' is affected by swap. Re-evaluating.")
+                    generated_flows_wf = self.path_finder.generate_flows(
+                        workflow_names=wf_def.functional_sequence,
+                        workflow_identifier=wf_def.workflow_id,
+                        custom_assignment_map=assignment_to_evaluate.get_map_copy()
+                    )
+                    wf_avg_time, wf_shortest_flow, wf_num_paths, wf_all_times = \
+                        self._evaluate_single_workflow_flows(
+                            generated_flows_wf, wf_def.workflow_id)
+
+                    current_outcome = EvaluatedWorkflowOutcome(
+                        workflow_definition=wf_def, average_time=wf_avg_time,
+                        shortest_flow=wf_shortest_flow, num_paths_considered=wf_num_paths,
+                        all_path_times=wf_all_times)
+                    new_evaluated_outcomes.append(current_outcome)
+                else:
+                    # Ensure self.cached_evaluated_outcomes is not None (already checked by can_do_incremental)
+                    new_evaluated_outcomes.append(
+                        self.cached_evaluated_outcomes[i])  # type: ignore
+
+            current_total_weighted_time_calc = 0.0
+            has_inf_path_incrementally = False
+            for outcome in new_evaluated_outcomes:
+                if outcome.average_time == float('inf'):
+                    has_inf_path_incrementally = True
+                    break
+                current_total_weighted_time_calc += outcome.average_time * \
+                    outcome.workflow_definition.weight
+
+            if has_inf_path_incrementally:
+                total_objective = float('inf')
+            else:
+                total_objective = current_total_weighted_time_calc
+
+            outcomes = new_evaluated_outcomes
+            # Log difference for significant changes to monitor incremental logic
+            if self.cached_total_objective_value is not None and abs(total_objective - self.cached_total_objective_value) > 1e-5:
+                logger.info(
+                    f"Incremental eval result. Prev Obj: {self.cached_total_objective_value:.2f}, New Obj: {total_objective:.2f}. Diff: {total_objective - self.cached_total_objective_value:.2f}")
+            elif self.cached_total_objective_value is None:
+                logger.info(
+                    f"Incremental eval result (no prev obj for diff). New Obj: {total_objective:.2f}")
+
+        # Update cache with the results of *this* evaluation, for the *assignment_to_evaluate*
+        self.cached_total_objective_value = total_objective
+        self.cached_evaluated_outcomes = outcomes
+        # Store a deepcopy to prevent external modifications to assignment_to_evaluate from affecting the cache
+        self.cached_assignment_obj = copy.deepcopy(assignment_to_evaluate)
+
+        return total_objective, outcomes
+
+    def reset_cache(self):
+        """Resets the cache. Call when the base state for comparison changes significantly."""
+        logger.info("Resetting LayoutObjectiveCalculator cache.")
+        self.cached_evaluated_outcomes = None
+        self.cached_total_objective_value = None
+        self.cached_assignment_obj = None
 
 
 class LayoutOptimizer:
     """
     Optimizes facility layout by reassigning functional types to physical locations.
-
-    Uses a greedy iterative approach (best-swap local search) to minimize the
-    total weighted travel time of predefined workflows.
+    Uses a greedy iterative approach (best-swap local search).
     """
 
     def __init__(self,
                  path_finder: PathFinder,
                  workflow_definitions: Sequence[WorkflowDefinition],
-                 config: NetworkConfig,
+                 config: NetworkConfig,  # Used by _initialize_physical_locations
                  area_tolerance_ratio: float = 0.2):
-        """
-        Initializes the LayoutOptimizer.
-
-        Args:
-            path_finder: An initialized PathFinder instance, used for path generation
-                         and time calculation. It must have its travel_times_df loaded.
-            workflow_definitions: A list of WorkflowDefinition objects that define
-                                  the paths and their importance.
-            config: The NetworkConfig object, used to identify non-swappable
-                    connection types.
-            area_tolerance_ratio: The maximum allowed relative area difference between
-                                  two physical locations for them to be considered swappable.
-                                  E.g., 0.2 means areas can differ by at most 20%.
-        """
         self.path_finder: PathFinder = path_finder
+        # For BAN_TYPES, CONNECTION_TYPES etc.
         self.config: NetworkConfig = config
         self.objective_calculator: LayoutObjectiveCalculator = LayoutObjectiveCalculator(
-            workflow_definitions, path_finder
-        )
+            workflow_definitions, path_finder, n_jobs_for_flows=config.N_JOBS_FOR_OPTIMIZER_FLOWS if hasattr(
+                config, 'N_JOBS_FOR_OPTIMIZER_FLOWS') else -1
+        )  # Pass n_jobs from config if available
         self.area_tolerance_ratio: float = area_tolerance_ratio
         self.all_physical_locations: List[PhysicalLocation] = self._initialize_physical_locations(
         )
         self.swappable_locations: List[PhysicalLocation] = [
             loc for loc in self.all_physical_locations if loc.is_swappable
         ]
-
         logger.info(f"Optimizer initialized. Found {len(self.all_physical_locations)} total physical locations, "
                     f"{len(self.swappable_locations)} are swappable.")
 
     def _initialize_physical_locations(self) -> List[PhysicalLocation]:
-        """
-        Creates PhysicalLocation objects from the PathFinder's data.
-        """
         locations = []
         if self.path_finder.travel_times_df is None:
             logger.error(
                 "PathFinder's travel_times_df is not loaded. Cannot initialize physical locations.")
             return []
-
-        if '面积' not in self.path_finder.travel_times_df.index:
-            logger.warning(
-                "Optimizer: '面积' row not found in travel_times_df. Areas will default to 0 for locations.")
+        # Ensure '面积' key exists or handle gracefully
+        has_area_info = '面积' in self.path_finder.travel_times_df.index
 
         for name_id_str in self.path_finder.all_name_ids:
             parts = name_id_str.split('_', 1)
             original_func_type = parts[0]
-
-            area = 0.0
-            if '面积' in self.path_finder.travel_times_df.index and \
-               name_id_str in self.path_finder.travel_times_df.columns:
+            area = 0.0  # Default area
+            if has_area_info and name_id_str in self.path_finder.travel_times_df.columns:
                 try:
-                    area = float(
-                        self.path_finder.travel_times_df.loc['面积', name_id_str])
+                    area_val = self.path_finder.travel_times_df.loc['面积', name_id_str]
+                    if pd.notna(area_val):  # Check for NaN
+                        area = float(area_val)
+                    else:
+                        logger.debug(
+                            f"Area for {name_id_str} is NaN. Defaulting to 0.")
                 except ValueError:
                     logger.warning(
                         f"Could not parse area for {name_id_str}. Defaulting to 0.")
+                except KeyError:  # Should be caught by `name_id_str in ...columns` but as a safeguard
+                    logger.warning(
+                        f"KeyError for area of {name_id_str}. Defaulting to 0.")
 
-            is_swappable = original_func_type not in self.config.CONNECTION_TYPES
+            # Determine swappability (e.g., '门' is a connection type, not swappable for a room function)
+            # This uses self.config.CONNECTION_TYPES from your NetworkConfig
+            is_swappable = original_func_type not in self.config.CONNECTION_TYPES and \
+                original_func_type not in getattr(self.config, 'BAN_TYPES_FOR_SWAP', [
+                ])  # Example of more specific ban types
+
             locations.append(PhysicalLocation(
                 name_id_str, original_func_type, area, is_swappable))
         return locations
 
     def _get_valid_swap_pairs(self) -> List[Tuple[PhysicalLocation, PhysicalLocation]]:
-        """Generates pairs of swappable physical locations that satisfy area constraints."""
         valid_pairs: List[Tuple[PhysicalLocation, PhysicalLocation]] = []
         num_swappable = len(self.swappable_locations)
         for i in range(num_swappable):
@@ -494,104 +592,134 @@ class LayoutOptimizer:
                 loc_A = self.swappable_locations[i]
                 loc_B = self.swappable_locations[j]
 
+                # Ensure original functions are different, or allow swapping same if it makes sense
+                # For now, let's assume swapping locations with the same original function is allowed
+                # if their areas match, effectively just moving a function between two identical spots.
+                # If they must have different functions to be considered a meaningful swap, add:
+                # if loc_A.original_functional_type == loc_B.original_functional_type:
+                #     continue
+
                 area_A, area_B = loc_A.area, loc_B.area
-                if area_A > 0 and area_B > 0:
+                # Handle area_A or area_B being 0 or very small if that's possible
+                if area_A > 1e-6 and area_B > 1e-6:  # Use a small epsilon for float comparison
                     if abs(area_A - area_B) / max(area_A, area_B) > self.area_tolerance_ratio:
                         continue
-                elif (area_A == 0 and area_B > 0) or (area_A > 0 and area_B == 0):
-                    if self.area_tolerance_ratio < 1.0:
+                elif (area_A <= 1e-6 and area_B > 1e-6) or \
+                     (area_A > 1e-6 and area_B <= 1e-6):
+                    # If one area is (near) zero and the other isn't,
+                    # only allow swap if tolerance is very high (e.g., >= 1.0 means ignore area diff)
+                    if self.area_tolerance_ratio < 1.0:  # A stricter interpretation
                         continue
+                # If both areas are (near) zero, they are considered compatible in terms of area
 
                 valid_pairs.append((loc_A, loc_B))
+        logger.info(
+            f"Generated {len(valid_pairs)} valid swap pairs based on area tolerance {self.area_tolerance_ratio}.")
         return valid_pairs
 
     def run_optimization(self,
                          initial_assignment: FunctionalAssignment,
                          max_iterations: int = 100
                          ) -> Tuple[FunctionalAssignment, float, List[EvaluatedWorkflowOutcome]]:
-        """
-        Runs the iterative layout optimization process.
-
-        Args:
-            initial_assignment: The starting FunctionalAssignment.
-            max_iterations: The maximum number of iterations to perform.
-
-        Returns:
-            A tuple containing:
-                - best_assignment (FunctionalAssignment): The optimized assignment.
-                - best_objective_value (float): The objective value of the best_assignment.
-                - best_outcomes (List[EvaluatedWorkflowOutcome]): Detailed outcomes for the best_assignment.
-        """
         logger.info("Starting layout optimization...")
 
-        current_assignment = initial_assignment
-        current_best_objective, current_best_outcomes = self.objective_calculator.evaluate(
-            current_assignment)
+        current_best_assignment = copy.deepcopy(
+            initial_assignment)  # Start with a copy
 
+        # Initial full evaluation and cache setup
+        self.objective_calculator.reset_cache()  # Clear any old cache
+        current_best_objective, current_best_outcomes = self.objective_calculator.evaluate(
+            assignment_to_evaluate=current_best_assignment
+            # No base_assignment or changed_locations, so it performs a full evaluation
+            # and populates its internal cache with current_best_assignment
+        )
         logger.info(f"Initial Objective Value: {current_best_objective:.2f}")
+
         if current_best_objective == float('inf'):
             logger.error(
                 "Initial assignment results in unroutable workflows. Optimization aborted.")
-            return current_assignment, current_best_objective, current_best_outcomes
+            return current_best_assignment, current_best_objective, current_best_outcomes
 
         valid_swap_pairs = self._get_valid_swap_pairs()
         if not valid_swap_pairs:
             logger.warning(
                 "No valid pairs of physical locations to swap. Optimization cannot proceed.")
-            return current_assignment, current_best_objective, current_best_outcomes
+            return current_best_assignment, current_best_objective, current_best_outcomes
 
         for iteration in range(max_iterations):
             logger.info(f"--- Iteration {iteration + 1}/{max_iterations} ---")
 
-            best_swap_this_iteration: Optional[Tuple[PhysicalLocation,
-                                                     PhysicalLocation]] = None
-            best_candidate_assignment_this_iteration: Optional[FunctionalAssignment] = None
-            objective_after_best_swap_this_iteration = current_best_objective
-            outcomes_for_best_swap_this_iteration = current_best_outcomes
+            best_swap_candidate_in_iteration: Optional[FunctionalAssignment] = None
+            # Initialize with current best
+            best_swap_objective_in_iteration = current_best_objective
+            best_swap_outcomes_in_iteration = current_best_outcomes
+            best_swapped_pair_info: Optional[Tuple[PhysicalLocation,
+                                                   PhysicalLocation]] = None
 
             num_evaluated_swaps = 0
             for loc_A, loc_B in valid_swap_pairs:
-                candidate_assignment = current_assignment.apply_functional_swap(
-                    loc_A.name_id, loc_B.name_id)
+                # Create a candidate assignment by swapping functions based on the *current_best_assignment*
+                candidate_assignment = current_best_assignment.apply_functional_swap(
+                    loc_A.name_id, loc_B.name_id
+                )
 
+                # Evaluate this candidate, providing the base for incremental calculation
                 candidate_objective, candidate_outcomes = self.objective_calculator.evaluate(
-                    candidate_assignment)
+                    assignment_to_evaluate=candidate_assignment,
+                    base_assignment_for_cache=current_best_assignment,  # The state *before* this swap
+                    # The specific swap made
+                    changed_locations=(loc_A.name_id, loc_B.name_id)
+                )
                 num_evaluated_swaps += 1
-                if num_evaluated_swaps % 100 == 0:
+                if num_evaluated_swaps % 200 == 0 and num_evaluated_swaps > 0:  # Log progress periodically
                     logger.debug(
                         f"  Evaluated {num_evaluated_swaps}/{len(valid_swap_pairs)} potential swaps in iteration {iteration+1}...")
 
-                if candidate_objective < objective_after_best_swap_this_iteration:
-                    objective_after_best_swap_this_iteration = candidate_objective
-                    best_swap_this_iteration = (loc_A, loc_B)
-                    best_candidate_assignment_this_iteration = candidate_assignment
-                    outcomes_for_best_swap_this_iteration = candidate_outcomes
+                if candidate_objective < best_swap_objective_in_iteration:
+                    best_swap_objective_in_iteration = candidate_objective
+                    best_swap_candidate_in_iteration = candidate_assignment  # This is a new object
+                    best_swap_outcomes_in_iteration = candidate_outcomes
+                    best_swapped_pair_info = (loc_A, loc_B)
 
-            if best_swap_this_iteration and best_candidate_assignment_this_iteration is not None:
-                swapped_loc_A, swapped_loc_B = best_swap_this_iteration
-                improvement = current_best_objective - objective_after_best_swap_this_iteration
+            if best_swap_candidate_in_iteration is not None and best_swap_objective_in_iteration < current_best_objective:
+                # An improvement was found in this iteration
+                improvement = current_best_objective - best_swap_objective_in_iteration
+                # Should not be None if candidate is not None
+                sw_loc_A, sw_loc_B = best_swapped_pair_info
 
                 logger.info(
-                    f"Improvement found! Swapping functions at '{swapped_loc_A.name_id}' "
-                    f"(original: {swapped_loc_A.original_functional_type}, area: {swapped_loc_A.area:.0f}) and "
-                    f"'{swapped_loc_B.name_id}' (original: {swapped_loc_B.original_functional_type}, area: {swapped_loc_B.area:.0f})."
+                    f"Improvement found! Swapping functions related to '{sw_loc_A.name_id}' "
+                    f"(Orig Func: {sw_loc_A.original_functional_type}, Area: {sw_loc_A.area:.0f}) and "
+                    f"'{sw_loc_B.name_id}' (Orig Func: {sw_loc_B.original_functional_type}, Area: {sw_loc_B.area:.0f})."
                 )
                 logger.info(
-                    f"Objective improved from {current_best_objective:.2f} to {objective_after_best_swap_this_iteration:.2f} (Gain: {improvement:.2f}).")
+                    f"Objective improved from {current_best_objective:.2f} to {best_swap_objective_in_iteration:.2f} (Gain: {improvement:.2f}).")
 
-                current_assignment = best_candidate_assignment_this_iteration
-                current_best_objective = objective_after_best_swap_this_iteration
-                current_best_outcomes = outcomes_for_best_swap_this_iteration
+                # Update the current best state for the next iteration
+                current_best_assignment = copy.deepcopy(
+                    best_swap_candidate_in_iteration)  # Store the new best assignment
+                current_best_objective = best_swap_objective_in_iteration
+                current_best_outcomes = best_swap_outcomes_in_iteration
+
+                # The objective_calculator's cache was already updated to reflect best_swap_candidate_in_iteration
+                # when it was evaluated and found to be the best in the inner loop, because evaluate() always
+                # updates its cache with the assignment_to_evaluate.
+                # So, when the next iteration starts, current_best_assignment will match the calculator's cache.
+
             else:
                 logger.info(
                     "No further improvement found in this iteration. Optimization stopped.")
-                break
+                break  # Stop if no improvement in this iteration
 
-        if iteration == max_iterations - 1 and best_swap_this_iteration:
+        if iteration == max_iterations - 1 and best_swap_candidate_in_iteration is not None and best_swap_objective_in_iteration < current_best_objective:
+            logger.info(
+                f"Reached maximum number of iterations ({max_iterations}), but was still improving.")
+        elif iteration == max_iterations - 1:
             logger.info(
                 f"Reached maximum number of iterations ({max_iterations}).")
 
         logger.info("Layout optimization finished.")
         logger.info(
             f"Final Best Objective Value: {current_best_objective:.2f}")
-        return current_assignment, current_best_objective, current_best_outcomes
+        # The current_best_outcomes corresponds to current_best_assignment
+        return current_best_assignment, current_best_objective, current_best_outcomes

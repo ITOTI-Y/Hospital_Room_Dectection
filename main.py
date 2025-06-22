@@ -254,26 +254,26 @@ def run_layout_optimization_example(app_config: NetworkConfig):
                            functional_sequence=word_detect.detect_nearest_word(
                                ['入口', '妇科', '采血处', '超声科', '妇科', '门诊药房', '入口']),
                            weight=1.0),
-        # WorkflowDefinition(workflow_id='WF_GynecologyB',
-        #                    functional_sequence=word_detect.detect_nearest_word(
-        #                        ['入口', '挂号收费', '妇科', '挂号收费', '采血处', '超声科', '妇科', '挂号收费', '门诊药房', '入口']),
-        #                    weight=1.0),
-        # WorkflowDefinition(workflow_id='WF_PulmonologyA',
-        #                    functional_sequence=word_detect.detect_nearest_word(
-        #                        ['入口', '呼吸内科', '采血处', '放射科', '呼吸内科', '门诊药房', '入口']),
-        #                    weight=0.5),
-        # WorkflowDefinition(workflow_id='WF_PulmonologyB',
-        #                    functional_sequence=word_detect.detect_nearest_word(
-        #                        ['入口', '挂号收费', '呼吸内科', '挂号收费', '采血处', '放射科', '呼吸内科', '挂号收费', '门诊药房', '入口']),
-        #                    weight=0.5),
-        # WorkflowDefinition(workflow_id='WF_CardiologyA',
-        #                    functional_sequence=word_detect.detect_nearest_word(
-        #                        ['入口', '心血管内科', '采血处', '超声科', '放射科', '心血管内科', '门诊药房', '入口']),
-        #                    weight=1.2),
-        # WorkflowDefinition(workflow_id='WF_CardiologyB',
-        #                    functional_sequence=word_detect.detect_nearest_word(
-        #                        ['入口', '挂号收费', '心血管内科', '挂号收费', '采血处', '超声科', '放射科', '心血管内科', '挂号收费', '门诊药房', '入口']),
-        #                    weight=1.2),
+        WorkflowDefinition(workflow_id='WF_GynecologyB',
+                           functional_sequence=word_detect.detect_nearest_word(
+                               ['入口', '挂号收费', '妇科', '挂号收费', '采血处', '超声科', '妇科', '挂号收费', '门诊药房', '入口']),
+                           weight=1.0),
+        WorkflowDefinition(workflow_id='WF_PulmonologyA',
+                           functional_sequence=word_detect.detect_nearest_word(
+                               ['入口', '呼吸内科', '采血处', '放射科', '呼吸内科', '门诊药房', '入口']),
+                           weight=0.5),
+        WorkflowDefinition(workflow_id='WF_PulmonologyB',
+                           functional_sequence=word_detect.detect_nearest_word(
+                               ['入口', '挂号收费', '呼吸内科', '挂号收费', '采血处', '放射科', '呼吸内科', '挂号收费', '门诊药房', '入口']),
+                           weight=0.5),
+        WorkflowDefinition(workflow_id='WF_CardiologyA',
+                           functional_sequence=word_detect.detect_nearest_word(
+                               ['入口', '心血管内科', '采血处', '超声科', '放射科', '心血管内科', '门诊药房', '入口']),
+                           weight=1.2),
+        WorkflowDefinition(workflow_id='WF_CardiologyB',
+                           functional_sequence=word_detect.detect_nearest_word(
+                               ['入口', '挂号收费', '心血管内科', '挂号收费', '采血处', '超声科', '放射科', '心血管内科', '挂号收费', '门诊药房', '入口']),
+                           weight=1.2),
     ]
     main_logger.info(
         f"Defined {len(workflow_defs)} workflows for optimization.")
