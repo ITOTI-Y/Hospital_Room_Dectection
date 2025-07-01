@@ -16,10 +16,6 @@ import pathlib  # For path operations
 import os  # For os.path.join if needed, but prefer pathlib
 from typing import Dict, List, Optional
 
-# 
-import cProfile
-import snakeviz
-
 # Import necessary modules from the 'src' package
 # Assuming COLOR_MAP is still defined in config
 from src.config import NetworkConfig, COLOR_MAP
@@ -360,7 +356,7 @@ def initialize_setup():
 
 
 if __name__ == "__main__":
-    main_logger, app_config, app_color_map_data = initialize_setup()
+    # main_logger, app_config, app_color_map_data = initialize_setup()
 
     # ---- Example 1: Single-floor network (optional) ----
     # main_logger.info("Attempting to run single-floor example...")
@@ -379,13 +375,16 @@ if __name__ == "__main__":
     #     total_time = finder.calculate_flow_total_time(flow)
 
     # ---- Example 4: Layout Optimization ----
-    travel_times_csv_path = app_config.RESULT_PATH / 'super_network_travel_times.csv'
-    if not travel_times_csv_path.exists():
-        main_logger.warning(f"{travel_times_csv_path} not found.")
-        main_logger.warning("Please ensure `super_network_travel_times.csv` is generated first "
-                            "(e.g., by running `run_multi_floor_example`).")
-        main_logger.warning("Skipping layout optimization example.")
-    else:
-        run_layout_optimization_example(app_config)
+    # travel_times_csv_path = app_config.RESULT_PATH / 'super_network_travel_times.csv'
+    # if not travel_times_csv_path.exists():
+    #     main_logger.warning(f"{travel_times_csv_path} not found.")
+    #     main_logger.warning("Please ensure `super_network_travel_times.csv` is generated first "
+    #                         "(e.g., by running `run_multi_floor_example`).")
+    #     main_logger.warning("Skipping layout optimization example.")
+    # else:
+    #     run_layout_optimization_example(app_config)
 
-    main_logger.info("Application finished.")
+    # ---- Example 5: RL Optimizer ----
+
+    # main_logger.info("Application finished.")
+    pass

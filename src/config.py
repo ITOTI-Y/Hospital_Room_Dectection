@@ -132,3 +132,97 @@ class NetworkConfig:
         # Ensure paths exist
         self.RESULT_PATH.mkdir(parents=True, exist_ok=True)
         self.DEBUG_PATH.mkdir(parents=True, exist_ok=True)
+
+class RLConfig:
+    """存储用于基于强化学习的布局优化的所有配置参数。
+
+    Attributes:
+        ROOT_PATH (pathlib.Path): 项目的根目录路径。
+        RL_OPTIMIZER_PATH (pathlib.Path): RL优化器模块的根目录。
+        DATA_PATH (pathlib.Path): RL优化器的数据目录。
+        CACHE_PATH (pathlib.Path): 用于存放所有自动生成的中间文件的缓存目录。
+        LOG_PATH (pathlib.Path): 用于存放训练日志和模型的目录。
+        TRAVEL_TIMES_CSV (pathlib.Path): 原始通行时间矩阵的CSV文件路径。
+        PROCESS_TEMPLATES_JSON (pathlib.Path): 用户定义的就医流程模板文件路径。
+        NODE_VARIANTS_JSON (pathlib.Path): 自动生成的节点变体缓存文件路径。
+        TRAFFIC_DISTRIBUTION_JSON (pathlib.Path): 自动生成的流量分布缓存文件路径。
+        RESOLVED_PATHWAYS_PKL (pathlib.Path): 最终解析出的流线数据缓存文件路径。
+        COST_MATRIX_CACHE (pathlib.Path): 预计算成本矩阵的缓存文件路径。
+        AREA_SCALING_FACTOR (float): 科室面积允许的缩放容差。
+        MANDATORY_ADJACENCY (List[List[str]]): 强制相邻的科室对列表。
+        PREFERRED_ADJACENCY (Dict[str, List[List[str]]]): 偏好相邻（软约束）的科室对字典。
+        FIXED_NODE_TYPES (List[str]): 在布局中位置固定、不参与优化的节点类型列表。
+        EMBEDDING_DIM (int): 节点嵌入向量的维度。
+        TRANSFORMER_HEADS (int): Transformer编码器中的多头注意力头数。
+        TRANSFORMER_LAYERS (int): Transformer编码器的层数。
+        FEATURES_DIM (int): 特征提取器输出的特征维度。
+        LEARNING_RATE (float): 优化器的学习率。
+        NUM_ENVS (int): 用于训练的并行环境数量。
+        NUM_STEPS (int): 每个环境在每次更新前收集的数据步数。
+        TOTAL_TIMESTEPS (int): 训练的总时间步数。
+        GAMMA (float): 奖励的折扣因子。
+        GAE_LAMBDA (float): 通用优势估计(GAE)的lambda参数。
+        CLIP_EPS (float): PPO中的裁剪范围。
+        ENT_COEF (float): 熵损失的系数，用于鼓励探索。
+        BATCH_SIZE (int): 每个优化轮次中使用的批大小。
+        NUM_EPOCHS (int): 每次收集数据后，对数据进行优化的轮次。
+        REWARD_TIME_WEIGHT (float): 奖励函数中通行时间成本的权重。
+        REWARD_ADJACENCY_WEIGHT (float): 奖励函数中相邻性偏好的权重。
+    """
+
+    def __init__(self):
+        # --- 路径配置 (使用Pathlib) ---
+        self.ROOT_PATH: pathlib.Path = pathlib.Path(__file__).parent.parent
+        self.RL_OPTIMIZER_PATH: pathlib.Path = self.ROOT_PATH / 'src' / 'rl_optimizer'
+        self.DATA_PATH: pathlib.Path = self.RL_OPTIMIZER_PATH / 'data'
+        self.CACHE_PATH: pathlib.Path = self.DATA_PATH / 'cache'
+        self.LOG_PATH: pathlib.Path = self.ROOT_PATH / 'logs'
+        self.RESULT_PATH: pathlib.Path = self.ROOT_PATH / 'result'
+
+        # --- 输入文件 ---
+        self.TRAVEL_TIMES_CSV: pathlib.Path = self.ROOT_PATH / 'result' / 'super_network_travel_times.csv'
+        self.PROCESS_TEMPLATES_JSON: pathlib.Path = self.DATA_PATH / 'process_templates.json'
+
+        # --- 自动生成/缓存的中间文件 ---
+        self.NODE_VARIANTS_JSON: pathlib.Path = self.CACHE_PATH / 'node_variants.json'
+        self.TRAFFIC_DISTRIBUTION_JSON: pathlib.Path = self.CACHE_PATH / 'traffic_distribution.json'
+        self.RESOLVED_PATHWAYS_PKL: pathlib.Path = self.CACHE_PATH / 'resolved_pathways.pkl'
+        self.COST_MATRIX_CACHE: pathlib.Path = self.CACHE_PATH / 'cost_precomputation.npz'
+
+        # --- 约束配置 ---
+        self.AREA_SCALING_FACTOR: float = 0.10
+        self.MANDATORY_ADJACENCY: List[List[str]] = []  # 例如: [['手术室_30007', '中心供应室_10003']]
+        self.PREFERRED_ADJACENCY: Dict[str, List[List[str]]] = {
+            'positive': [], # 例如: [['检验中心_10007', '采血处_20007']]
+            'negative': []  # 例如: [['儿科_10006', '急诊科_1']]
+        }
+        self.FIXED_NODE_TYPES: List[str] = [
+            '门', '楼梯', '电梯', '扶梯', '走廊', '墙', '栏杆', 
+            '室外', '绿化', '中庭', '空房间'
+        ]
+
+        # --- 模型超参数 ---
+        self.EMBEDDING_DIM: int = 128
+        self.TRANSFORMER_HEADS: int = 4
+        self.TRANSFORMER_LAYERS: int = 4
+        self.FEATURES_DIM: int = 256
+        self.LEARNING_RATE: float = 3e-4
+
+        # --- PPO 训练超参数 ---
+        self.NUM_ENVS: int = 8
+        self.NUM_STEPS: int = 512
+        self.TOTAL_TIMESTEPS: int = 5_000_000
+        self.GAMMA: float = 0.99
+        self.GAE_LAMBDA: float = 0.95
+        self.CLIP_EPS: float = 0.2
+        self.ENT_COEF: float = 0.01
+        self.BATCH_SIZE: int = 64
+        self.NUM_EPOCHS: int = 10
+
+        # --- 软约束奖励权重 ---
+        self.REWARD_TIME_WEIGHT: float = 1.0
+        self.REWARD_ADJACENCY_WEIGHT: float = 0.1
+
+        # 确保关键路径存在
+        self.CACHE_PATH.mkdir(parents=True, exist_ok=True)
+        self.LOG_PATH.mkdir(parents=True, exist_ok=True)

@@ -15,7 +15,7 @@ The content is organized as follows:
 2. Repository information
 3. Directory structure
 4. Repository files (if enabled)
-4. Repository files, each consisting of:
+5. Multiple file entries, each consisting of:
   - File path as an attribute
   - Full contents of the file
 </file_format>
@@ -38,10 +38,6 @@ The content is organized as follows:
 - Files are sorted by Git change count (files with more changes are at the bottom)
 </notes>
 
-<additional_info>
-
-</additional_info>
-
 </file_summary>
 
 <directory_structure>
@@ -62,10 +58,1339 @@ src/network/super_network.py
 src/optimization/optimizer.py
 src/plotting/__init__.py
 src/plotting/plotter.py
+src/rl_optimizer/agent/ppo_agent.py
+src/rl_optimizer/data/cache_manager.py
+src/rl_optimizer/data/cache/node_variants.json
+src/rl_optimizer/data/cache/traffic_distribution.json
+src/rl_optimizer/data/process_templates.json
+src/rl_optimizer/env/cost_calculator.py
+src/rl_optimizer/env/layout_env.py
+src/rl_optimizer/model/policy_network.py
+src/rl_optimizer/utils/setup.py
 </directory_structure>
 
 <files>
 This section contains the contents of the repository's files.
+
+<file path="src/rl_optimizer/agent/ppo_agent.py">
+# src/rl_optimizer/agent/ppo_agent.py
+
+import gymnasium as gym
+import torch
+from stable_baselines3 import PPO
+from stable_baselines3.common.env_util import make_vec_env
+from stable_baselines3.common.callbacks import EvalCallback
+from sb3_contrib import MaskablePPO
+from sb3_contrib.common.wrappers import ActionMasker
+from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
+from typing import Dict, Any, List, Callable
+import numpy as np
+import time
+
+from src.config import RLConfig
+from src.rl_optimizer.data.cache_manager import CacheManager
+from src.rl_optimizer.env.cost_calculator import CostCalculator
+from src.rl_optimizer.env.layout_env import LayoutEnv
+from src.rl_optimizer.model.policy_network import LayoutTransformer
+from src.rl_optimizer.utils.setup import setup_logger, save_json
+
+logger = setup_logger(__name__)
+
+def get_action_mask_from_info(infos: List[Dict]) -> np.ndarray:
+    """
+    一个辅助函数，用于从矢量化环境的info字典列表中提取动作掩码。
+    这是为了适配 `stable-baselines3` 的 `ActionMasker` 包装器。
+
+    Args:
+        infos (List[Dict]): 来自矢量化环境的info字典列表。
+
+    Returns:
+        np.ndarray: 合法的动作掩码堆叠成的数组。
+    """
+    return np.array([info.get("action_mask", []) for info in infos])
+
+class PPOAgent:
+    """
+    PPO智能体，负责编排整个强化学习训练和评估流程。
+
+    它使用stable-baselines3和sb3-contrib库来高效地实现MaskablePPO算法，
+    该算法能够处理带有动作掩码的复杂决策问题。
+    """
+
+    def __init__(self, config: RLConfig, cache_manager: CacheManager, cost_calculator: CostCalculator):
+        """
+        初始化PPO智能体。
+
+        Args:
+            config (RLConfig): RL优化器的配置对象。
+            cache_manager (CacheManager): 已初始化的数据缓存管理器。
+            cost_calculator (CostCalculator): 已初始化的成本计算器。
+        """
+        self.config = config
+        self.cm = cache_manager
+        self.cc = cost_calculator
+
+        # 将所有需要传递给环境的参数打包成一个字典
+        self.env_kwargs = {
+            "config": self.config,
+            "cache_manager": self.cm,
+            "cost_calculator": self.cc
+        }
+
+    def train(self):
+        """
+        启动并执行完整的训练流程。
+        """
+        logger.info("开始配置和启动PPO训练流程...")
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        log_dir = self.config.LOG_PATH / f"ppo_layout_{timestamp}"
+        result_dir = self.config.RESULT_PATH / f"ppo_layout_{timestamp}"
+
+        # --- 1. 创建并行化的、支持掩码的矢量化环境 ---
+        logger.info(f"正在创建 {self.config.NUM_ENVS} 个并行环境...")
+
+        # 构建单个带掩码的环境
+        vec_env = make_vec_env(
+            lambda: ActionMasker(LayoutEnv(**self.env_kwargs), LayoutEnv._action_mask_fn),
+            n_envs=self.config.NUM_ENVS
+        )
+
+        logger.info("矢量化环境创建成功。")
+
+        # --- 2. 配置PPO模型 ---
+        # 定义策略网络的关键字参数，指定自定义的特征提取器
+        policy_kwargs = {
+            "features_extractor_class": LayoutTransformer,
+            "features_extractor_kwargs": {
+                "config": self.config,
+                "features_dim": self.config.FEATURES_DIM
+            },
+            # 定义Actor和Critic网络的隐藏层结构
+            "net_arch": [256, 256] 
+        }
+
+        # 定义评估回调函数，用于在训练过程中定期评估模型并保存最优模型
+        eval_env = ActionMasker(LayoutEnv(**self.env_kwargs), LayoutEnv._action_mask_fn)
+        eval_callback = EvalCallback(
+            eval_env,
+            best_model_save_path=str(result_dir / 'best_model'),
+            log_path=str(log_dir / 'eval_logs'),
+            eval_freq=max(self.config.NUM_STEPS * 5, 2048),
+            deterministic=True,
+            render=False,
+            n_eval_episodes=20 # 评估更多回合以获得更稳定的结果
+        )
+
+        logger.info("正在初始化MaskablePPO模型...")
+        model = MaskablePPO(
+            MaskableActorCriticPolicy,
+            vec_env,
+            policy_kwargs=policy_kwargs,
+            learning_rate=self.config.LEARNING_RATE,
+            n_steps=self.config.NUM_STEPS,
+            batch_size=self.config.BATCH_SIZE,
+            n_epochs=self.config.NUM_EPOCHS,
+            gamma=self.config.GAMMA,
+            gae_lambda=self.config.GAE_LAMBDA,
+            clip_range=self.config.CLIP_EPS,
+            ent_coef=self.config.ENT_COEF,
+            verbose=1,
+            tensorboard_log=str(log_dir / 'tensorboard_logs'),
+            device='cuda' if torch.cuda.is_available() else 'cpu'
+        )
+        logger.info(f"模型初始化成功，将在 {model.device.type} 设备上进行训练。")
+
+        # --- 3. 启动训练 ---
+        logger.info(f"开始训练，总时间步数: {self.config.TOTAL_TIMESTEPS}...")
+        logger.info(f"日志和模型将保存在: {log_dir}")
+        try:
+            model.learn(
+                total_timesteps=self.config.TOTAL_TIMESTEPS,
+                callback=eval_callback,
+                progress_bar=True
+            )
+        except KeyboardInterrupt:
+            logger.warning("训练被手动中断。")
+        finally:
+            # --- 4. 保存最终模型 ---
+            final_model_path = log_dir / 'final_model.zip'
+            model.save(final_model_path)
+            logger.info(f"训练结束，最终模型已保存至: {final_model_path}")
+            vec_env.close()
+
+    def evaluate(self, model_path: str) -> Dict[str, Any]:
+        """
+        加载一个已训练好的模型，进行确定性评估并返回最优布局方案。
+
+        Args:
+            model_path (str): 已保存模型的路径 (.zip 文件)。
+
+        Returns:
+            Dict[str, Any]: 包含最优布局、总成本和各流程成本的结果字典。
+        """
+        logger.info(f"正在加载模型进行评估: {model_path}...")
+        try:
+            model = MaskablePPO.load(model_path, device='cpu')
+        except FileNotFoundError:
+            logger.error(f"模型文件未找到: {model_path}")
+            return {}
+        
+        eval_env = LayoutEnv(**self.env_kwargs)
+
+        obs, info = eval_env.reset()
+        terminated = False
+
+        while not terminated:
+            action_mask = eval_env.get_action_mask()
+            action, _states = model.predict(obs, action_masks=action_mask, deterministic=True)
+            obs, reward, terminated, _, info = eval_env.step(int(action))
+
+        final_layout_str = eval_env._get_final_layout_str()
+        total_cost = self.cc.calculate_total_cost(final_layout_str)
+        per_process_cost = self.cc.calculate_per_process_cost(final_layout_str)
+
+        # 构建最终的布局映射：槽位 -> 科室
+        final_layout_map = {
+            slot: dept for slot, dept in zip(eval_env.placeable_slots, final_layout_str)
+            if dept is not None
+        }
+
+        results = {
+            "best_layout": final_layout_map,
+            "total_weighted_cost": total_cost,
+            "per_process_unweighted_cost": per_process_cost,
+            "final_reward_from_env": reward
+        }
+
+        result_path = self.config.LOG_PATH / 'best_layout_result.json'
+        save_json(results, result_path)
+        logger.info(f"评估完成！最优布局已保存至: {result_path}")
+        logger.info(f"最优布局的总加权成本为: {total_cost:.2f}")
+
+        return results
+</file>
+
+<file path="src/rl_optimizer/data/cache_manager.py">
+import pandas as pd
+from pathlib import Path
+from typing import Dict, List, Tuple, Any
+from collections import defaultdict
+import itertools
+
+from src.config import RLConfig
+from src.rl_optimizer.utils.setup import setup_logger, save_json, load_json, save_pickle, load_pickle
+
+logger = setup_logger(__name__)
+
+class CacheManager:
+
+    def __init__(self, config: RLConfig):
+        """
+        初始化缓存管理器，并处理所有数据的加载和预计算。
+
+        Args:
+            config (RLConfig): RL优化器的配置对象。
+        """
+        self.config = config
+
+        # --- 1. 加载和处理基础数据 ---
+        self.raw_travel_times_df = self._load_raw_travel_times()
+        self.node_data = self._load_and_process_node_data(self.raw_travel_times_df)
+        self.travel_times_matrix = self.raw_travel_times_df.drop('面积', errors='ignore')
+
+        # --- 2. 节点分类与封装 ---
+        # 核心逻辑：所有节点分类都在此处完成并封装
+        fixed_mask = self.node_data['generic_name'].isin(config.FIXED_NODE_TYPES)
+        self.all_nodes_list: List[str] = self.node_data['node_id'].tolist()
+        self.placeable_nodes_df: pd.DataFrame = self.node_data[~fixed_mask].copy()
+        self.fixed_nodes_df: pd.DataFrame = self.node_data[fixed_mask].copy()
+
+        # 公开给外部使用的、清晰的属性
+        self.placeable_departments: List[str] = self.placeable_nodes_df['node_id'].tolist()
+        self.placeable_slots: List[str] = self.placeable_nodes_df['node_id'].tolist()
+
+        # --- 3. 解析流程与流线 ---
+        self.variants = self.get_node_variants()
+        self.traffic = self.get_traffic_distribution()
+        self.resolved_pathways = self.get_resolved_pathways()
+
+    def _load_raw_travel_times(self) -> pd.DataFrame:
+        """加载原始CSV文件。"""
+        if not self.config.TRAVEL_TIMES_CSV.exists():
+            logger.error(f"致命错误: 原始通行时间文件未找到: {self.config.TRAVEL_TIMES_CSV}")
+            raise FileNotFoundError(f"原始通行时间文件未找到: {self.config.TRAVEL_TIMES_CSV}")
+        return pd.read_csv(self.config.TRAVEL_TIMES_CSV, index_col=0)
+
+    def _load_and_process_node_data(self, df: pd.DataFrame) -> pd.DataFrame:
+        """从已加载的DataFrame中解析节点和面积。"""
+        logger.info("正在处理节点数据...")
+        node_ids = df.columns.tolist()
+        
+        if '面积' not in df.index:
+            raise ValueError("CSV文件中必须包含名为'面积'的最后一行。")
+        area_series = df.loc['面积']
+
+        if not all(node_id in area_series.index for node_id in node_ids):
+             raise ValueError("CSV文件的列标题与'面积'行的索引不完全匹配。请检查文件格式。")
+
+        nodes_list = [{'node_id': node_id, 'area': area_series[node_id]} for node_id in node_ids]
+        all_nodes_df = pd.DataFrame(nodes_list)
+        all_nodes_df['generic_name'] = all_nodes_df['node_id'].apply(lambda x: str(x).split('_')[0])
+        
+        logger.info(f"成功处理了 {len(all_nodes_df)} 个唯一节点及其面积。")
+        return all_nodes_df
+
+    def get_node_variants(self) -> Dict[str, List[str]]:
+        """
+        获取节点变体映射。如果缓存存在则加载，否则从节点数据生成。
+        """
+        if self.config.NODE_VARIANTS_JSON.exists():
+            logger.info(f"从缓存加载节点变体: {self.config.NODE_VARIANTS_JSON}")
+            return load_json(self.config.NODE_VARIANTS_JSON)
+        
+        logger.info("缓存未找到，正在生成节点变体...")
+        variants = self.node_data.groupby('generic_name')['node_id'].apply(list).to_dict()
+        save_json(variants, self.config.NODE_VARIANTS_JSON)
+        logger.info(f"节点变体已生成并缓存至: {self.config.NODE_VARIANTS_JSON}")
+        return variants
+    
+    def get_traffic_distribution(self) -> Dict[str, Dict[str, float]]:
+        """
+        获取流量分布。如果缓存存在则加载，否则基于变体生成初始权重。
+        """
+        if self.config.TRAFFIC_DISTRIBUTION_JSON.exists():
+            logger.info(f"从缓存加载流量分布: {self.config.TRAFFIC_DISTRIBUTION_JSON}")
+            return load_json(self.config.TRAFFIC_DISTRIBUTION_JSON)
+            
+        logger.info("缓存未找到，正在生成初始流量分布...")
+        traffic_distribution = {
+            generic_name: {node: 1.0 for node in specific_nodes}
+            for generic_name, specific_nodes in self.variants.items()
+        }
+        save_json(traffic_distribution, self.config.TRAFFIC_DISTRIBUTION_JSON)
+        logger.info(f"初始流量分布已生成并缓存至: {self.config.TRAFFIC_DISTRIBUTION_JSON}")
+        return traffic_distribution
+    
+    def get_resolved_pathways(self) -> List[Tuple[List[str], float]]:
+        """
+        获取最终解析出的流线列表。这是调度核心，如果缓存不存在则触发解析。
+        """
+        if self.config.RESOLVED_PATHWAYS_PKL.exists():
+            logger.info(f"从缓存加载已解析的流线: {self.config.RESOLVED_PATHWAYS_PKL}")
+            return load_pickle(self.config.RESOLVED_PATHWAYS_PKL)
+
+        logger.info("缓存未找到，正在解析就医流程以生成具体流线...")
+        
+        try:
+            templates = load_json(self.config.PROCESS_TEMPLATES_JSON)
+        except FileNotFoundError:
+            logger.error(f"致命错误: 就医流程模板文件未找到: {self.config.PROCESS_TEMPLATES_JSON}")
+            raise
+        
+        resolved_pathways = []
+        for template in templates:
+            resolved_pathways.extend(self._resolve_single_template(template))
+        
+        save_pickle(resolved_pathways, self.config.RESOLVED_PATHWAYS_PKL)
+        logger.info(f"所有流线已解析并缓存 ({len(resolved_pathways)}条): {self.config.RESOLVED_PATHWAYS_PKL}")
+        return resolved_pathways
+    
+    def _resolve_single_template(self, template: Dict[str, Any]) -> List[Tuple[List[str], float]]:
+        """
+        根据单个流程模板，高效地解析出所有可能的具体流线及其权重。
+        该方法能正确处理端点（如门）和核心路径节点权重的不同计算逻辑。
+
+        Args:
+            template (Dict[str, Any]): 单个就医流程的模板字典。
+
+        Returns:
+            List[Tuple[List[str], float]]: 一个包含(具体流线, 最终权重)元组的列表。
+        """
+        base_weight = template.get('base_weight', 1.0)
+
+        # 1. 准备所有部分的选项列表
+        start_nodes_options = [self.variants.get(gn, [gn]) for gn in template['start_nodes']]
+        core_sequences_options = [self.variants.get(gn, [gn]) for gn in template['core_sequence']]
+        end_nodes_options = [self.variants.get(gn, [gn]) for gn in template['end_nodes']]
+
+        # 2. 一次性计算所有组合的笛卡尔积
+        # 注意：我们将起点、核心和终点的组合分开处理，以便应用不同的权重逻辑
+        start_combinations = list(itertools.product(*start_nodes_options))
+        core_combinations = list(itertools.product(*core_sequences_options))
+        end_combinations = list(itertools.product(*end_nodes_options))
+
+        pathways = []
+        # 3. 组合并计算权重 (恢复使用清晰的三重循环，因为逻辑已变得复杂)
+        for start_combo in start_combinations:
+            for core_combo in core_combinations:
+                for end_combo in end_combinations:
+                    
+                    # --- 权重计算开始 ---
+                    final_weight = base_weight
+                    
+                    # a. 计算起点的权重 (总是计算)
+                    for node in start_combo:
+                        final_weight *= self._get_normalized_weight(node)
+                        
+                    # b. 计算核心路径的权重 (每个通用名只计算一次)
+                    processed_core_generics = set()
+                    for node in core_combo:
+                        generic_name = str(node).split('_')[0]
+                        if generic_name not in processed_core_generics:
+                            final_weight *= self._get_normalized_weight(node)
+                            processed_core_generics.add(generic_name)
+
+                    # c. 计算终点的权重 (总是计算)
+                    for node in end_combo:
+                        final_weight *= self._get_normalized_weight(node)
+
+                    # --- 权重计算结束 ---
+
+                    # 拼接成完整流线
+                    full_path = list(start_combo) + list(core_combo) + list(end_combo)
+                    pathways.append({
+                        "process_id": template['process_id'],
+                        "path": full_path,
+                        "weight": final_weight
+                    })
+            
+        return pathways
+    
+    def _get_normalized_weight(self, node_name: str) -> float:
+        """
+        计算单个节点的归一化流量权重。
+        如果一个通用名下只有一个变体，其权重因子为1.0。
+        """
+        generic_name = str(node_name).split('_')[0]
+        # 使用 self.traffic，它是在 __init__ 中加载或生成的
+        distribution_map = self.traffic.get(generic_name)
+        
+        # 如果找不到分布或只有一个变体，则权重因子为1
+        if not distribution_map or len(distribution_map) <= 1:
+            return 1.0
+
+        total_weight = sum(distribution_map.values())
+        if total_weight == 0:
+            logger.warning(f"通用名 '{generic_name}' 的总权重为0，无法进行归一化。")
+            return 0.0
+
+        raw_weight = distribution_map.get(node_name, 0.0)
+        return raw_weight / total_weight
+</file>
+
+<file path="src/rl_optimizer/data/cache/node_variants.json">
+{
+  "ICU": [
+    "ICU_30013"
+  ],
+  "NICU": [
+    "NICU_30012"
+  ],
+  "中医科": [
+    "中医科_10008",
+    "中医科_40003"
+  ],
+  "中心供应室": [
+    "中心供应室_10003"
+  ],
+  "产前诊断门诊": [
+    "产前诊断门诊_30009"
+  ],
+  "产科": [
+    "产科_30006"
+  ],
+  "介入科": [
+    "介入科_20013"
+  ],
+  "儿科": [
+    "儿科_10006"
+  ],
+  "全科": [
+    "全科_10004"
+  ],
+  "内诊药房": [
+    "内诊药房_10001"
+  ],
+  "内镜中心": [
+    "内镜中心_20002"
+  ],
+  "口腔一区": [
+    "口腔一区_40005"
+  ],
+  "口腔科二区": [
+    "口腔科二区_40009"
+  ],
+  "呼吸内科": [
+    "呼吸内科_20011"
+  ],
+  "妇科": [
+    "妇科_30005"
+  ],
+  "心血管内科": [
+    "心血管内科_20006"
+  ],
+  "急诊科": [
+    "急诊科_1"
+  ],
+  "手术室": [
+    "手术室_30007",
+    "手术室_40007"
+  ],
+  "挂号收费": [
+    "挂号收费_10002",
+    "挂号收费_20001",
+    "挂号收费_30001",
+    "挂号收费_40001"
+  ],
+  "放射科": [
+    "放射科_10005"
+  ],
+  "检验中心": [
+    "检验中心_10007",
+    "检验中心_20003"
+  ],
+  "泌尿外科": [
+    "泌尿外科_30003"
+  ],
+  "消化内科": [
+    "消化内科_20004"
+  ],
+  "烧伤整形科": [
+    "烧伤整形科_30011"
+  ],
+  "生殖医学科": [
+    "生殖医学科_30010"
+  ],
+  "甲状腺外科": [
+    "甲状腺外科_30002"
+  ],
+  "病理科": [
+    "病理科_20008"
+  ],
+  "皮肤科": [
+    "皮肤科_40006"
+  ],
+  "眼科": [
+    "眼科_40002"
+  ],
+  "神经内科": [
+    "神经内科_20010"
+  ],
+  "综合激光科": [
+    "综合激光科_40010"
+  ],
+  "耳鼻喉科": [
+    "耳鼻喉科_40004"
+  ],
+  "肝胆胰外科": [
+    "肝胆胰外科_30004"
+  ],
+  "肾内科": [
+    "肾内科_20005"
+  ],
+  "肿瘤科": [
+    "肿瘤科_20012"
+  ],
+  "超声科": [
+    "超声科_10009"
+  ],
+  "透析中心": [
+    "透析中心_30008"
+  ],
+  "采血处": [
+    "采血处_20007"
+  ],
+  "门": [
+    "门_11072",
+    "门_11083",
+    "门_11086",
+    "门_11087",
+    "门_11093",
+    "门_11094",
+    "门_11112",
+    "门_11113",
+    "门_11116",
+    "门_11118",
+    "门_11119",
+    "门_11122",
+    "门_11145",
+    "门_11146",
+    "门_11147",
+    "门_11149",
+    "门_11153",
+    "门_11154",
+    "门_11155",
+    "门_11165"
+  ],
+  "门诊手术室": [
+    "门诊手术室_40008"
+  ],
+  "骨科": [
+    "骨科_20009"
+  ]
+}
+</file>
+
+<file path="src/rl_optimizer/data/cache/traffic_distribution.json">
+{
+  "ICU": {
+    "ICU_30013": 1.0
+  },
+  "NICU": {
+    "NICU_30012": 1.0
+  },
+  "中医科": {
+    "中医科_10008": 1.0,
+    "中医科_40003": 1.0
+  },
+  "中心供应室": {
+    "中心供应室_10003": 1.0
+  },
+  "产前诊断门诊": {
+    "产前诊断门诊_30009": 1.0
+  },
+  "产科": {
+    "产科_30006": 1.0
+  },
+  "介入科": {
+    "介入科_20013": 1.0
+  },
+  "儿科": {
+    "儿科_10006": 1.0
+  },
+  "全科": {
+    "全科_10004": 1.0
+  },
+  "内诊药房": {
+    "内诊药房_10001": 1.0
+  },
+  "内镜中心": {
+    "内镜中心_20002": 1.0
+  },
+  "口腔一区": {
+    "口腔一区_40005": 1.0
+  },
+  "口腔科二区": {
+    "口腔科二区_40009": 1.0
+  },
+  "呼吸内科": {
+    "呼吸内科_20011": 1.0
+  },
+  "妇科": {
+    "妇科_30005": 1.0
+  },
+  "心血管内科": {
+    "心血管内科_20006": 1.0
+  },
+  "急诊科": {
+    "急诊科_1": 1.0
+  },
+  "手术室": {
+    "手术室_30007": 1.0,
+    "手术室_40007": 1.0
+  },
+  "挂号收费": {
+    "挂号收费_10002": 1.0,
+    "挂号收费_20001": 1.0,
+    "挂号收费_30001": 1.0,
+    "挂号收费_40001": 1.0
+  },
+  "放射科": {
+    "放射科_10005": 1.0
+  },
+  "检验中心": {
+    "检验中心_10007": 1.0,
+    "检验中心_20003": 1.0
+  },
+  "泌尿外科": {
+    "泌尿外科_30003": 1.0
+  },
+  "消化内科": {
+    "消化内科_20004": 1.0
+  },
+  "烧伤整形科": {
+    "烧伤整形科_30011": 1.0
+  },
+  "生殖医学科": {
+    "生殖医学科_30010": 1.0
+  },
+  "甲状腺外科": {
+    "甲状腺外科_30002": 1.0
+  },
+  "病理科": {
+    "病理科_20008": 1.0
+  },
+  "皮肤科": {
+    "皮肤科_40006": 1.0
+  },
+  "眼科": {
+    "眼科_40002": 1.0
+  },
+  "神经内科": {
+    "神经内科_20010": 1.0
+  },
+  "综合激光科": {
+    "综合激光科_40010": 1.0
+  },
+  "耳鼻喉科": {
+    "耳鼻喉科_40004": 1.0
+  },
+  "肝胆胰外科": {
+    "肝胆胰外科_30004": 1.0
+  },
+  "肾内科": {
+    "肾内科_20005": 1.0
+  },
+  "肿瘤科": {
+    "肿瘤科_20012": 1.0
+  },
+  "超声科": {
+    "超声科_10009": 1.0
+  },
+  "透析中心": {
+    "透析中心_30008": 1.0
+  },
+  "采血处": {
+    "采血处_20007": 1.0
+  },
+  "门": {
+    "门_11072": 1.0,
+    "门_11083": 1.0,
+    "门_11086": 1.0,
+    "门_11087": 1.0,
+    "门_11093": 1.0,
+    "门_11094": 1.0,
+    "门_11112": 1.0,
+    "门_11113": 1.0,
+    "门_11116": 1.0,
+    "门_11118": 1.0,
+    "门_11119": 1.0,
+    "门_11122": 1.0,
+    "门_11145": 1.0,
+    "门_11146": 1.0,
+    "门_11147": 1.0,
+    "门_11149": 1.0,
+    "门_11153": 1.0,
+    "门_11154": 1.0,
+    "门_11155": 1.0,
+    "门_11165": 1.0
+  },
+  "门诊手术室": {
+    "门诊手术室_40008": 1.0
+  },
+  "骨科": {
+    "骨科_20009": 1.0
+  }
+}
+</file>
+
+<file path="src/rl_optimizer/data/process_templates.json">
+[
+    {
+        "process_id": "STD_CHECKUP",
+        "description": "标准体检流程",
+        "core_sequence": ["挂号", "全科", "采血处", "检验中心", "放射科", "全科"],
+        "start_nodes": ["门"],
+        "end_nodes": ["门"],
+        "base_weight": 1.0
+    },
+    {
+        "process_id": "EMERGENCY_TRAUMA",
+        "description": "急诊创伤流程",
+        "core_sequence": ["急诊科", "放射科", "手术室", "ICU"],
+        "start_nodes": ["门"],
+        "end_nodes": ["ICU"],
+        "base_weight": 1.0
+    },
+    {
+        "process_id": "GYN_ROUTINE",
+        "description": "妇科常规就诊",
+        "core_sequence": ["挂号", "妇科", "药房"],
+        "start_nodes": ["门"],
+        "end_nodes": ["门"],
+        "base_weight": 1.0
+    }
+]
+</file>
+
+<file path="src/rl_optimizer/env/cost_calculator.py">
+# src/rl_optimizer/env/cost_calculator.py
+
+import numpy as np
+import pandas as pd
+from scipy.sparse import dok_matrix, csr_matrix
+from typing import List, Dict, Tuple, Any
+from collections import defaultdict
+import itertools
+
+from src.config import RLConfig
+from src.rl_optimizer.utils.setup import setup_logger, load_pickle, save_pickle
+
+logger = setup_logger(__name__)
+
+class CostCalculator:
+    """
+    一个高效的成本计算器，用于评估给定布局下的加权总通行时间。
+    它通过预计算一个稀疏矩阵来实现高性能计算。
+    """
+
+    def __init__(self, 
+                 config: RLConfig, 
+                 resolved_pathways: List[Dict[str, Any]], 
+                 travel_times: pd.DataFrame, 
+                 placeable_slots: List[str],
+                 placeable_departments: List[str]):
+        """
+        初始化成本计算器。
+
+        Args:
+            config (RLConfig): RL优化器的配置对象。
+            resolved_pathways (List[Dict]): 已解析的流线字典列表。
+            travel_times (pd.DataFrame): 纯通行时间矩阵，其行列为原始节点名。
+            placeable_slots (List[str]): 可用物理槽位的原始节点名称列表。
+            placeable_departments (List[str]): 所有需要被布局的科室的完整列表。
+        """
+        self.config = config
+        self.travel_times = travel_times
+        self.placeable_slots = placeable_slots
+        self.num_slots = len(placeable_slots)
+        
+        self.dept_list = sorted(placeable_departments)
+        self.pair_to_col, self.num_dept_pairs = self._create_dept_pair_mapping()
+        
+        self.M, self.W, self.pathway_to_process_id = self._build_cost_matrices(resolved_pathways)
+
+    def _create_dept_pair_mapping(self) -> Tuple[Dict[Tuple[str, str], int], int]:
+        """创建科室对到列索引的映射。"""
+        dept_pairs = list(itertools.permutations(self.dept_list, 2))
+        return {pair: i for i, pair in enumerate(dept_pairs)}, len(dept_pairs)
+    
+    def _build_cost_matrices(self, pathways: List[Dict[str, Any]]) -> Tuple[csr_matrix, np.ndarray, List[str]]:
+        """构建成本矩阵。"""
+        num_pathways = len(pathways)
+        pathway_to_process_id = [p['process_id'] for p in pathways]
+        
+        M_dok = dok_matrix((num_pathways, self.num_dept_pairs), dtype=np.float32)
+        W_arr = np.zeros(num_pathways, dtype=np.float32)
+
+        for i, p_data in enumerate(pathways):
+            path = p_data['path']
+            W_arr[i] = p_data['weight']
+            for j in range(len(path) - 1):
+                pair = (path[j], path[j+1])
+                if pair in self.pair_to_col:
+                    M_dok[i, self.pair_to_col[pair]] += 1
+        
+        return M_dok.tocsr(), W_arr, pathway_to_process_id
+    
+    def calculate_total_cost(self, layout: List[str]) -> float:
+        """
+        给定一个布局，高效计算总加权通行时间。
+
+        Args:
+            layout (List[str]): 一个表示当前布局的科室名称列表。
+                               其索引对应于 self.placeable_nodes 的索引。
+
+        Returns:
+            float: 计算出的总加权成本。
+        """
+        time_vector = self._get_time_vector(layout)
+        time_per_pathway = self.M.dot(time_vector)
+        total_cost = time_per_pathway.dot(self.W)
+        return float(total_cost)
+    
+    def calculate_per_process_cost(self, layout: List[str]) -> Dict[str, float]:
+        """
+        评估每个就医流程模板的单独通行时间（未加权）。
+        """
+        time_vector = self._get_time_vector(layout)
+        time_per_pathway = self.M.dot(time_vector)
+        
+        process_costs = defaultdict(float)
+        # 遍历所有流线，将它们的时间累加到对应的流程模板上
+        for i, process_id in enumerate(self.pathway_to_process_id):
+            process_costs[process_id] += time_per_pathway[i]
+            
+        return dict(process_costs)
+    
+    def _get_time_vector(self, layout: List[str]) -> np.ndarray:
+        """
+        内部辅助函数，根据布局计算所有科室对的通行时间向量。
+        """
+        time_vector = np.zeros(self.num_dept_pairs, dtype=np.float32)
+
+        # 创建一个从科室到其当前所在槽位（原始节点名）的映射
+        # layout 的索引是槽位索引，值是科室名
+        # self.placeable_nodes 的索引是槽位索引，值是原始节点名
+        dept_to_slot_node = {dept: self.placeable_nodes[i] for i, dept in enumerate(layout) if dept is not None}
+
+        # 遍历所有需要计算时间的科室对
+        for pair, col_idx in self.pair_to_col.items():
+            dept_from, dept_to = pair
+            
+            # 查找科室所在的原始节点名
+            node_from = dept_to_slot_node.get(dept_from)
+            node_to = dept_to_slot_node.get(dept_to)
+            
+            # 如果两个科室都已放置，则从通行时间矩阵中查找时间
+            if node_from is not None and node_to is not None:
+                time_vector[col_idx] = self.travel_times.loc[node_from, node_to]
+                
+        return time_vector
+</file>
+
+<file path="src/rl_optimizer/env/layout_env.py">
+# src/rl_optimizer/env/layout_env.py
+
+import gymnasium as gym
+from gymnasium import spaces
+import numpy as np
+from typing import List, Dict, Any, Tuple, Optional
+from collections import defaultdict
+
+from src.config import RLConfig
+from src.rl_optimizer.data.cache_manager import CacheManager
+from src.rl_optimizer.env.cost_calculator import CostCalculator
+from src.rl_optimizer.utils.setup import setup_logger
+
+logger = setup_logger(__name__)
+
+class LayoutEnv(gym.Env):
+    """
+    医院布局优化的强化学习环境 (范式A: 选科室，填槽位)。
+
+    遵循Gymnasium接口，通过自回归方式构建布局。环境按照一个在每个回合
+    开始时随机打乱的槽位顺序进行填充。在每一步，智能体从所有尚未被
+    放置的科室中选择一个，放入当前待填充的槽位。
+
+    - **状态 (Observation)**: 字典，包含当前部分布局、已放置科室的掩码、
+                              以及当前待填充槽位的面积信息。
+    - **动作 (Action)**: 离散值，代表在 `placeable_depts` 列表中的科室索引。
+    - **奖励 (Reward)**: 仅在回合结束时给予的稀疏奖励，基于加权总通行时间
+                      和软约束。
+    - **约束 (Constraints)**: 硬约束（面积、强制相邻）通过动作掩码实现，
+                          确保智能体只能选择合法的科室。
+    """
+
+    metadata = {'render_modes': ['human']}
+
+    def __init__(self, config: RLConfig, cache_manager: CacheManager, cost_calculator: CostCalculator):
+        """
+        初始化布局优化环境。
+
+        Args:
+            config (RLConfig): RL优化器的配置对象。
+            cache_manager (CacheManager): 已初始化的数据缓存管理器。
+            cost_calculator (CostCalculator): 已初始化的成本计算器。
+        """
+        super().__init__()
+        self.config = config
+        self.cm = cache_manager
+        self.cc = cost_calculator
+
+        self._initialize_nodes_and_slots()
+        self._define_spaces()
+        self._initialize_state_variables()
+
+        logger.info(f"环境初始化完成：{self.num_slots}个可用槽位，{self.num_depts}个待放置科室。")
+
+    def _initialize_nodes_and_slots(self):
+        """从CacheManager获取并设置节点和槽位信息。"""
+        self.placeable_slots = self.cm.placeable_slots
+        self.slot_areas = self.cm.placeable_nodes_df['area'].values
+        self.num_slots = len(self.placeable_slots)
+
+        self.placeable_depts = self.cm.placeable_departments
+        self.dept_areas_map = dict(zip(self.cm.placeable_nodes_df['node_id'], self.cm.placeable_nodes_df['area']))
+        self.num_depts = len(self.placeable_depts)
+        
+        if self.num_slots != self.num_depts:
+            raise ValueError(f"槽位数 ({self.num_slots}) 与待布局科室数 ({self.num_depts}) 不匹配!")
+        
+        self.dept_to_idx = {dept: i for i, dept in enumerate(self.placeable_depts)}
+
+    def _define_spaces(self):
+        """定义观测空间和动作空间。"""
+        # 动作空间：选择一个科室进行放置。动作是科室的索引。
+        self.action_space = spaces.Discrete(self.num_depts)
+
+        # 观测空间：
+        self.observation_space = spaces.Dict({
+            # layout[i] = k+1 表示槽位i放置了索引为k的科室。0表示空。
+            "layout": spaces.MultiDiscrete([self.num_depts + 1] * self.num_slots),
+            # placed_mask[k] = 1 表示索引为k的科室已被放置。
+            "placed_mask": spaces.MultiBinary(self.num_depts),
+            # 当前待填充槽位的面积
+            "current_slot_idx": spaces.Box(low=0, high=self.num_slots - 1, shape=(1,), dtype=np.int32)
+        })
+
+    def _initialize_state_variables(self):
+        """初始化每个回合都会改变的状态变量。"""
+        self.current_step = 0
+        # layout的索引是物理槽位索引，值是科室索引+1
+        self.layout = np.zeros(self.num_slots, dtype=np.int32)
+        self.placed_mask = np.zeros(self.num_depts, dtype=np.int8)
+        # 每个回合开始时需要被打乱的槽位处理顺序
+        self.shuffled_slot_indices = np.arange(self.num_slots)
+
+    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Dict, Dict]:
+        """重置环境，随机化槽位顺序，并返回初始观测。"""
+        super().reset(seed=seed)
+        self._initialize_state_variables()
+        self.np_random.shuffle(self.shuffled_slot_indices)
+        return self._get_obs(), self._get_info()
+    
+    def step(self, action: int) -> Tuple[Dict, float, bool, bool, Dict]:
+        """执行一个动作：在当前槽位放置选定的科室。"""
+        if self.placed_mask[action] == 1:
+            # 这是一个安全检查。理论上动作掩码会阻止这种情况。
+            # 如果发生，说明上游逻辑有误，应给予重罚并终止。
+            logger.error("严重错误：智能体选择了已被放置的科室！")
+            return self._get_obs(), -100.0, True, False, self._get_info()
+
+        # 确定当前要填充的物理槽位索引
+        slot_to_fill = self.shuffled_slot_indices[self.current_step]
+        
+        # 更新状态：在布局中记录放置，并标记科室为"已用"
+        self.layout[slot_to_fill] = action + 1  # 动作是科室索引，存储时+1
+        self.placed_mask[action] = 1
+        self.current_step += 1
+
+        terminated = (self.current_step == self.num_slots)
+        reward = self._calculate_reward() if terminated else 0.0
+
+        return self._get_obs(), reward, terminated, False, self._get_info()
+    
+    def _get_obs(self) -> Dict[str, Any]:
+        """构建并返回当前观测字典。"""
+        if self.current_step >= self.num_slots:
+            current_slot_idx = 0.0
+        else:
+            current_slot_idx = self.shuffled_slot_indices[self.current_step]
+
+        return {
+            "layout": self.layout,
+            "placed_mask": self.placed_mask,
+            "current_slot_idx": np.array([current_slot_idx], dtype=np.int32)
+        }
+    
+    def _get_info(self) -> Dict[str, Any]:
+        """返回包含动作掩码的附加信息。"""
+        return {"action_mask": self.get_action_mask()}
+    
+    def get_action_mask(self) -> np.ndarray:
+        """
+        计算当前步骤的合法动作掩码 (即哪些**科室**是合法的)。
+        """
+        if self.current_step >= self.num_slots:
+            return np.zeros(self.num_depts, dtype=np.int8)
+
+        # 1. 初始掩码：所有未放置的科室都是潜在的合法动作
+        action_mask = 1 - self.placed_mask
+
+        # 2. 面积约束：科室面积必须符合当前槽位的容差
+        current_slot_idx = self.shuffled_slot_indices[self.current_step]
+        current_slot_area = self.slot_areas[current_slot_idx]
+        min_area = current_slot_area * (1 - self.config.AREA_SCALING_FACTOR)
+        max_area = current_slot_area * (1 + self.config.AREA_SCALING_FACTOR)
+
+        for dept_idx in range(self.num_depts):
+            if action_mask[dept_idx] == 1:  # 只检查当前合法的动作
+                dept_name = self.placeable_depts[dept_idx]
+                dept_area = self.dept_areas_map[dept_name]
+                if not (min_area <= dept_area <= max_area):
+                    action_mask[dept_idx] = 0
+        
+        # TODO: 3. 强制相邻约束检查 (生产级需要实现)
+        # self._apply_mandatory_adjacency_mask(action_mask)
+
+        # 如果没有合法动作，这是一个严重问题，需要记录
+        if np.sum(action_mask) == 0:
+            logger.warning(f"在步骤 {self.current_step}，没有找到任何合法的动作！")
+        
+        return action_mask
+    
+    def _calculate_reward(self) -> float:
+        """在回合结束时计算最终奖励。"""
+        final_layout_depts = [None] * self.num_slots
+        for slot_idx, dept_id in enumerate(self.layout):
+            if dept_id > 0:
+                final_layout_depts[slot_idx] = self.placeable_depts[dept_id - 1]
+        
+        if None in final_layout_depts:
+            logger.error("布局计算奖励时发现未完成的布局，返回重罚。")
+            return -500.0
+
+        time_cost = self.cc.calculate_total_cost(final_layout_depts)
+        time_reward = -time_cost / 1e6  # 缩放以稳定训练
+
+        adjacency_reward = self._calculate_adjacency_reward(final_layout_depts)
+        
+        total_reward = (self.config.REWARD_TIME_WEIGHT * time_reward + 
+                        self.config.REWARD_ADJACENCY_WEIGHT * adjacency_reward)
+        
+        return total_reward
+    
+    def _calculate_adjacency_reward(self, final_layout: List[str]) -> float:
+        """
+        计算偏好相邻软约束的奖励。
+        (TODO: 需要一个可靠的邻接关系数据源)
+        """
+        # 这是一个示例实现，实际部署时需要替换为真实邻接数据
+        # 假设 travel_times 矩阵中时间小于某个阈值（例如 10）即为相邻
+        reward = 0.0
+        # ... 实现软约束奖励计算 ...
+        return reward
+    
+    def render(self, mode="human"):
+        """(可选) 渲染环境状态，用于调试。"""
+        if mode == "human":
+            print(f"--- Step: {self.current_step} ---")
+            current_slot_idx = self.shuffled_slot_indices[self.current_step]
+            current_slot = self.placeable_slots[current_slot_idx]
+            print(f"Current Slot to Fill: {current_slot} (Area: {self.slot_areas[current_slot_idx]:.2f})")
+            
+            layout_str = []
+            for i in range(self.num_slots):
+                dept_id = self.layout[i]
+                if dept_id > 0:
+                    layout_str.append(f"{self.placeable_slots[i]}: {self.placeable_depts[dept_id-1]}")
+                else:
+                    layout_str.append(f"{self.placeable_slots[i]}: EMPTY")
+            print("Current Layout:\n" + "\n".join(layout_str))
+
+    @staticmethod
+    def _action_mask_fn(env: 'LayoutEnv') -> np.ndarray:
+        """
+        ActionMasker 包装器所需的静态方法，用于提取动作掩码。
+        
+        Args:
+            env (LayoutEnv): 环境实例。
+            
+        Returns:
+            np.ndarray: 当前状态下的动作掩码。
+        """
+        return env.get_action_mask()
+
+    def _get_final_layout_str(self) -> List[str]:
+        """
+        获取最终布局的科室名称列表。
+        
+        Returns:
+            List[str]: 按槽位顺序排列的科室名称列表。
+        """
+        final_layout = [None] * self.num_slots
+        for slot_idx, dept_id in enumerate(self.layout):
+            if dept_id > 0:
+                final_layout[slot_idx] = self.placeable_depts[dept_id - 1]
+        return final_layout
+</file>
+
+<file path="src/rl_optimizer/model/policy_network.py">
+# src/rl_optimizer/model/policy_network.py
+
+import torch
+import torch.nn as nn
+from gymnasium import spaces
+from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
+from typing import Dict
+
+from src.config import RLConfig
+from src.rl_optimizer.utils.setup import setup_logger
+
+logger = setup_logger(__name__)
+
+class LayoutTransformer(BaseFeaturesExtractor):
+    """
+    基于Transformer的特征提取器，用于处理布局状态。
+
+    该网络接收环境的字典式观测，通过嵌入层和Transformer编码器，
+    学习布局中已放置科室与待放置科室之间的复杂空间和逻辑关系，
+    最终为策略网络（Actor-Critic）输出一个固定维度的特征向量。
+
+    该设计特别适用于自回归构建任务，因为它能有效地处理序列信息
+    和元素之间的长程依赖。
+    """
+
+    def __init__(self, observation_space: spaces.Dict, features_dim: int, config: RLConfig):
+        """
+        初始化Transformer特征提取器。
+
+        Args:
+            observation_space (spaces.Dict): 环境的观测空间。
+            features_dim (int): 输出特征的维度。
+            config (RLConfig): RL优化器的配置对象。
+        """
+        super().__init__(observation_space, features_dim)
+
+        self.config = config
+
+        # 从观测空间中提取维度信息
+        # 槽位数量，决定了序列长度
+        num_slots = observation_space["layout"].shape[0]
+        # 科室种类数量 (包括0，代表"未放置"或"空")
+        num_depts = observation_space["layout"].nvec[0]
+
+        embedding_dim = self.config.EMBEDDING_DIM
+
+        # --- 网络层定义 ---
+        
+        # 1. 科室嵌入层 (Dept Embedding)
+        # 将每个科室ID (包括0) 映射为一个高维向量
+        self.dept_embedding = nn.Embedding(num_embeddings=num_depts, embedding_dim=embedding_dim)
+
+        # 2. 槽位位置嵌入层 (Slot Positional Embedding)
+        # 为每个槽位（位置）学习一个唯一的嵌入向量，以区分位置信息
+        self.slot_position_embedding = nn.Embedding(num_embeddings=num_slots, embedding_dim=embedding_dim)
+
+
+        # 3. 当前待决策科室嵌入层 (Current Dept Embedding)
+        # 输入ID范围是 0 到 num_placeable_depts - 1
+        self.current_dept_embedding = nn.Embedding(num_embeddings=num_depts-1, embedding_dim=embedding_dim)
+
+        # 4. Transformer 编码器层
+        # 这是网络的核心，用于处理序列信息
+        encoder_layer = nn.TransformerEncoderLayer(
+            d_model=embedding_dim,
+            nhead=self.config.TRANSFORMER_HEADS,
+            dim_feedforward=embedding_dim * 4,
+            dropout=0.1,
+            activation='gelu',
+            batch_first=True  # 确保输入张量的维度顺序为 (batch, sequence, features)
+        )
+        self.transformer_encoder = nn.TransformerEncoder(
+            encoder_layer, 
+            num_layers=self.config.TRANSFORMER_LAYERS
+        )
+
+        # 5. 输出线性层 (Output Layer)
+        # 将处理后的特征与当前待决策科室的特征拼接，然后映射到最终的特征维度
+        self.linear = nn.Sequential(
+            nn.LayerNorm(embedding_dim * num_slots + embedding_dim),
+            nn.Linear(embedding_dim * num_slots + embedding_dim, features_dim),
+            nn.ReLU()
+        )
+
+        logger.info(f"LayoutTransformer 初始化成功。")
+        logger.info(f"  - 槽位数量: {num_slots}")
+        logger.info(f"  - 科室种类数量: {num_depts}")
+        logger.info(f"  - 嵌入维度: {embedding_dim}")
+
+    def forward(self, observations: Dict[str, torch.Tensor]) -> torch.Tensor:
+        """
+        定义模型的前向传播逻辑。
+
+        Args:
+            observations (Dict[str, torch.Tensor]): 从环境中获得的观测数据字典。
+                - "layout": (batch_size, num_slots) 当前布局，值为科室ID
+                - "current_dept_id": (batch_size, 1) 当前待决策的科室ID
+
+        Returns:
+            torch.Tensor: 提取出的状态特征，维度为 (batch_size, features_dim)。
+        """
+        # --- 1. 准备输入嵌入 ---
+        layout_ids = observations["layout"]
+        current_dept_id = observations["current_slot_idx"].squeeze(-1) # 降维 (B, 1) -> (B,)
+
+        batch_size, num_slots = layout_ids.shape
+        device = layout_ids.device
+
+        # 获取科室嵌入
+        dept_embeds = self.dept_embedding(layout_ids) # (B, num_slots, D_emb)
+
+        # 获取槽位位置嵌入
+        slot_positions = torch.arange(0, num_slots, device=device).unsqueeze(0).expand(batch_size, -1)
+        slot_pos_embeds = self.slot_position_embedding(slot_positions) # (B, num_slots, D_emb)
+
+        # 组合输入嵌入 (这是Transformer的标准做法)
+        input_embeds = dept_embeds + slot_pos_embeds
+
+        # --- 2. 通过 Transformer 处理布局信息 ---
+        # Transformer的输出包含了每个槽位位置的上下文感知特征
+        transformer_output = self.transformer_encoder(input_embeds) # (B, num_slots, D_emb)
+
+        # 将所有槽位的特征展平，形成一个代表整个布局的向量
+        flattened_layout_features = transformer_output.reshape(batch_size, -1) # (B, num_slots * D_emb)
+
+        # --- 3. 整合当前待决策科室的信息 ---
+        # 获取当前待决策科室的嵌入
+        current_dept_embed = self.current_dept_embedding(current_dept_id) # (B, D_emb)
+
+        # --- 4. 拼接并输出最终特征 ---
+        # 将布局特征和当前科室特征拼接在一起
+        combined_features = torch.cat([flattened_layout_features, current_dept_embed], dim=1)
+        
+        # 通过最后的线性层得到最终的特征向量
+        final_features = self.linear(combined_features)
+        
+        return final_features
+</file>
+
+<file path="src/rl_optimizer/utils/setup.py">
+# src/rl_optimizer/utils/setup.py
+
+import logging
+import sys
+from typing import Any
+import json
+import pathlib
+import pickle
+import numpy as np
+
+class NpEncoder(json.JSONEncoder):
+    """自定义JSON编码器，以处理Numpy数据类型。"""
+    def default(self, obj: Any) -> Any:
+        if isinstance(obj, np.integer):
+            return int(obj)
+        if isinstance(obj, np.floating):
+            return float(obj)
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        return super(NpEncoder, self).default(obj)
+    
+def setup_logger(name: str) -> logging.Logger:
+    """配置并返回一个标准化的日志记录器。
+
+    Args:
+        name (str): 日志记录器的名称。
+
+    Returns:
+        logging.Logger: 配置好的日志记录器实例。
+    """
+    logger = logging.getLogger(name)
+    logger.setLevel(logging.INFO)
+    if not logger.handlers:
+        handler = logging.StreamHandler(sys.stdout)
+        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
+    return logger
+
+def save_json(data: dict, path: pathlib.Path):
+    """使用自定义编码器将字典保存为JSON文件。"""
+    with open(path, 'w', encoding='utf-8') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2, cls=NpEncoder)
+
+def load_json(path: pathlib.Path) -> dict:
+    """从JSON文件加载字典。"""
+    with open(path, 'r', encoding='utf-8') as f:
+        return json.load(f)
+    
+def save_pickle(data: Any, path: pathlib.Path):
+    """将任何Python对象序列化为pickle文件。"""
+    with open(path, 'wb') as f:
+        pickle.dump(data, f)
+
+def load_pickle(path: pathlib.Path) -> Any:
+    """从pickle文件加载Python对象。"""
+    with open(path, 'rb') as f:
+        return pickle.load(f)
+    
+def load_pickle(path: pathlib.Path) -> Any:
+    """从pickle文件反序列化Python对象。"""
+    with open(path, 'rb') as f:
+        return pickle.load(f)
+</file>
 
 <file path="src/analysis/__init__.py">
 # src/analysis/__init__.py
@@ -1823,562 +3148,6 @@ class SuperNetwork:
             f"Inter-floor connections made for {connected_pairs_count} pairs of vertical nodes.")
 </file>
 
-<file path="src/optimization/optimizer.py">
-"""
-Module for facility layout optimization by reassigning functional types
-to physical locations to minimize total travel times for defined workflows.
-"""
-
-import copy
-import logging
-from typing import List, Dict, Optional, Tuple, Set, Any, Sequence
-import os
-from joblib import Parallel, delayed
-
-from src.analysis.process_flow import PeopleFlow, PathFinder
-from src.config import NetworkConfig
-
-logger = logging.getLogger(__name__)
-
-
-class PhysicalLocation:
-    """Represents a physical space/node in the facility.
-
-    Attributes:
-        name_id: The unique identifier of the physical location (e.g., 'RoomType_123').
-        original_functional_type: The functional type initially associated with this
-            physical location based on the input data (e.g., ' Radiology').
-        area: The area of this physical location.
-        is_swappable: Boolean indicating if this location can have its function reassigned.
-                      Typically, connection types like 'Door' are not swappable.
-    """
-
-    def __init__(self, name_id: str, original_functional_type: str, area: float, is_swappable: bool = True):
-        self.name_id: str = name_id
-        self.original_functional_type: str = original_functional_type
-        self.area: float = area
-        self.is_swappable: bool = is_swappable
-
-    def __repr__(self) -> str:
-        return (f"PhysicalLocation(name_id='{self.name_id}', "
-                f"original_type='{self.original_functional_type}', area={self.area:.2f}, "
-                f"swappable={self.is_swappable})")
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, PhysicalLocation):
-            return NotImplemented
-        return self.name_id == other.name_id
-
-    def __hash__(self) -> int:
-        return hash(self.name_id)
-
-
-class FunctionalAssignment:
-    """Manages the assignment of functional types to lists of physical locations.
-
-    This class represents the current "layout" by defining which physical
-    locations (Name_IDs) are currently serving each functional type.
-    It supports creating new assignment states by swapping the functional roles
-    of two physical locations.
-
-    Attributes:
-        assignment_map: A dictionary where keys are functional type strings (e.g., "Radiology")
-                        and values are lists of Name_ID strings of PhysicalLocations
-                        currently assigned to that function.
-    """
-
-    def __init__(self, initial_assignment_map: Dict[str, List[str]]):
-        # Deepcopy to ensure independence from the source map
-        self.assignment_map: Dict[str, List[str]
-                                  ] = copy.deepcopy(initial_assignment_map)
-
-    def get_physical_ids_for_function(self, functional_type: str) -> List[str]:
-        """Returns the list of physical Name_IDs assigned to the given functional type."""
-        return self.assignment_map.get(functional_type, [])
-
-    def get_functional_type_at_physical_id(self, physical_name_id: str) -> Optional[str]:
-        """Finds which functional type, if any, the given physical_name_id is currently assigned to."""
-        for func_type, id_list in self.assignment_map.items():
-            if physical_name_id in id_list:
-                return func_type
-        return None
-
-    def get_map_copy(self) -> Dict[str, List[str]]:
-        """Returns a deep copy of the internal assignment map."""
-        return copy.deepcopy(self.assignment_map)
-
-    def apply_functional_swap(self, phys_loc_A_id: str, phys_loc_B_id: str) -> 'FunctionalAssignment':
-        """Creates a new FunctionalAssignment representing the state after swapping
-        the functional roles currently hosted at phys_loc_A_id and phys_loc_B_id.
-
-        For example, if A hosts 'Radiology' and B hosts 'Lab', the new assignment
-        will have A hosting 'Lab' and B hosting 'Radiology'.
-        If one location is "unassigned" (not in any list in assignment_map),
-        the function from the other location moves to it, and the original location
-        becomes unassigned for that function.
-
-        Args:
-            phys_loc_A_id: Name_ID of the first physical location.
-            phys_loc_B_id: Name_ID of the second physical location.
-
-        Returns:
-            A new FunctionalAssignment object with the swapped roles.
-        """
-        new_map = self.get_map_copy()
-
-        func_type_at_A = self.get_functional_type_at_physical_id(phys_loc_A_id)
-        func_type_at_B = self.get_functional_type_at_physical_id(phys_loc_B_id)
-
-        # Remove A from its current function's list (if any) and add B instead.
-        if func_type_at_A:
-            if phys_loc_A_id in new_map.get(func_type_at_A, []):
-                new_map[func_type_at_A].remove(phys_loc_A_id)
-            if func_type_at_A not in new_map:
-                new_map[func_type_at_A] = []  # Should not happen if found
-            new_map[func_type_at_A].append(phys_loc_B_id)
-            if not new_map[func_type_at_A]:  # If list became empty
-                del new_map[func_type_at_A]
-
-        # Remove B from its current function's list (if any) and add A instead.
-        if func_type_at_B:
-            # Check if B was already moved (e.g. A and B had same func type)
-            if phys_loc_B_id in new_map.get(func_type_at_B, []):
-                if func_type_at_A == func_type_at_B:
-                    pass
-                else:
-                    new_map[func_type_at_B].remove(phys_loc_B_id)
-
-            if func_type_at_B not in new_map:
-                new_map[func_type_at_B] = []
-            new_map[func_type_at_B].append(phys_loc_A_id)
-            if not new_map[func_type_at_B]:
-                del new_map[func_type_at_B]
-
-        for func_type in list(new_map.keys()):
-            if new_map[func_type]:
-                new_map[func_type] = sorted(list(set(new_map[func_type])))
-            else:
-                del new_map[func_type]
-
-        return FunctionalAssignment(new_map)
-
-    def __repr__(self) -> str:
-        return f"FunctionalAssignment(map_size={len(self.assignment_map)})"
-
-
-class WorkflowDefinition:
-    """Defines a patient/staff workflow to be evaluated.
-
-    Attributes:
-        workflow_id: A unique identifier for this workflow (e.g., 'OutpatientVisit').
-        functional_sequence: An ordered list of functional type names representing
-                             the steps in the workflow (e.g., ['Reception', 'ConsultRoom', 'Pharmacy']).
-        weight: A float representing the importance or frequency of this workflow,
-                used in the objective function.
-    """
-
-    def __init__(self, workflow_id: str, functional_sequence: List[str], weight: float = 1.0):
-        self.workflow_id: str = workflow_id
-        self.functional_sequence: List[str] = functional_sequence
-        self.weight: float = weight
-
-    def __repr__(self) -> str:
-        return (f"WorkflowDefinition(id='{self.workflow_id}', "
-                f"seq_len={len(self.functional_sequence)}, weight={self.weight})")
-
-
-class EvaluatedWorkflowOutcome:
-    """Stores the outcome of evaluating a WorkflowDefinition under a specific assignment.
-
-    Attributes:
-        workflow_definition: The WorkflowDefinition that was evaluated.
-        average_time: The average travel time of all valid PeopleFlows for this workflow
-                      under the given assignment. Can be float('inf') if any potential path
-                      is unroutable or if no valid paths exist.
-        shortest_flow: The actual PeopleFlow object representing the shortest path found
-                       for this workflow under the given assignment. Can be None if no
-                       valid path was found or if average_time is inf.
-        num_paths_considered: The number of valid PeopleFlows used to calculate the average_time.
-        all_path_times: A list of travel times for all valid PeopleFlows. Can be None.
-    """
-
-    def __init__(self,
-                 workflow_definition: WorkflowDefinition,
-                 average_time: Optional[float],
-                 # Still store the shortest for reference
-                 shortest_flow: Optional[PeopleFlow],
-                 num_paths_considered: int,
-                 all_path_times: Optional[List[float]]):
-        self.workflow_definition: WorkflowDefinition = workflow_definition
-        self.average_time: float = average_time if average_time is not None else float(
-            'inf')
-        self.shortest_flow: Optional[PeopleFlow] = shortest_flow
-        self.num_paths_considered: int = num_paths_considered
-        self.all_path_times: Optional[List[float]] = all_path_times
-
-    def __repr__(self) -> str:
-        path_str = "N/A"
-        if self.shortest_flow and self.shortest_flow.actual_node_id_sequence:
-            shortest_time_val = self.shortest_flow.total_time if self.shortest_flow.total_time is not None else float(
-                'inf')
-            path_str = (f"Shortest: {self.shortest_flow.actual_node_id_sequence[0]}..."
-                        f"{self.shortest_flow.actual_node_id_sequence[-1]} (Time: {shortest_time_val:.2f})")
-
-        return (f"EvaluatedWorkflow(id='{self.workflow_definition.workflow_id}', "
-                f"avg_time={self.average_time:.2f}, num_paths={self.num_paths_considered}, {path_str})")
-
-# Helper function for joblib to process a single flow
-# This function will be called in parallel for each flow.
-# It needs access to a PathFinder instance.
-
-
-def _calculate_flow_time_joblib_task(flow_to_process: PeopleFlow, path_finder_instance: PathFinder) -> Tuple[Optional[float], Any, List[str]]:
-    """
-    Calculates total time for a flow and returns time, flow identifier, and sequence.
-    The flow_to_process.total_time will be updated by calculate_flow_total_time.
-    """
-    time = path_finder_instance.calculate_flow_total_time(flow_to_process)
-    # Return time and identifiers to re-associate with original flow object if needed,
-    # and to allow the main thread to update the original flow objects.
-    return time, flow_to_process.identify, flow_to_process.actual_node_id_sequence
-
-
-class LayoutObjectiveCalculator:
-    """Calculates the overall objective value for a given functional assignment.
-
-    The objective is typically the sum of weighted average travel times for all defined workflows.
-    """
-
-    def __init__(self,
-                 workflow_definitions: Sequence[WorkflowDefinition],
-                 path_finder: PathFinder,
-                 n_jobs_for_flows: int = -1):  # Default to all cores for flow calculation
-        self.workflow_definitions: Sequence[WorkflowDefinition] = workflow_definitions
-        self.path_finder: PathFinder = path_finder
-        self.n_jobs_for_flows: int = n_jobs_for_flows if n_jobs_for_flows != 0 else 1
-        if self.n_jobs_for_flows == -1:  # Check if os.cpu_count() is available
-            cpu_count = os.cpu_count()
-            self.n_jobs_for_flows = cpu_count if cpu_count is not None else 1
-        elif self.n_jobs_for_flows == 0:  # Explicitly set to 1 if 0 is passed.
-            self.n_jobs_for_flows = 1
-
-    def evaluate(self, assignment: FunctionalAssignment) -> Tuple[float, List[EvaluatedWorkflowOutcome]]:
-        """Evaluates the given FunctionalAssignment.
-
-        Args:
-            assignment: The FunctionalAssignment to evaluate.
-
-        Returns:
-            A tuple containing:
-                - total_objective_value (float): The sum of weighted average travel times.
-                  Can be float('inf') if any critical workflow is unroutable.
-                - evaluated_outcomes (List[EvaluatedWorkflowOutcome]): A list of outcomes
-                  for each workflow definition.
-        """
-        total_weighted_time: float = 0.0
-        evaluated_outcomes: List[EvaluatedWorkflowOutcome] = []
-
-        for wf_def in self.workflow_definitions:
-            generated_flows = self.path_finder.generate_flows(
-                workflow_names=wf_def.functional_sequence,
-                workflow_identifier=wf_def.workflow_id,
-                custom_assignment_map=assignment.get_map_copy()
-            )
-
-            workflow_average_time: float = float('inf')
-            shortest_flow_for_wf: Optional[PeopleFlow] = None
-            shortest_time_val_for_wf: float = float('inf')
-            valid_flow_times_for_wf: List[float] = []
-            num_paths_considered_for_wf: int = 0
-
-            if not generated_flows:
-                logger.debug(
-                    f"Workflow '{wf_def.workflow_id}' generated no flows for current assignment. Avg Time is Inf.")
-            else:
-                # Use joblib to parallelize the calculation of total_time for each flow
-                # The _calculate_flow_time_joblib_task helper will be used.
-                # PathFinder instance needs to be passed to the helper.
-                try:
-                    # Using 'loky' backend which is robust for multiprocessing
-                    # prefer='threads' could be used if tasks are I/O bound and GIL is an issue,
-                    # but here it's likely CPU bound due to DataFrame lookups.
-                    # 'threading' backend is limited by GIL for CPU-bound tasks in CPython.
-                    # 'loky' or 'multiprocessing' are better for CPU-bound.
-                    with Parallel(n_jobs=self.n_jobs_for_flows, backend='loky') as parallel:
-                        results = parallel(
-                            delayed(_calculate_flow_time_joblib_task)(
-                                flow, self.path_finder)
-                            for flow in generated_flows
-                        )
-                    # results is a list of (time, flow_identify, flow_sequence)
-
-                except Exception as e:  # Catch potential joblib/pickling errors
-                    logger.error(
-                        f"Error during parallel flow calculation for workflow '{wf_def.workflow_id}': {e}. Falling back to sequential.")
-                    results = [_calculate_flow_time_joblib_task(
-                        flow, self.path_finder) for flow in generated_flows]
-
-                all_paths_routable = True
-                temp_flow_times: List[float] = []
-
-                # Create a mapping from (identify, tuple(sequence)) to original flow object for quick lookup
-                flow_map_for_update: Dict[Tuple[Any, Tuple[str, ...]], PeopleFlow] = {
-                    (f.identify, tuple(f.actual_node_id_sequence)): f for f in generated_flows
-                }
-
-                for current_flow_time, flow_identify, flow_sequence_list in results:
-                    # Ensure hashable for dict key
-                    flow_sequence_tuple = tuple(flow_sequence_list)
-                    original_flow_obj = flow_map_for_update.get(
-                        (flow_identify, flow_sequence_tuple))
-
-                    if original_flow_obj:
-                        # Update the total_time on the original PeopleFlow object
-                        # Note: _calculate_flow_time_joblib_task already calls calculate_flow_total_time
-                        # which updates the flow object passed to it (which is a copy in multiprocessing).
-                        # So, we need to update the original object in the main process's list.
-                        original_flow_obj.update_total_time(
-                            current_flow_time if current_flow_time is not None else float('inf'))
-                    else:
-                        logger.warning(
-                            f"Could not find original flow for id {flow_identify} and sequence {flow_sequence_list} after parallel processing.")
-                        # This should ideally not happen if identifiers are unique and sequences match.
-
-                    if current_flow_time is None:
-                        logger.debug(f"Flow identified by '{flow_identify}' (sequence: {'->'.join(flow_sequence_list[:2])}... ) "
-                                     f"for workflow '{wf_def.workflow_id}' is unroutable. "
-                                     f"Workflow average time will be Inf (strict mode).")
-                        all_paths_routable = False
-                        break  # Strict mode
-
-                    temp_flow_times.append(current_flow_time)
-                    if original_flow_obj and current_flow_time < shortest_time_val_for_wf:
-                        shortest_time_val_for_wf = current_flow_time
-                        shortest_flow_for_wf = original_flow_obj
-
-                if all_paths_routable:
-                    if temp_flow_times:
-                        valid_flow_times_for_wf = temp_flow_times
-                        workflow_average_time = sum(
-                            valid_flow_times_for_wf) / len(valid_flow_times_for_wf)
-                        num_paths_considered_for_wf = len(
-                            valid_flow_times_for_wf)
-                    else:
-                        logger.warning(
-                            f"Workflow '{wf_def.workflow_id}': all_paths_routable is True, but temp_flow_times is empty.")
-                        workflow_average_time = float('inf')
-                else:
-                    workflow_average_time = float('inf')
-                    shortest_flow_for_wf = None
-                    valid_flow_times_for_wf = []
-                    num_paths_considered_for_wf = 0
-
-            outcome = EvaluatedWorkflowOutcome(
-                workflow_definition=wf_def,
-                average_time=workflow_average_time,
-                shortest_flow=shortest_flow_for_wf,
-                num_paths_considered=num_paths_considered_for_wf,
-                all_path_times=valid_flow_times_for_wf if workflow_average_time != float(
-                    'inf') else None
-            )
-            evaluated_outcomes.append(outcome)
-
-            if workflow_average_time == float('inf'):
-                total_weighted_time = float('inf')
-
-            if total_weighted_time != float('inf'):
-                total_weighted_time += workflow_average_time * wf_def.weight
-
-        return total_weighted_time, evaluated_outcomes
-
-
-class LayoutOptimizer:
-    """
-    Optimizes facility layout by reassigning functional types to physical locations.
-
-    Uses a greedy iterative approach (best-swap local search) to minimize the
-    total weighted travel time of predefined workflows.
-    """
-
-    def __init__(self,
-                 path_finder: PathFinder,
-                 workflow_definitions: Sequence[WorkflowDefinition],
-                 config: NetworkConfig,
-                 area_tolerance_ratio: float = 0.2):
-        """
-        Initializes the LayoutOptimizer.
-
-        Args:
-            path_finder: An initialized PathFinder instance, used for path generation
-                         and time calculation. It must have its travel_times_df loaded.
-            workflow_definitions: A list of WorkflowDefinition objects that define
-                                  the paths and their importance.
-            config: The NetworkConfig object, used to identify non-swappable
-                    connection types.
-            area_tolerance_ratio: The maximum allowed relative area difference between
-                                  two physical locations for them to be considered swappable.
-                                  E.g., 0.2 means areas can differ by at most 20%.
-        """
-        self.path_finder: PathFinder = path_finder
-        self.config: NetworkConfig = config
-        self.objective_calculator: LayoutObjectiveCalculator = LayoutObjectiveCalculator(
-            workflow_definitions, path_finder
-        )
-        self.area_tolerance_ratio: float = area_tolerance_ratio
-        self.all_physical_locations: List[PhysicalLocation] = self._initialize_physical_locations(
-        )
-        self.swappable_locations: List[PhysicalLocation] = [
-            loc for loc in self.all_physical_locations if loc.is_swappable
-        ]
-
-        logger.info(f"Optimizer initialized. Found {len(self.all_physical_locations)} total physical locations, "
-                    f"{len(self.swappable_locations)} are swappable.")
-
-    def _initialize_physical_locations(self) -> List[PhysicalLocation]:
-        """
-        Creates PhysicalLocation objects from the PathFinder's data.
-        """
-        locations = []
-        if self.path_finder.travel_times_df is None:
-            logger.error(
-                "PathFinder's travel_times_df is not loaded. Cannot initialize physical locations.")
-            return []
-
-        if '面积' not in self.path_finder.travel_times_df.index:
-            logger.warning(
-                "Optimizer: '面积' row not found in travel_times_df. Areas will default to 0 for locations.")
-
-        for name_id_str in self.path_finder.all_name_ids:
-            parts = name_id_str.split('_', 1)
-            original_func_type = parts[0]
-
-            area = 0.0
-            if '面积' in self.path_finder.travel_times_df.index and \
-               name_id_str in self.path_finder.travel_times_df.columns:
-                try:
-                    area = float(
-                        self.path_finder.travel_times_df.loc['面积', name_id_str])
-                except ValueError:
-                    logger.warning(
-                        f"Could not parse area for {name_id_str}. Defaulting to 0.")
-
-            is_swappable = original_func_type not in self.config.CONNECTION_TYPES
-            locations.append(PhysicalLocation(
-                name_id_str, original_func_type, area, is_swappable))
-        return locations
-
-    def _get_valid_swap_pairs(self) -> List[Tuple[PhysicalLocation, PhysicalLocation]]:
-        """Generates pairs of swappable physical locations that satisfy area constraints."""
-        valid_pairs: List[Tuple[PhysicalLocation, PhysicalLocation]] = []
-        num_swappable = len(self.swappable_locations)
-        for i in range(num_swappable):
-            for j in range(i + 1, num_swappable):
-                loc_A = self.swappable_locations[i]
-                loc_B = self.swappable_locations[j]
-
-                area_A, area_B = loc_A.area, loc_B.area
-                if area_A > 0 and area_B > 0:
-                    if abs(area_A - area_B) / max(area_A, area_B) > self.area_tolerance_ratio:
-                        continue
-                elif (area_A == 0 and area_B > 0) or (area_A > 0 and area_B == 0):
-                    if self.area_tolerance_ratio < 1.0:
-                        continue
-
-                valid_pairs.append((loc_A, loc_B))
-        return valid_pairs
-
-    def run_optimization(self,
-                         initial_assignment: FunctionalAssignment,
-                         max_iterations: int = 100
-                         ) -> Tuple[FunctionalAssignment, float, List[EvaluatedWorkflowOutcome]]:
-        """
-        Runs the iterative layout optimization process.
-
-        Args:
-            initial_assignment: The starting FunctionalAssignment.
-            max_iterations: The maximum number of iterations to perform.
-
-        Returns:
-            A tuple containing:
-                - best_assignment (FunctionalAssignment): The optimized assignment.
-                - best_objective_value (float): The objective value of the best_assignment.
-                - best_outcomes (List[EvaluatedWorkflowOutcome]): Detailed outcomes for the best_assignment.
-        """
-        logger.info("Starting layout optimization...")
-
-        current_assignment = initial_assignment
-        current_best_objective, current_best_outcomes = self.objective_calculator.evaluate(
-            current_assignment)
-
-        logger.info(f"Initial Objective Value: {current_best_objective:.2f}")
-        if current_best_objective == float('inf'):
-            logger.error(
-                "Initial assignment results in unroutable workflows. Optimization aborted.")
-            return current_assignment, current_best_objective, current_best_outcomes
-
-        valid_swap_pairs = self._get_valid_swap_pairs()
-        if not valid_swap_pairs:
-            logger.warning(
-                "No valid pairs of physical locations to swap. Optimization cannot proceed.")
-            return current_assignment, current_best_objective, current_best_outcomes
-
-        for iteration in range(max_iterations):
-            logger.info(f"--- Iteration {iteration + 1}/{max_iterations} ---")
-
-            best_swap_this_iteration: Optional[Tuple[PhysicalLocation,
-                                                     PhysicalLocation]] = None
-            best_candidate_assignment_this_iteration: Optional[FunctionalAssignment] = None
-            objective_after_best_swap_this_iteration = current_best_objective
-            outcomes_for_best_swap_this_iteration = current_best_outcomes
-
-            num_evaluated_swaps = 0
-            for loc_A, loc_B in valid_swap_pairs:
-                candidate_assignment = current_assignment.apply_functional_swap(
-                    loc_A.name_id, loc_B.name_id)
-
-                candidate_objective, candidate_outcomes = self.objective_calculator.evaluate(
-                    candidate_assignment)
-                num_evaluated_swaps += 1
-                if num_evaluated_swaps % 100 == 0:
-                    logger.debug(
-                        f"  Evaluated {num_evaluated_swaps}/{len(valid_swap_pairs)} potential swaps in iteration {iteration+1}...")
-
-                if candidate_objective < objective_after_best_swap_this_iteration:
-                    objective_after_best_swap_this_iteration = candidate_objective
-                    best_swap_this_iteration = (loc_A, loc_B)
-                    best_candidate_assignment_this_iteration = candidate_assignment
-                    outcomes_for_best_swap_this_iteration = candidate_outcomes
-
-            if best_swap_this_iteration and best_candidate_assignment_this_iteration is not None:
-                swapped_loc_A, swapped_loc_B = best_swap_this_iteration
-                improvement = current_best_objective - objective_after_best_swap_this_iteration
-
-                logger.info(
-                    f"Improvement found! Swapping functions at '{swapped_loc_A.name_id}' "
-                    f"(original: {swapped_loc_A.original_functional_type}, area: {swapped_loc_A.area:.0f}) and "
-                    f"'{swapped_loc_B.name_id}' (original: {swapped_loc_B.original_functional_type}, area: {swapped_loc_B.area:.0f})."
-                )
-                logger.info(
-                    f"Objective improved from {current_best_objective:.2f} to {objective_after_best_swap_this_iteration:.2f} (Gain: {improvement:.2f}).")
-
-                current_assignment = best_candidate_assignment_this_iteration
-                current_best_objective = objective_after_best_swap_this_iteration
-                current_best_outcomes = outcomes_for_best_swap_this_iteration
-            else:
-                logger.info(
-                    "No further improvement found in this iteration. Optimization stopped.")
-                break
-
-        if iteration == max_iterations - 1 and best_swap_this_iteration:
-            logger.info(
-                f"Reached maximum number of iterations ({max_iterations}).")
-
-        logger.info("Layout optimization finished.")
-        logger.info(
-            f"Final Best Objective Value: {current_best_objective:.2f}")
-        return current_assignment, current_best_objective, current_best_outcomes
-</file>
-
 <file path="src/plotting/plotter.py">
 """
 Defines plotter classes for visualizing network graphs using Matplotlib and Plotly.
@@ -3022,6 +3791,734 @@ NICU_30012,13.25,1,1781.5,1544.75,22.25,508.5,467.0,3274.25,694.25,499.75,138.75
 面积,554606.00,326947.00,114436.00,158725.00,469641.00,156895.00,205904.00,292003.00,553919.00,317620.00,207908.00,463762.00,210075.00,137990.00,133453.00,273260.00,273260.00,1503304.00,432330.00,1617941.00,126317.00,6762.00,6762.00,6762.00,664487.00,482857.00,429863.00,133453.00,137990.00,116365.00,86640.00,137990.00,411610.00,156895.00,209503.00,206055.00,133453.00,273260.00,133105.00,156895.00,133067.00,217902.00,465431.00,34333.00,150.00,190.00,170.00,170.00,395.00,380.00,235.00,162.00,438.00,190.00,162.00,250.00,415.00,370.00,145.00,145.00,145.00,165.00,145.00,235.00,465431.00,205904.00
 </file>
 
+<file path="src/optimization/optimizer.py">
+"""
+Module for facility layout optimization by reassigning functional types
+to physical locations to minimize total travel times for defined workflows.
+"""
+
+import copy
+import logging
+from typing import List, Dict, Optional, Tuple, Set, Any, Sequence
+import pandas as pd
+import os
+from joblib import Parallel, delayed
+
+from src.analysis.process_flow import PeopleFlow, PathFinder
+from src.config import NetworkConfig
+
+# Code Time Profiling
+import cProfile
+import pstats
+profiler = cProfile.Profile()
+
+logger = logging.getLogger(__name__)
+
+
+class PhysicalLocation:
+    """Represents a physical space/node in the facility.
+
+    Attributes:
+        name_id: The unique identifier of the physical location (e.g., 'RoomType_123').
+        original_functional_type: The functional type initially associated with this
+            physical location based on the input data (e.g., ' Radiology').
+        area: The area of this physical location.
+        is_swappable: Boolean indicating if this location can have its function reassigned.
+                      Typically, connection types like 'Door' are not swappable.
+    """
+
+    def __init__(self, name_id: str, original_functional_type: str, area: float, is_swappable: bool = True):
+        self.name_id: str = name_id
+        self.original_functional_type: str = original_functional_type
+        self.area: float = area
+        self.is_swappable: bool = is_swappable
+
+    def __repr__(self) -> str:
+        return (f"PhysicalLocation(name_id='{self.name_id}', "
+                f"original_type='{self.original_functional_type}', area={self.area:.2f}, "
+                f"swappable={self.is_swappable})")
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, PhysicalLocation):
+            return NotImplemented
+        return self.name_id == other.name_id
+
+    def __hash__(self) -> int:
+        return hash(self.name_id)
+
+
+class FunctionalAssignment:
+    """Manages the assignment of functional types to lists of physical locations.
+     This class represents the current "layout" by defining which physical
+    locations (Name_IDs) are currently serving each functional type.
+    It supports creating new assignment states by swapping the functional roles
+    of two physical locations.
+
+    Attributes:
+        assignment_map: A dictionary where keys are functional type strings (e.g., "Radiology")
+                        and values are lists of Name_ID strings of PhysicalLocations
+                        currently assigned to that function.
+    """
+
+    def __init__(self, initial_assignment_map: Dict[str, List[str]]):
+        # Deepcopy to ensure independence from the source map
+        self.assignment_map: Dict[str, List[str]
+                                  ] = copy.deepcopy(initial_assignment_map)
+
+    def get_physical_ids_for_function(self, functional_type: str) -> List[str]:
+        """Returns the list of physical Name_IDs assigned to the given functional type."""
+        return self.assignment_map.get(functional_type, [])
+
+    def get_functional_type_at_physical_id(self, physical_name_id: str) -> Optional[str]:
+        """Finds which functional type, if any, the given physical_name_id is currently assigned to."""
+        for func_type, id_list in self.assignment_map.items():
+            if physical_name_id in id_list:
+                return func_type
+        return None
+
+    def get_map_copy(self) -> Dict[str, List[str]]:
+        """Returns a deep copy of the internal assignment map."""
+        return copy.deepcopy(self.assignment_map)
+
+    def apply_functional_swap(self, phys_loc_A_id: str, phys_loc_B_id: str) -> 'FunctionalAssignment':
+        """Creates a new FunctionalAssignment representing the state after swapping
+        the functional roles currently hosted at phys_loc_A_id and phys_loc_B_id.
+
+        For example, if A hosts 'Radiology' and B hosts 'Lab', the new assignment
+        will have A hosting 'Lab' and B hosting 'Radiology'.
+        If one location is "unassigned" (not in any list in assignment_map),
+        the function from the other location moves to it, and the original location
+        becomes unassigned for that function.
+
+        Args:
+            phys_loc_A_id: Name_ID of the first physical location.
+            phys_loc_B_id: Name_ID of the second physical location.
+
+        Returns:
+            A new FunctionalAssignment object with the swapped roles.
+        """
+        new_map = self.get_map_copy()  # Start with a copy of the current assignment
+
+        func_type_at_A = self.get_functional_type_at_physical_id(phys_loc_A_id)
+        func_type_at_B = self.get_functional_type_at_physical_id(phys_loc_B_id)
+
+        # Handle func_type_at_A (moving func_type_at_A from A to B, if B is involved)
+        if func_type_at_A is not None:
+            if phys_loc_A_id in new_map.get(func_type_at_A, []):
+                new_map[func_type_at_A].remove(phys_loc_A_id)
+            # If B is now supposed to host what A had
+            if func_type_at_B != func_type_at_A:  # Avoid issues if A and B had same func type initially
+                if func_type_at_A not in new_map:  # Should not be needed if remove was successful
+                    new_map[func_type_at_A] = []
+                # Add B to host A's original function
+                if phys_loc_B_id not in new_map[func_type_at_A]:
+                    new_map[func_type_at_A].append(phys_loc_B_id)
+
+        # Handle func_type_at_B (moving func_type_at_B from B to A, if A is involved)
+        if func_type_at_B is not None:
+            if phys_loc_B_id in new_map.get(func_type_at_B, []):
+                new_map[func_type_at_B].remove(phys_loc_B_id)
+            # If A is now supposed to host what B had
+            # if func_type_at_A != func_type_at_B: # Redundant due to first block, but helps clarity
+            if func_type_at_B not in new_map:
+                new_map[func_type_at_B] = []
+            # Add A to host B's original function
+            if phys_loc_A_id not in new_map[func_type_at_B]:
+                new_map[func_type_at_B].append(phys_loc_A_id)
+
+        # Clean up: remove empty lists and ensure lists are sorted and unique
+        # Iterate over a copy of keys for safe deletion
+        for func_type in list(new_map.keys()):
+            if new_map[func_type]:
+                new_map[func_type] = sorted(list(set(new_map[func_type])))
+            else:
+                # Remove function type if it no longer has any locations
+                del new_map[func_type]
+
+        return FunctionalAssignment(new_map)
+
+    def __repr__(self) -> str:
+        return f"FunctionalAssignment(map_size={len(self.assignment_map)})"
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, FunctionalAssignment):
+            return NotImplemented
+
+        # Check if the keys (functional types) are the same
+        if set(self.assignment_map.keys()) != set(other.assignment_map.keys()):
+            return False
+
+        # Check if the lists of physical IDs for each functional type are the same
+        # Comparing sorted lists ensures that order of IDs within the list doesn't affect equality
+        for func_type, phys_ids_self in self.assignment_map.items():
+            # Already know func_type exists in other due to key check
+            phys_ids_other = other.assignment_map.get(func_type)
+            if sorted(phys_ids_self) != sorted(phys_ids_other):
+                return False
+        return True
+
+
+class WorkflowDefinition:
+    """Defines a patient/staff workflow to be evaluated.
+
+    Attributes:
+        workflow_id: A unique identifier for this workflow (e.g., 'OutpatientVisit').
+        functional_sequence: An ordered list of functional type names representing
+                             the steps in the workflow (e.g., ['Reception', 'ConsultRoom', 'Pharmacy']).
+        weight: A float representing the importance or frequency of this workflow,
+                used in the objective function.
+    """
+
+    def __init__(self, workflow_id: str, functional_sequence: List[str], weight: float = 1.0):
+        self.workflow_id: str = workflow_id
+        self.functional_sequence: List[str] = functional_sequence
+        self.weight: float = weight
+
+    def __repr__(self) -> str:
+        return (f"WorkflowDefinition(id='{self.workflow_id}', "
+                f"seq_len={len(self.functional_sequence)}, weight={self.weight})")
+
+
+class EvaluatedWorkflowOutcome:
+    """Stores the outcome of evaluating a WorkflowDefinition under a specific assignment.
+
+    Attributes:
+        workflow_definition: The WorkflowDefinition that was evaluated.
+        average_time: The average travel time of all valid PeopleFlows for this workflow
+                      under the given assignment. Can be float('inf') if any potential path
+                      is unroutable or if no valid paths exist.
+        shortest_flow: The actual PeopleFlow object representing the shortest path found
+                       for this workflow under the given assignment. Can be None if no
+                       valid path was found or if average_time is inf.
+        num_paths_considered: The number of valid PeopleFlows used to calculate the average_time.
+        all_path_times: A list of travel times for all valid PeopleFlows. Can be None.
+    """
+
+    def __init__(self,
+                 workflow_definition: WorkflowDefinition,
+                 average_time: Optional[float],
+                 # Still store the shortest for reference
+                 shortest_flow: Optional[PeopleFlow],
+                 num_paths_considered: int,
+                 all_path_times: Optional[List[float]]):
+        self.workflow_definition: WorkflowDefinition = workflow_definition
+        self.average_time: float = average_time if average_time is not None else float(
+            'inf')
+        self.shortest_flow: Optional[PeopleFlow] = shortest_flow
+        self.num_paths_considered: int = num_paths_considered
+        self.all_path_times: Optional[List[float]] = all_path_times
+
+    def __repr__(self) -> str:
+        path_str = "N/A"
+        if self.shortest_flow and self.shortest_flow.actual_node_id_sequence:
+            shortest_time_val = self.shortest_flow.total_time if self.shortest_flow.total_time is not None else float(
+                'inf')
+            path_str = (f"Shortest: {self.shortest_flow.actual_node_id_sequence[0]}..."
+                        f"{self.shortest_flow.actual_node_id_sequence[-1]} (Time: {shortest_time_val:.2f})")
+
+        return (f"EvaluatedWorkflow(id='{self.workflow_definition.workflow_id}', "
+                f"avg_time={self.average_time:.2f}, num_paths={self.num_paths_considered}, {path_str})")
+
+# Helper function for joblib to process a single flow
+# This function will be called in parallel for each flow.
+# It needs access to a PathFinder instance.
+
+
+def _calculate_flow_time_joblib_task(flow_to_process: PeopleFlow, path_finder_instance: PathFinder) -> Tuple[Optional[float], Any, List[str]]:
+    """
+    Calculates total time for a flow and returns time, flow identifier, and sequence.
+    The flow_to_process.total_time will be updated by calculate_flow_total_time.
+    """
+    time = path_finder_instance.calculate_flow_total_time(flow_to_process)
+    # Return time and identifiers to re-associate with original flow object if needed,
+    # and to allow the main thread to update the original flow objects.
+    return time, flow_to_process.identify, flow_to_process.actual_node_id_sequence
+
+def _calculate_batch_flow_times(flows_batch, path_finder):
+    results = []
+    for flow in flows_batch:
+        time = path_finder.calculate_flow_total_time(flow)
+        results.append((time, flow.identify, flow.actual_node_id_sequence))
+    return results
+
+class LayoutObjectiveCalculator:
+    """
+    Calculates the overall objective value for a given functional assignment.
+    Supports incremental calculation.
+    """
+
+    def __init__(self,
+                 workflow_definitions: Sequence[WorkflowDefinition],
+                 path_finder: PathFinder,
+                 n_jobs_for_flows: int = -1):
+        self.workflow_definitions: Sequence[WorkflowDefinition] = workflow_definitions
+        self.path_finder: PathFinder = path_finder
+
+        if n_jobs_for_flows == 0:
+            self.n_jobs_for_flows = 1
+        elif n_jobs_for_flows == -1:
+            cpu_count = os.cpu_count()
+            self.n_jobs_for_flows = cpu_count if cpu_count is not None else 1
+        else:
+            self.n_jobs_for_flows = n_jobs_for_flows
+
+        logger.info(
+            f"LayoutObjectiveCalculator initialized with n_jobs_for_flows={self.n_jobs_for_flows}")
+
+        self.cached_evaluated_outcomes: Optional[List[EvaluatedWorkflowOutcome]] = None
+        self.cached_total_objective_value: Optional[float] = None
+        # Stores the FunctionalAssignment object
+        self.cached_assignment_obj: Optional[FunctionalAssignment] = None
+
+    def _evaluate_single_workflow_flows(self,
+                                        generated_flows: List[PeopleFlow],
+                                        workflow_id_for_logging: str
+                                        ) -> Tuple[float, Optional[PeopleFlow], int, Optional[List[float]]]:
+        # ... (Implementation from the previous response, unchanged) ...
+        workflow_average_time: float = float('inf')
+        shortest_flow: Optional[PeopleFlow] = None
+        shortest_time_val: float = float('inf')
+        valid_flow_times: List[float] = []
+        num_paths_considered: int = 0
+
+        if not generated_flows:
+            logger.debug(
+                f"Single WF Eval: Workflow '{workflow_id_for_logging}' generated no flows. Avg Time is Inf.")
+            return float('inf'), None, 0, None
+
+        try:
+            parallel_results_wf: List[Tuple[Optional[float], Any, List[str]]] = [
+            ]
+            backend_to_use = 'loky'
+            if self.n_jobs_for_flows > 1 and len(generated_flows) > 1:
+                batch_size = 600
+                batch_results = []
+                flow_batches = [generated_flows[i:i + batch_size] for i in range(0, len(generated_flows), batch_size)]
+                # Ensure _calculate_batch_flow_times is globally defined or properly imported
+                with Parallel(n_jobs=self.n_jobs_for_flows, backend=backend_to_use) as parallel:
+                    results_from_parallel = parallel(
+                        delayed(_calculate_batch_flow_times)(
+                            flow_batch, self.path_finder)
+                        for flow_batch in flow_batches
+                    )
+                for single_batch_result in results_from_parallel:
+                    batch_results.extend(single_batch_result)
+                parallel_results_wf = batch_results
+            else:
+                for flow in generated_flows:
+                    parallel_results_wf.append(
+                        _calculate_flow_time_joblib_task(flow, self.path_finder))
+        except Exception as e:
+            logger.error(
+                f"Error during parallel flow calculation for single workflow '{workflow_id_for_logging}': {e}. Falling back to sequential.", exc_info=True)
+            parallel_results_wf = [_calculate_flow_time_joblib_task(
+                flow, self.path_finder) for flow in generated_flows]
+
+        all_paths_routable = True
+        temp_flow_times: List[float] = []
+        flow_map_for_update: Dict[Tuple[Any, Tuple[str, ...]], PeopleFlow] = {
+            (f.identify, tuple(f.actual_node_id_sequence)): f for f in generated_flows
+        }
+
+        for flow_time, flow_id, flow_seq_list in parallel_results_wf:
+            flow_seq_tuple = tuple(flow_seq_list)
+            original_flow = flow_map_for_update.get((flow_id, flow_seq_tuple))
+            if original_flow:
+                original_flow.update_total_time(
+                    flow_time if flow_time is not None else float('inf'))
+
+            if flow_time is None:
+                all_paths_routable = False
+                break
+            temp_flow_times.append(flow_time)
+            if original_flow and flow_time < shortest_time_val:
+                shortest_time_val = flow_time
+                shortest_flow = original_flow
+
+        if all_paths_routable:
+            if temp_flow_times:
+                valid_flow_times = temp_flow_times
+                workflow_average_time = sum(
+                    valid_flow_times) / len(valid_flow_times)
+                num_paths_considered = len(valid_flow_times)
+        else:
+            workflow_average_time = float('inf')
+            shortest_flow = None
+            valid_flow_times = []
+            num_paths_considered = 0
+
+        return workflow_average_time, shortest_flow, num_paths_considered, (valid_flow_times if workflow_average_time != float('inf') else None)
+
+    def _perform_full_evaluation(self,
+                                 current_assignment: FunctionalAssignment
+                                 ) -> Tuple[float, List[EvaluatedWorkflowOutcome]]:
+        # ... (Implementation from the previous response, unchanged) ...
+        logger.debug(
+            f"Performing full evaluation for assignment (map_size={len(current_assignment.assignment_map)}).")
+        total_weighted_time: float = 0.0
+        evaluated_outcomes: List[EvaluatedWorkflowOutcome] = []
+
+        for wf_def in self.workflow_definitions:
+            generated_flows = self.path_finder.generate_flows(
+                workflow_names=wf_def.functional_sequence,
+                workflow_identifier=wf_def.workflow_id,
+                custom_assignment_map=current_assignment.get_map_copy()
+            )
+
+            wf_avg_time, wf_shortest_flow, wf_num_paths, wf_all_times = \
+                self._evaluate_single_workflow_flows(
+                    generated_flows, wf_def.workflow_id)
+
+            outcome = EvaluatedWorkflowOutcome(
+                workflow_definition=wf_def,
+                average_time=wf_avg_time,
+                shortest_flow=wf_shortest_flow,
+                num_paths_considered=wf_num_paths,
+                all_path_times=wf_all_times
+            )
+            evaluated_outcomes.append(outcome)
+
+            if total_weighted_time != float('inf'):
+                if wf_avg_time == float('inf'):
+                    total_weighted_time = float('inf')
+                else:
+                    total_weighted_time += wf_avg_time * wf_def.weight
+
+        return total_weighted_time, evaluated_outcomes
+
+    def evaluate(self,
+                 assignment_to_evaluate: FunctionalAssignment,
+                 base_assignment_for_cache: Optional[FunctionalAssignment] = None,
+                 changed_locations: Optional[Tuple[str, str]] = None
+                 ) -> Tuple[float, List[EvaluatedWorkflowOutcome]]:
+        """Evaluates the given FunctionalAssignment.
+
+        If `base_assignment_for_cache` and `changed_locations` are provided, and
+        `base_assignment_for_cache` matches the internally cached assignment object,
+        an incremental update is attempted. Otherwise, a full evaluation is performed.
+        """
+        can_do_incremental = (
+            base_assignment_for_cache is not None and
+            changed_locations is not None and
+            self.cached_assignment_obj is not None and
+            self.cached_evaluated_outcomes is not None and
+            # Use the __eq__ method of FunctionalAssignment for comparison
+            self.cached_assignment_obj == base_assignment_for_cache
+        )
+
+        if not can_do_incremental:
+            if base_assignment_for_cache is not None and changed_locations is not None and self.cached_assignment_obj is not None:
+                # More specific logging if an attempt at incremental was made but failed due to cache mismatch
+                logger.debug(
+                    "Cache mismatch for incremental: `base_assignment_for_cache` does not match `cached_assignment_obj`. Performing full evaluation.")
+            else:
+                logger.debug(
+                    "Performing full evaluation (no valid base for incremental or cache empty).")
+            total_objective, outcomes = self._perform_full_evaluation(
+                assignment_to_evaluate)
+        else:
+            # Incremental calculation
+            logger.debug(
+                f"Attempting incremental evaluation. Changed locations: {changed_locations}")
+            loc_A_id, loc_B_id = changed_locations
+
+            func_type_at_A_prev = base_assignment_for_cache.get_functional_type_at_physical_id(
+                loc_A_id)
+            func_type_at_B_prev = base_assignment_for_cache.get_functional_type_at_physical_id(
+                loc_B_id)
+            func_type_at_A_curr = assignment_to_evaluate.get_functional_type_at_physical_id(
+                loc_A_id)
+            func_type_at_B_curr = assignment_to_evaluate.get_functional_type_at_physical_id(
+                loc_B_id)
+
+            affected_functional_types: Set[str] = set()
+            if func_type_at_A_prev:
+                affected_functional_types.add(func_type_at_A_prev)
+            if func_type_at_B_prev:
+                affected_functional_types.add(func_type_at_B_prev)
+            if func_type_at_A_curr:
+                affected_functional_types.add(func_type_at_A_curr)
+            if func_type_at_B_curr:
+                affected_functional_types.add(func_type_at_B_curr)
+
+            logger.debug(f"Swap details for incremental: LocA ({loc_A_id}): {func_type_at_A_prev} -> {func_type_at_A_curr}. "
+                         f"LocB ({loc_B_id}): {func_type_at_B_prev} -> {func_type_at_B_curr}.")
+            logger.debug(
+                f"Functional types triggering re-evaluation: {affected_functional_types}")
+
+            new_evaluated_outcomes: List[EvaluatedWorkflowOutcome] = []
+
+            for i, wf_def in enumerate(self.workflow_definitions):
+                workflow_is_potentially_affected = any(
+                    func_step in affected_functional_types for func_step in wf_def.functional_sequence
+                )
+
+                if workflow_is_potentially_affected:
+                    # logger.debug(f"Workflow '{wf_def.workflow_id}' is affected by swap. Re-evaluating.")
+                    generated_flows_wf = self.path_finder.generate_flows(
+                        workflow_names=wf_def.functional_sequence,
+                        workflow_identifier=wf_def.workflow_id,
+                        custom_assignment_map=assignment_to_evaluate.get_map_copy()
+                    )
+                    wf_avg_time, wf_shortest_flow, wf_num_paths, wf_all_times = \
+                        self._evaluate_single_workflow_flows(
+                            generated_flows_wf, wf_def.workflow_id)
+
+                    current_outcome = EvaluatedWorkflowOutcome(
+                        workflow_definition=wf_def, average_time=wf_avg_time,
+                        shortest_flow=wf_shortest_flow, num_paths_considered=wf_num_paths,
+                        all_path_times=wf_all_times)
+                    new_evaluated_outcomes.append(current_outcome)
+                else:
+                    # Ensure self.cached_evaluated_outcomes is not None (already checked by can_do_incremental)
+                    new_evaluated_outcomes.append(
+                        self.cached_evaluated_outcomes[i])  # type: ignore
+
+            current_total_weighted_time_calc = 0.0
+            has_inf_path_incrementally = False
+            for outcome in new_evaluated_outcomes:
+                if outcome.average_time == float('inf'):
+                    has_inf_path_incrementally = True
+                    break
+                current_total_weighted_time_calc += outcome.average_time * \
+                    outcome.workflow_definition.weight
+
+            if has_inf_path_incrementally:
+                total_objective = float('inf')
+            else:
+                total_objective = current_total_weighted_time_calc
+
+            outcomes = new_evaluated_outcomes
+            # Log difference for significant changes to monitor incremental logic
+            if self.cached_total_objective_value is not None and abs(total_objective - self.cached_total_objective_value) > 1e-5:
+                logger.info(
+                    f"Incremental eval result. Prev Obj: {self.cached_total_objective_value:.2f}, New Obj: {total_objective:.2f}. Diff: {total_objective - self.cached_total_objective_value:.2f}")
+            elif self.cached_total_objective_value is None:
+                logger.info(
+                    f"Incremental eval result (no prev obj for diff). New Obj: {total_objective:.2f}")
+
+        # Update cache with the results of *this* evaluation, for the *assignment_to_evaluate*
+        self.cached_total_objective_value = total_objective
+        self.cached_evaluated_outcomes = outcomes
+        # Store a deepcopy to prevent external modifications to assignment_to_evaluate from affecting the cache
+        self.cached_assignment_obj = copy.deepcopy(assignment_to_evaluate)
+
+        return total_objective, outcomes
+
+    def reset_cache(self):
+        """Resets the cache. Call when the base state for comparison changes significantly."""
+        logger.info("Resetting LayoutObjectiveCalculator cache.")
+        self.cached_evaluated_outcomes = None
+        self.cached_total_objective_value = None
+        self.cached_assignment_obj = None
+
+
+class LayoutOptimizer:
+    """
+    Optimizes facility layout by reassigning functional types to physical locations.
+    Uses a greedy iterative approach (best-swap local search).
+    """
+
+    def __init__(self,
+                 path_finder: PathFinder,
+                 workflow_definitions: Sequence[WorkflowDefinition],
+                 config: NetworkConfig,  # Used by _initialize_physical_locations
+                 area_tolerance_ratio: float = 0.2):
+        self.path_finder: PathFinder = path_finder
+        # For BAN_TYPES, CONNECTION_TYPES etc.
+        self.config: NetworkConfig = config
+        self.objective_calculator: LayoutObjectiveCalculator = LayoutObjectiveCalculator(
+            workflow_definitions, path_finder, n_jobs_for_flows=config.N_JOBS_FOR_OPTIMIZER_FLOWS if hasattr(
+                config, 'N_JOBS_FOR_OPTIMIZER_FLOWS') else -1
+        )  # Pass n_jobs from config if available
+        self.area_tolerance_ratio: float = area_tolerance_ratio
+        self.all_physical_locations: List[PhysicalLocation] = self._initialize_physical_locations(
+        )
+        self.swappable_locations: List[PhysicalLocation] = [
+            loc for loc in self.all_physical_locations if loc.is_swappable
+        ]
+        logger.info(f"Optimizer initialized. Found {len(self.all_physical_locations)} total physical locations, "
+                    f"{len(self.swappable_locations)} are swappable.")
+
+    def _initialize_physical_locations(self) -> List[PhysicalLocation]:
+        locations = []
+        if self.path_finder.travel_times_df is None:
+            logger.error(
+                "PathFinder's travel_times_df is not loaded. Cannot initialize physical locations.")
+            return []
+        # Ensure '面积' key exists or handle gracefully
+        has_area_info = '面积' in self.path_finder.travel_times_df.index
+
+        for name_id_str in self.path_finder.all_name_ids:
+            parts = name_id_str.split('_', 1)
+            original_func_type = parts[0]
+            area = 0.0  # Default area
+            if has_area_info and name_id_str in self.path_finder.travel_times_df.columns:
+                try:
+                    area_val = self.path_finder.travel_times_df.loc['面积', name_id_str]
+                    if pd.notna(area_val):  # Check for NaN
+                        area = float(area_val)
+                    else:
+                        logger.debug(
+                            f"Area for {name_id_str} is NaN. Defaulting to 0.")
+                except ValueError:
+                    logger.warning(
+                        f"Could not parse area for {name_id_str}. Defaulting to 0.")
+                except KeyError:  # Should be caught by `name_id_str in ...columns` but as a safeguard
+                    logger.warning(
+                        f"KeyError for area of {name_id_str}. Defaulting to 0.")
+
+            # Determine swappability (e.g., '门' is a connection type, not swappable for a room function)
+            # This uses self.config.CONNECTION_TYPES from your NetworkConfig
+            is_swappable = original_func_type not in self.config.CONNECTION_TYPES and \
+                original_func_type not in getattr(self.config, 'BAN_TYPES_FOR_SWAP', [
+                ])  # Example of more specific ban types
+
+            locations.append(PhysicalLocation(
+                name_id_str, original_func_type, area, is_swappable))
+        return locations
+
+    def _get_valid_swap_pairs(self) -> List[Tuple[PhysicalLocation, PhysicalLocation]]:
+        valid_pairs: List[Tuple[PhysicalLocation, PhysicalLocation]] = []
+        num_swappable = len(self.swappable_locations)
+        for i in range(num_swappable):
+            for j in range(i + 1, num_swappable):
+                loc_A = self.swappable_locations[i]
+                loc_B = self.swappable_locations[j]
+
+                # Ensure original functions are different, or allow swapping same if it makes sense
+                # For now, let's assume swapping locations with the same original function is allowed
+                # if their areas match, effectively just moving a function between two identical spots.
+                # If they must have different functions to be considered a meaningful swap, add:
+                # if loc_A.original_functional_type == loc_B.original_functional_type:
+                #     continue
+
+                area_A, area_B = loc_A.area, loc_B.area
+                # Handle area_A or area_B being 0 or very small if that's possible
+                if area_A > 1e-6 and area_B > 1e-6:  # Use a small epsilon for float comparison
+                    if abs(area_A - area_B) / max(area_A, area_B) > self.area_tolerance_ratio:
+                        continue
+                elif (area_A <= 1e-6 and area_B > 1e-6) or \
+                     (area_A > 1e-6 and area_B <= 1e-6):
+                    # If one area is (near) zero and the other isn't,
+                    # only allow swap if tolerance is very high (e.g., >= 1.0 means ignore area diff)
+                    if self.area_tolerance_ratio < 1.0:  # A stricter interpretation
+                        continue
+                # If both areas are (near) zero, they are considered compatible in terms of area
+
+                valid_pairs.append((loc_A, loc_B))
+        logger.info(
+            f"Generated {len(valid_pairs)} valid swap pairs based on area tolerance {self.area_tolerance_ratio}.")
+        return valid_pairs
+
+    def run_optimization(self,
+                         initial_assignment: FunctionalAssignment,
+                         max_iterations: int = 100
+                         ) -> Tuple[FunctionalAssignment, float, List[EvaluatedWorkflowOutcome]]:
+        logger.info("Starting layout optimization...")
+
+        current_best_assignment = copy.deepcopy(
+            initial_assignment)  # Start with a copy
+
+        # Initial full evaluation and cache setup
+        self.objective_calculator.reset_cache()  # Clear any old cache
+        current_best_objective, current_best_outcomes = self.objective_calculator.evaluate(
+            assignment_to_evaluate=current_best_assignment
+            # No base_assignment or changed_locations, so it performs a full evaluation
+            # and populates its internal cache with current_best_assignment
+        )
+        logger.info(f"Initial Objective Value: {current_best_objective:.2f}")
+
+        if current_best_objective == float('inf'):
+            logger.error(
+                "Initial assignment results in unroutable workflows. Optimization aborted.")
+            return current_best_assignment, current_best_objective, current_best_outcomes
+
+        valid_swap_pairs = self._get_valid_swap_pairs()
+        if not valid_swap_pairs:
+            logger.warning(
+                "No valid pairs of physical locations to swap. Optimization cannot proceed.")
+            return current_best_assignment, current_best_objective, current_best_outcomes
+
+        for iteration in range(max_iterations):
+            logger.info(f"--- Iteration {iteration + 1}/{max_iterations} ---")
+
+            best_swap_candidate_in_iteration: Optional[FunctionalAssignment] = None
+            # Initialize with current best
+            best_swap_objective_in_iteration = current_best_objective
+            best_swap_outcomes_in_iteration = current_best_outcomes
+            best_swapped_pair_info: Optional[Tuple[PhysicalLocation,
+                                                   PhysicalLocation]] = None
+
+            num_evaluated_swaps = 0
+            for loc_A, loc_B in valid_swap_pairs:
+                # Create a candidate assignment by swapping functions based on the *current_best_assignment*
+                candidate_assignment = current_best_assignment.apply_functional_swap(
+                    loc_A.name_id, loc_B.name_id
+                )
+
+                # Evaluate this candidate, providing the base for incremental calculation
+                candidate_objective, candidate_outcomes = self.objective_calculator.evaluate(
+                    assignment_to_evaluate=candidate_assignment,
+                    base_assignment_for_cache=current_best_assignment,  # The state *before* this swap
+                    # The specific swap made
+                    changed_locations=(loc_A.name_id, loc_B.name_id)
+                )
+                num_evaluated_swaps += 1
+                if num_evaluated_swaps % 200 == 0 and num_evaluated_swaps > 0:  # Log progress periodically
+                    logger.debug(
+                        f"  Evaluated {num_evaluated_swaps}/{len(valid_swap_pairs)} potential swaps in iteration {iteration+1}...")
+
+                if candidate_objective < best_swap_objective_in_iteration:
+                    best_swap_objective_in_iteration = candidate_objective
+                    best_swap_candidate_in_iteration = candidate_assignment  # This is a new object
+                    best_swap_outcomes_in_iteration = candidate_outcomes
+                    best_swapped_pair_info = (loc_A, loc_B)
+
+            if best_swap_candidate_in_iteration is not None and best_swap_objective_in_iteration < current_best_objective:
+                # An improvement was found in this iteration
+                improvement = current_best_objective - best_swap_objective_in_iteration
+                # Should not be None if candidate is not None
+                sw_loc_A, sw_loc_B = best_swapped_pair_info
+
+                logger.info(
+                    f"Improvement found! Swapping functions related to '{sw_loc_A.name_id}' "
+                    f"(Orig Func: {sw_loc_A.original_functional_type}, Area: {sw_loc_A.area:.0f}) and "
+                    f"'{sw_loc_B.name_id}' (Orig Func: {sw_loc_B.original_functional_type}, Area: {sw_loc_B.area:.0f})."
+                )
+                logger.info(
+                    f"Objective improved from {current_best_objective:.2f} to {best_swap_objective_in_iteration:.2f} (Gain: {improvement:.2f}).")
+
+                # Update the current best state for the next iteration
+                current_best_assignment = copy.deepcopy(
+                    best_swap_candidate_in_iteration)  # Store the new best assignment
+                current_best_objective = best_swap_objective_in_iteration
+                current_best_outcomes = best_swap_outcomes_in_iteration
+
+                # The objective_calculator's cache was already updated to reflect best_swap_candidate_in_iteration
+                # when it was evaluated and found to be the best in the inner loop, because evaluate() always
+                # updates its cache with the assignment_to_evaluate.
+                # So, when the next iteration starts, current_best_assignment will match the calculator's cache.
+
+            else:
+                logger.info(
+                    "No further improvement found in this iteration. Optimization stopped.")
+                break  # Stop if no improvement in this iteration
+
+        if iteration == max_iterations - 1 and best_swap_candidate_in_iteration is not None and best_swap_objective_in_iteration < current_best_objective:
+            logger.info(
+                f"Reached maximum number of iterations ({max_iterations}), but was still improving.")
+        elif iteration == max_iterations - 1:
+            logger.info(
+                f"Reached maximum number of iterations ({max_iterations}).")
+
+        logger.info("Layout optimization finished.")
+        logger.info(
+            f"Final Best Objective Value: {current_best_objective:.2f}")
+        # The current_best_outcomes corresponds to current_best_assignment
+        return current_best_assignment, current_best_objective, current_best_outcomes
+</file>
+
 <file path="src/network/network.py">
 """
 Orchestrates the construction of a single-floor network graph.
@@ -3405,6 +4902,100 @@ class NetworkConfig:
         # Ensure paths exist
         self.RESULT_PATH.mkdir(parents=True, exist_ok=True)
         self.DEBUG_PATH.mkdir(parents=True, exist_ok=True)
+
+class RLConfig:
+    """存储用于基于强化学习的布局优化的所有配置参数。
+
+    Attributes:
+        ROOT_PATH (pathlib.Path): 项目的根目录路径。
+        RL_OPTIMIZER_PATH (pathlib.Path): RL优化器模块的根目录。
+        DATA_PATH (pathlib.Path): RL优化器的数据目录。
+        CACHE_PATH (pathlib.Path): 用于存放所有自动生成的中间文件的缓存目录。
+        LOG_PATH (pathlib.Path): 用于存放训练日志和模型的目录。
+        TRAVEL_TIMES_CSV (pathlib.Path): 原始通行时间矩阵的CSV文件路径。
+        PROCESS_TEMPLATES_JSON (pathlib.Path): 用户定义的就医流程模板文件路径。
+        NODE_VARIANTS_JSON (pathlib.Path): 自动生成的节点变体缓存文件路径。
+        TRAFFIC_DISTRIBUTION_JSON (pathlib.Path): 自动生成的流量分布缓存文件路径。
+        RESOLVED_PATHWAYS_PKL (pathlib.Path): 最终解析出的流线数据缓存文件路径。
+        COST_MATRIX_CACHE (pathlib.Path): 预计算成本矩阵的缓存文件路径。
+        AREA_SCALING_FACTOR (float): 科室面积允许的缩放容差。
+        MANDATORY_ADJACENCY (List[List[str]]): 强制相邻的科室对列表。
+        PREFERRED_ADJACENCY (Dict[str, List[List[str]]]): 偏好相邻（软约束）的科室对字典。
+        FIXED_NODE_TYPES (List[str]): 在布局中位置固定、不参与优化的节点类型列表。
+        EMBEDDING_DIM (int): 节点嵌入向量的维度。
+        TRANSFORMER_HEADS (int): Transformer编码器中的多头注意力头数。
+        TRANSFORMER_LAYERS (int): Transformer编码器的层数。
+        FEATURES_DIM (int): 特征提取器输出的特征维度。
+        LEARNING_RATE (float): 优化器的学习率。
+        NUM_ENVS (int): 用于训练的并行环境数量。
+        NUM_STEPS (int): 每个环境在每次更新前收集的数据步数。
+        TOTAL_TIMESTEPS (int): 训练的总时间步数。
+        GAMMA (float): 奖励的折扣因子。
+        GAE_LAMBDA (float): 通用优势估计(GAE)的lambda参数。
+        CLIP_EPS (float): PPO中的裁剪范围。
+        ENT_COEF (float): 熵损失的系数，用于鼓励探索。
+        BATCH_SIZE (int): 每个优化轮次中使用的批大小。
+        NUM_EPOCHS (int): 每次收集数据后，对数据进行优化的轮次。
+        REWARD_TIME_WEIGHT (float): 奖励函数中通行时间成本的权重。
+        REWARD_ADJACENCY_WEIGHT (float): 奖励函数中相邻性偏好的权重。
+    """
+
+    def __init__(self):
+        # --- 路径配置 (使用Pathlib) ---
+        self.ROOT_PATH: pathlib.Path = pathlib.Path(__file__).parent.parent
+        self.RL_OPTIMIZER_PATH: pathlib.Path = self.ROOT_PATH / 'src' / 'rl_optimizer'
+        self.DATA_PATH: pathlib.Path = self.RL_OPTIMIZER_PATH / 'data'
+        self.CACHE_PATH: pathlib.Path = self.DATA_PATH / 'cache'
+        self.LOG_PATH: pathlib.Path = self.ROOT_PATH / 'logs'
+        self.RESULT_PATH: pathlib.Path = self.ROOT_PATH / 'result'
+
+        # --- 输入文件 ---
+        self.TRAVEL_TIMES_CSV: pathlib.Path = self.ROOT_PATH / 'result' / 'super_network_travel_times.csv'
+        self.PROCESS_TEMPLATES_JSON: pathlib.Path = self.DATA_PATH / 'process_templates.json'
+
+        # --- 自动生成/缓存的中间文件 ---
+        self.NODE_VARIANTS_JSON: pathlib.Path = self.CACHE_PATH / 'node_variants.json'
+        self.TRAFFIC_DISTRIBUTION_JSON: pathlib.Path = self.CACHE_PATH / 'traffic_distribution.json'
+        self.RESOLVED_PATHWAYS_PKL: pathlib.Path = self.CACHE_PATH / 'resolved_pathways.pkl'
+        self.COST_MATRIX_CACHE: pathlib.Path = self.CACHE_PATH / 'cost_precomputation.npz'
+
+        # --- 约束配置 ---
+        self.AREA_SCALING_FACTOR: float = 0.10
+        self.MANDATORY_ADJACENCY: List[List[str]] = []  # 例如: [['手术室_30007', '中心供应室_10003']]
+        self.PREFERRED_ADJACENCY: Dict[str, List[List[str]]] = {
+            'positive': [], # 例如: [['检验中心_10007', '采血处_20007']]
+            'negative': []  # 例如: [['儿科_10006', '急诊科_1']]
+        }
+        self.FIXED_NODE_TYPES: List[str] = [
+            '门', '楼梯', '电梯', '扶梯', '走廊', '墙', '栏杆', 
+            '室外', '绿化', '中庭', '空房间'
+        ]
+
+        # --- 模型超参数 ---
+        self.EMBEDDING_DIM: int = 128
+        self.TRANSFORMER_HEADS: int = 4
+        self.TRANSFORMER_LAYERS: int = 4
+        self.FEATURES_DIM: int = 256
+        self.LEARNING_RATE: float = 3e-4
+
+        # --- PPO 训练超参数 ---
+        self.NUM_ENVS: int = 8
+        self.NUM_STEPS: int = 512
+        self.TOTAL_TIMESTEPS: int = 5_000_000
+        self.GAMMA: float = 0.99
+        self.GAE_LAMBDA: float = 0.95
+        self.CLIP_EPS: float = 0.2
+        self.ENT_COEF: float = 0.01
+        self.BATCH_SIZE: int = 64
+        self.NUM_EPOCHS: int = 10
+
+        # --- 软约束奖励权重 ---
+        self.REWARD_TIME_WEIGHT: float = 1.0
+        self.REWARD_ADJACENCY_WEIGHT: float = 0.1
+
+        # 确保关键路径存在
+        self.CACHE_PATH.mkdir(parents=True, exist_ok=True)
+        self.LOG_PATH.mkdir(parents=True, exist_ok=True)
 </file>
 
 <file path="main.py">
@@ -3425,10 +5016,6 @@ import sys
 import pathlib  # For path operations
 import os  # For os.path.join if needed, but prefer pathlib
 from typing import Dict, List, Optional
-
-# 
-import cProfile
-import snakeviz
 
 # Import necessary modules from the 'src' package
 # Assuming COLOR_MAP is still defined in config
@@ -3664,26 +5251,26 @@ def run_layout_optimization_example(app_config: NetworkConfig):
                            functional_sequence=word_detect.detect_nearest_word(
                                ['入口', '妇科', '采血处', '超声科', '妇科', '门诊药房', '入口']),
                            weight=1.0),
-        # WorkflowDefinition(workflow_id='WF_GynecologyB',
-        #                    functional_sequence=word_detect.detect_nearest_word(
-        #                        ['入口', '挂号收费', '妇科', '挂号收费', '采血处', '超声科', '妇科', '挂号收费', '门诊药房', '入口']),
-        #                    weight=1.0),
-        # WorkflowDefinition(workflow_id='WF_PulmonologyA',
-        #                    functional_sequence=word_detect.detect_nearest_word(
-        #                        ['入口', '呼吸内科', '采血处', '放射科', '呼吸内科', '门诊药房', '入口']),
-        #                    weight=0.5),
-        # WorkflowDefinition(workflow_id='WF_PulmonologyB',
-        #                    functional_sequence=word_detect.detect_nearest_word(
-        #                        ['入口', '挂号收费', '呼吸内科', '挂号收费', '采血处', '放射科', '呼吸内科', '挂号收费', '门诊药房', '入口']),
-        #                    weight=0.5),
-        # WorkflowDefinition(workflow_id='WF_CardiologyA',
-        #                    functional_sequence=word_detect.detect_nearest_word(
-        #                        ['入口', '心血管内科', '采血处', '超声科', '放射科', '心血管内科', '门诊药房', '入口']),
-        #                    weight=1.2),
-        # WorkflowDefinition(workflow_id='WF_CardiologyB',
-        #                    functional_sequence=word_detect.detect_nearest_word(
-        #                        ['入口', '挂号收费', '心血管内科', '挂号收费', '采血处', '超声科', '放射科', '心血管内科', '挂号收费', '门诊药房', '入口']),
-        #                    weight=1.2),
+        WorkflowDefinition(workflow_id='WF_GynecologyB',
+                           functional_sequence=word_detect.detect_nearest_word(
+                               ['入口', '挂号收费', '妇科', '挂号收费', '采血处', '超声科', '妇科', '挂号收费', '门诊药房', '入口']),
+                           weight=1.0),
+        WorkflowDefinition(workflow_id='WF_PulmonologyA',
+                           functional_sequence=word_detect.detect_nearest_word(
+                               ['入口', '呼吸内科', '采血处', '放射科', '呼吸内科', '门诊药房', '入口']),
+                           weight=0.5),
+        WorkflowDefinition(workflow_id='WF_PulmonologyB',
+                           functional_sequence=word_detect.detect_nearest_word(
+                               ['入口', '挂号收费', '呼吸内科', '挂号收费', '采血处', '放射科', '呼吸内科', '挂号收费', '门诊药房', '入口']),
+                           weight=0.5),
+        WorkflowDefinition(workflow_id='WF_CardiologyA',
+                           functional_sequence=word_detect.detect_nearest_word(
+                               ['入口', '心血管内科', '采血处', '超声科', '放射科', '心血管内科', '门诊药房', '入口']),
+                           weight=1.2),
+        WorkflowDefinition(workflow_id='WF_CardiologyB',
+                           functional_sequence=word_detect.detect_nearest_word(
+                               ['入口', '挂号收费', '心血管内科', '挂号收费', '采血处', '超声科', '放射科', '心血管内科', '挂号收费', '门诊药房', '入口']),
+                           weight=1.2),
     ]
     main_logger.info(
         f"Defined {len(workflow_defs)} workflows for optimization.")
@@ -3770,7 +5357,7 @@ def initialize_setup():
 
 
 if __name__ == "__main__":
-    main_logger, app_config, app_color_map_data = initialize_setup()
+    # main_logger, app_config, app_color_map_data = initialize_setup()
 
     # ---- Example 1: Single-floor network (optional) ----
     # main_logger.info("Attempting to run single-floor example...")
@@ -3789,20 +5376,19 @@ if __name__ == "__main__":
     #     total_time = finder.calculate_flow_total_time(flow)
 
     # ---- Example 4: Layout Optimization ----
-    travel_times_csv_path = app_config.RESULT_PATH / 'super_network_travel_times.csv'
-    if not travel_times_csv_path.exists():
-        main_logger.warning(f"{travel_times_csv_path} not found.")
-        main_logger.warning("Please ensure `super_network_travel_times.csv` is generated first "
-                            "(e.g., by running `run_multi_floor_example`).")
-        main_logger.warning("Skipping layout optimization example.")
-    else:
-        profiler = cProfile.Profile()
-        profiler.enable()
-        run_layout_optimization_example(app_config)
-        profiler.disable()
-        profiler.dump_stats("layout_opt.prof")
+    # travel_times_csv_path = app_config.RESULT_PATH / 'super_network_travel_times.csv'
+    # if not travel_times_csv_path.exists():
+    #     main_logger.warning(f"{travel_times_csv_path} not found.")
+    #     main_logger.warning("Please ensure `super_network_travel_times.csv` is generated first "
+    #                         "(e.g., by running `run_multi_floor_example`).")
+    #     main_logger.warning("Skipping layout optimization example.")
+    # else:
+    #     run_layout_optimization_example(app_config)
 
-    main_logger.info("Application finished.")
+    # ---- Example 5: RL Optimizer ----
+
+    # main_logger.info("Application finished.")
+    pass
 </file>
 
 </files>

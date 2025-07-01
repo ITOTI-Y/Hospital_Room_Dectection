@@ -11,9 +11,11 @@ dependencies = [
     "opencv-python>=4.10.0.84",
     "pandas>=2.2.3",
     "plotly>=6.0.0",
+    "sb3-contrib>=2.6.0",
     "scikit-learn>=1.5.1",
     "sentence-transformers>=4.1.0",
     "snakeviz>=2.2.2",
+    "stable-baselines3[extra]>=2.6.0",
     "torch>=2.6.0",
     "torchvision>=0.22.0",
 ]
