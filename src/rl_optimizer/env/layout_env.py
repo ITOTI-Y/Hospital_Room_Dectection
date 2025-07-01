@@ -72,10 +72,15 @@ class LayoutEnv(gym.Env):
         # 动作空间：选择一个科室进行放置。动作是科室的索引。
         self.action_space = spaces.Discrete(self.num_depts)
 
-        # 观测空间：使用MultiDiscrete确保与策略网络的兼容性
+        # 观测空间：使用Box空间来明确定义形状，避免SB3的意外转换
         self.observation_space = spaces.Dict({
             # layout[i] = k+1 表示槽位i放置了索引为k的科室。0表示空。
-            "layout": spaces.MultiDiscrete([self.num_depts + 1] * self.num_slots),
+            "layout": spaces.Box(
+                low=0, 
+                high=self.num_depts, # 最大值为科室数 (num_depts-1)+1
+                shape=(self.num_slots,), 
+                dtype=np.int32
+            ),
             # placed_mask[k] = 1 表示索引为k的科室已被放置。
             "placed_mask": spaces.MultiBinary(self.num_depts),
             # 当前待填充槽位的索引
@@ -87,7 +92,7 @@ class LayoutEnv(gym.Env):
         self.current_step = 0
         # layout的索引是物理槽位索引，值是科室索引+1
         self.layout = np.zeros(self.num_slots, dtype=np.int32)
-        self.placed_mask = np.zeros(self.num_depts, dtype=np.int8)
+        self.placed_mask = np.zeros(self.num_depts, dtype=bool)
         # 每个回合开始时需要被打乱的槽位处理顺序
         self.shuffled_slot_indices = np.arange(self.num_slots)
 
@@ -105,7 +110,7 @@ class LayoutEnv(gym.Env):
             logger.error(f"无效的动作索引: {action}，有效范围是 [0, {self.num_depts-1}]")
             return self._get_obs(), -100.0, True, False, self._get_info()
         
-        if self.placed_mask[action] == 1:
+        if self.placed_mask[action]:
             # 这是一个安全检查。理论上动作掩码会阻止这种情况。
             # 如果发生，说明上游逻辑有误，应给予重罚并终止。
             logger.error(f"严重错误：智能体选择了已被放置的科室！动作={action}, 科室={self.placeable_depts[action]}")
@@ -118,7 +123,7 @@ class LayoutEnv(gym.Env):
         
         # 更新状态：在布局中记录放置，并标记科室为"已用"
         self.layout[slot_to_fill] = action + 1  # 动作是科室索引，存储时+1
-        self.placed_mask[action] = 1
+        self.placed_mask[action] = True
         self.current_step += 1
 
         terminated = (self.current_step == self.num_slots)
@@ -129,7 +134,7 @@ class LayoutEnv(gym.Env):
     def _get_obs(self) -> Dict[str, Any]:
         """构建并返回当前观测字典。"""
         if self.current_step >= self.num_slots:
-            current_slot_idx = 0.0
+            current_slot_idx = 0
         else:
             current_slot_idx = self.shuffled_slot_indices[self.current_step]
 
@@ -148,10 +153,10 @@ class LayoutEnv(gym.Env):
         计算当前步骤的合法动作掩码 (即哪些**科室**是合法的)。
         """
         if self.current_step >= self.num_slots:
-            return np.zeros(self.num_depts, dtype=np.int8)
+            return np.zeros(self.num_depts, dtype=bool)
 
         # 1. 初始掩码：所有未放置的科室都是潜在的合法动作
-        action_mask = 1 - self.placed_mask
+        action_mask = ~self.placed_mask
 
         # 2. 面积约束：科室面积必须符合当前槽位的容差
         current_slot_idx = self.shuffled_slot_indices[self.current_step]
@@ -160,29 +165,29 @@ class LayoutEnv(gym.Env):
         max_area = current_slot_area * (1 + self.config.AREA_SCALING_FACTOR)
 
         for dept_idx in range(self.num_depts):
-            if action_mask[dept_idx] == 1:  # 只检查当前合法的动作
+            if action_mask[dept_idx]:  # 只检查当前合法的动作
                 dept_name = self.placeable_depts[dept_idx]
                 dept_area = self.dept_areas_map[dept_name]
                 if not (min_area <= dept_area <= max_area):
-                    action_mask[dept_idx] = 0
+                    action_mask[dept_idx] = False
         
         # 容错机制：如果没有合法动作，逐步放松约束
         if np.sum(action_mask) == 0:
             logger.warning(f"在步骤 {self.current_step}，没有找到任何合法的动作！尝试放松约束...")
             
             # 重新计算，使用更宽松的面积约束
-            relaxation_factors = [0.2, 0.3, 0.5, 1.0]  # 逐步放松
+            relaxation_factors = [0.2, 0.3, 0.5, 0.7, 1.0]  # 逐步放松
             for factor in relaxation_factors:
-                action_mask = 1 - self.placed_mask  # 重新开始，只考虑未放置的科室
+                action_mask = ~self.placed_mask  # 重新开始，只考虑未放置的科室
                 min_area = current_slot_area * (1 - factor)
                 max_area = current_slot_area * (1 + factor)
                 
                 for dept_idx in range(self.num_depts):
-                    if action_mask[dept_idx] == 1:
+                    if action_mask[dept_idx]:
                         dept_name = self.placeable_depts[dept_idx]
                         dept_area = self.dept_areas_map[dept_name]
                         if not (min_area <= dept_area <= max_area):
-                            action_mask[dept_idx] = 0
+                            action_mask[dept_idx] = False
                 
                 if np.sum(action_mask) > 0:
                     logger.info(f"使用松弛因子 {factor} 找到了 {np.sum(action_mask)} 个合法动作")
@@ -191,7 +196,7 @@ class LayoutEnv(gym.Env):
             # 最后的安全检查：如果仍然没有合法动作，至少允许所有未放置的科室
             if np.sum(action_mask) == 0:
                 logger.error(f"即使放松所有约束也没有找到合法动作！强制允许所有未放置的科室。")
-                action_mask = 1 - self.placed_mask
+                action_mask = ~self.placed_mask
         
         return action_mask
     
@@ -207,7 +212,7 @@ class LayoutEnv(gym.Env):
             return -500.0
 
         time_cost = self.cc.calculate_total_cost(final_layout_depts)
-        time_reward = -time_cost / 1e6  # 缩放以稳定训练
+        time_reward = -time_cost / 1e5  # 缩放以稳定训练
 
         adjacency_reward = self._calculate_adjacency_reward(final_layout_depts)
         

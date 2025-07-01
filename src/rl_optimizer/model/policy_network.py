@@ -44,10 +44,10 @@ class LayoutTransformer(BaseFeaturesExtractor):
         # 支持两种观测空间定义方式
         if hasattr(observation_space["layout"], 'nvec'):
             # MultiDiscrete 空间
-            num_depts = observation_space["layout"].nvec[0]
+            num_depts = int(observation_space["layout"].nvec[0])
         else:
             # Box 空间
-            num_depts = observation_space["layout"].high[0]
+            num_depts = int(observation_space["layout"].high[0]) + 1 # high是最大值，种类数是最大值+1
 
         embedding_dim = self.config.EMBEDDING_DIM
 
@@ -60,11 +60,6 @@ class LayoutTransformer(BaseFeaturesExtractor):
         # 2. 槽位位置嵌入层 (Slot Positional Embedding)
         # 为每个槽位（位置）学习一个唯一的嵌入向量，以区分位置信息
         self.slot_position_embedding = nn.Embedding(num_embeddings=num_slots, embedding_dim=embedding_dim)
-
-
-        # 3. 当前待决策科室嵌入层 (Current Dept Embedding)
-        # 输入ID范围是 0 到 num_placeable_depts - 1
-        self.current_dept_embedding = nn.Embedding(num_embeddings=num_depts, embedding_dim=embedding_dim)
 
         # 4. Transformer 编码器层
         # 这是网络的核心，用于处理序列信息
@@ -82,7 +77,7 @@ class LayoutTransformer(BaseFeaturesExtractor):
         )
 
         # 5. 输出线性层 (Output Layer)
-        # 将处理后的特征与当前待决策科室的特征拼接，然后映射到最终的特征维度
+        # 将处理后的特征与当前待决策槽位的特征拼接，然后映射到最终的特征维度
         self.linear = nn.Sequential(
             nn.LayerNorm(embedding_dim * num_slots + embedding_dim),
             nn.Linear(embedding_dim * num_slots + embedding_dim, features_dim),
@@ -101,18 +96,18 @@ class LayoutTransformer(BaseFeaturesExtractor):
         Args:
             observations (Dict[str, torch.Tensor]): 从环境中获得的观测数据字典。
                 - "layout": (batch_size, num_slots) 当前布局，值为科室ID
-                - "current_dept_id": (batch_size, 1) 当前待决策的科室ID
+                - "current_slot_idx": (batch_size, 1) 当前待填充的槽位索引
 
         Returns:
             torch.Tensor: 提取出的状态特征，维度为 (batch_size, features_dim)。
         """
         # --- 1. 准备输入嵌入 ---
         layout_ids = observations["layout"]
-        current_dept_id = observations["current_dept_id"].squeeze(-1)
+        current_slot_idx = observations["current_slot_idx"].squeeze(-1)
 
         # 确保数据类型正确：嵌入层需要整数类型
         layout_ids = layout_ids.long()  # 转换为 LongTensor
-        current_dept_id = current_dept_id.long()  # 转换为 LongTensor
+        current_slot_idx = current_slot_idx.long()  # 转换为 LongTensor
 
         batch_size, num_slots = layout_ids.shape
         device = layout_ids.device
@@ -134,13 +129,13 @@ class LayoutTransformer(BaseFeaturesExtractor):
         # 将所有槽位的特征展平，形成一个代表整个布局的向量
         flattened_layout_features = transformer_output.reshape(batch_size, -1) # (B, num_slots * D_emb)
 
-        # --- 3. 整合当前待决策科室的信息 ---
-        # 获取当前待决策科室的嵌入
-        current_dept_embed = self.current_dept_embedding(current_dept_id) # (B, D_emb)
+        # --- 3. 整合当前待决策槽位的信息 ---
+        # 获取当前待决策槽位的嵌入
+        current_slot_embed = self.slot_position_embedding(current_slot_idx) # (B, D_emb)
 
         # --- 4. 拼接并输出最终特征 ---
         # 将布局特征和当前科室特征拼接在一起
-        combined_features = torch.cat([flattened_layout_features, current_dept_embed], dim=1)
+        combined_features = torch.cat([flattened_layout_features, current_slot_embed], dim=1)
         
         # 通过最后的线性层得到最终的特征向量
         final_features = self.linear(combined_features)

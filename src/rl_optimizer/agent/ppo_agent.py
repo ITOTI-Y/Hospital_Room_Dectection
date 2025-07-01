@@ -131,7 +131,7 @@ class PPOAgent:
         try:
             model.learn(
                 total_timesteps=self.config.TOTAL_TIMESTEPS,
-                callback=eval_callback,
+                # callback=eval_callback,
                 progress_bar=True
             )
         except KeyboardInterrupt:
