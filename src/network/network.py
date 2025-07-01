@@ -129,12 +129,13 @@ class Network:
                                  self._id_map, z_level)
 
         # Conditionally run the OutsideNodeCreator to create actual mesh nodes for outside
-        if process_outside_nodes:
-            logger.info(f"Running creator: {self._outside_node_creator.__class__.__name__} (for mesh)")
-            # Note: _create_mesh_nodes_for_mask in OutsideNodeCreator also sets id_map,
-            # but it's okay as it will set the same OUTSIDE_ID_MAP_VALUE before creating nodes.
-            self._outside_node_creator.create_nodes(
-                self._current_image_data, self._id_map, z_level)
+        # FIXME: 不需要室外节点
+        # if process_outside_nodes:
+        #     logger.info(f"Running creator: {self._outside_node_creator.__class__.__name__} (for mesh)")
+        #     # Note: _create_mesh_nodes_for_mask in OutsideNodeCreator also sets id_map,
+        #     # but it's okay as it will set the same OUTSIDE_ID_MAP_VALUE before creating nodes.
+        #     self._outside_node_creator.create_nodes(
+        #         self._current_image_data, self._id_map, z_level)
 
     def _connect_doors_to_mesh_areas(self, z_level: int) -> None:
         """
@@ -204,7 +205,7 @@ class Network:
                     # Query for potentially multiple pedestrian nodes within a smaller radius
                     # This is for cases like an exit onto a patio (pedestrian) then to lawn (outside)
                     indices_in_ball = ped_tree.query_ball_point(
-                        door_pos_2d, r=np.sqrt(self.config.GRID_SIZE ** 2 + (self.config.GRID_SIZE / 2) ** 2))
+                        door_pos_2d, r=np.sqrt(2 * self.config.GRID_SIZE ** 2))
                     for ped_idx in indices_in_ball:
                         if ped_idx < len(pedestrian_mesh_nodes):
                             self.graph_manager.connect_nodes_by_ids(

@@ -1,0 +1,26 @@
+[
+    {
+        "process_id": "STD_CHECKUP",
+        "description": "标准体检流程",
+        "core_sequence": ["挂号", "全科", "采血处", "检验中心", "放射科", "全科"],
+        "start_nodes": ["门"],
+        "end_nodes": ["门"],
+        "base_weight": 1.0
+    },
+    {
+        "process_id": "EMERGENCY_TRAUMA",
+        "description": "急诊创伤流程",
+        "core_sequence": ["急诊科", "放射科", "手术室", "ICU"],
+        "start_nodes": ["门"],
+        "end_nodes": ["ICU"],
+        "base_weight": 1.0
+    },
+    {
+        "process_id": "GYN_ROUTINE",
+        "description": "妇科常规就诊",
+        "core_sequence": ["挂号", "妇科", "药房"],
+        "start_nodes": ["门"],
+        "end_nodes": ["门"],
+        "base_weight": 1.0
+    }
+]
