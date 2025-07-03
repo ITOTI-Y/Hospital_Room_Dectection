@@ -172,6 +172,11 @@ class RLConfig:
 
     def __init__(self):
         # --- 路径配置 (使用Pathlib) ---
+        """
+        初始化 RLConfig 类，设置强化学习布局优化所需的所有路径、输入文件、缓存文件、约束参数及模型训练超参数。
+        
+        该方法会自动创建缓存目录和日志目录（如不存在）。
+        """
         self.ROOT_PATH: pathlib.Path = pathlib.Path(__file__).parent.parent
         self.RL_OPTIMIZER_PATH: pathlib.Path = self.ROOT_PATH / 'src' / 'rl_optimizer'
         self.DATA_PATH: pathlib.Path = self.RL_OPTIMIZER_PATH / 'data'
