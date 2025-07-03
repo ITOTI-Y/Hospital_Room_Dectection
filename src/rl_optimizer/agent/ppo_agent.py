@@ -1,14 +1,14 @@
 # src/rl_optimizer/agent/ppo_agent.py
 
-import gymnasium as gym
 import torch
-from stable_baselines3 import PPO
+from pathlib import Path
+from stable_baselines3.common.vec_env import VecNormalize
 from stable_baselines3.common.env_util import make_vec_env
-from stable_baselines3.common.callbacks import EvalCallback
+from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback as EvalCallback
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
-from typing import Dict, Any, List, Callable
+from typing import Dict, Any, List
 import numpy as np
 import time
 
@@ -131,7 +131,7 @@ class PPOAgent:
         try:
             model.learn(
                 total_timesteps=self.config.TOTAL_TIMESTEPS,
-                # callback=eval_callback,
+                callback=eval_callback,
                 progress_bar=True
             )
         except KeyboardInterrupt:
