@@ -195,7 +195,20 @@ class LayoutEnv(gym.Env):
             
             # 最后的安全检查：如果仍然没有合法动作，至少允许所有未放置的科室
             if np.sum(action_mask) == 0:
-                logger.error(f"即使放松所有约束也没有找到合法动作！强制允许所有未放置的科室。")
+                current_slot_name = self.placeable_slots[current_slot_idx]
+                current_slot_area = self.slot_areas[current_slot_idx]
+                
+                unplaced_indices = np.where(~self.placed_mask)[0]
+                unplaced_depts_info = [
+                    f"{self.placeable_depts[i]}({self.dept_areas_map[self.placeable_depts[i]]:.2f})"
+                    for i in unplaced_indices
+                ]
+                
+                logger.error(
+                    f"即使放松所有约束也没有为槽位 '{current_slot_name}' (面积: {current_slot_area:.2f}) 找到合法科室！"
+                    f"剩余待放置科室: [{', '.join(unplaced_depts_info)}]. "
+                    f"将强制允许所有未放置的科室。"
+                )
                 action_mask = ~self.placed_mask
         
         return action_mask
@@ -212,7 +225,7 @@ class LayoutEnv(gym.Env):
             return -500.0
 
         time_cost = self.cc.calculate_total_cost(final_layout_depts)
-        time_reward = -time_cost / 1e5  # 缩放以稳定训练
+        time_reward = -time_cost / 1e3  # 缩放以稳定训练
 
         adjacency_reward = self._calculate_adjacency_reward(final_layout_depts)
         

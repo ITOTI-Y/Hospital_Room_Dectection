@@ -190,7 +190,7 @@ class RLConfig:
         self.COST_MATRIX_CACHE: pathlib.Path = self.CACHE_PATH / 'cost_precomputation.npz'
 
         # --- 约束配置 ---
-        self.AREA_SCALING_FACTOR: float = 0.30
+        self.AREA_SCALING_FACTOR: float = 0.1
         self.MANDATORY_ADJACENCY: List[List[str]] = []  # 例如: [['手术室_30007', '中心供应室_10003']]
         self.PREFERRED_ADJACENCY: Dict[str, List[List[str]]] = {
             'positive': [], # 例如: [['检验中心_10007', '采血处_20007']]
