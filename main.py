@@ -356,15 +356,15 @@ def initialize_setup():
 
 
 if __name__ == "__main__":
-    # main_logger, app_config, app_color_map_data = initialize_setup()
+    main_logger, app_config, app_color_map_data = initialize_setup()
 
     # ---- Example 1: Single-floor network (optional) ----
     # main_logger.info("Attempting to run single-floor example...")
     # run_single_floor_example(app_config, app_color_map_data)
 
     # ---- Example 2: Multi-floor SuperNetwork (primary use case) ----
-    # main_logger.info("Attempting to run multi-floor SuperNetwork example...")
-    # run_multi_floor_example(app_config, app_color_map_data)
+    main_logger.info("Attempting to run multi-floor SuperNetwork example...")
+    run_multi_floor_example(app_config, app_color_map_data)
 
     # ---- Example 3: Process Flow ----
     # main_logger.info("Attempting to run process flow example...")
