@@ -150,7 +150,12 @@ class LayoutEnv(gym.Env):
     
     def get_action_mask(self) -> np.ndarray:
         """
-        计算当前步骤的合法动作掩码 (即哪些**科室**是合法的)。
+        计算当前步骤下所有合法的科室动作掩码。
+        
+        该方法根据当前待填充槽位的面积约束，返回一个布尔数组，指示哪些未放置的科室可被合法选择。如果所有未放置科室均不满足面积约束，将逐步放宽容差，直至至少有一个合法动作；如仍无合法动作，则强制允许所有未放置科室。
+        
+        返回值:
+            np.ndarray: 长度等于科室数的布尔数组，True 表示对应科室当前可被选择。
         """
         if self.current_step >= self.num_slots:
             return np.zeros(self.num_depts, dtype=bool)
@@ -214,7 +219,11 @@ class LayoutEnv(gym.Env):
         return action_mask
     
     def _calculate_reward(self) -> float:
-        """在回合结束时计算最终奖励。"""
+        """
+        在回合结束时，根据最终布局计算并返回总奖励。
+        
+        如果布局未完成，则返回重罚。奖励由时间成本和邻接约束两部分加权组成，其中时间成本通过 `CostCalculator` 计算并缩放，邻接奖励由 `_calculate_adjacency_reward` 计算。
+        """
         final_layout_depts = [None] * self.num_slots
         for slot_idx, dept_id in enumerate(self.layout):
             if dept_id > 0:
