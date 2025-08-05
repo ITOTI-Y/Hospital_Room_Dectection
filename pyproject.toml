@@ -13,6 +13,7 @@ dependencies = [
     "plotly>=6.0.0",
     "sb3-contrib>=2.6.0",
     "scikit-learn>=1.5.1",
+    "seaborn>=0.13.2",
     "sentence-transformers>=4.1.0",
     "snakeviz>=2.2.2",
     "stable-baselines3[extra]>=2.6.0",

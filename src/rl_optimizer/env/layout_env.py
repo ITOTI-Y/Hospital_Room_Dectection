@@ -11,7 +11,7 @@ from src.rl_optimizer.data.cache_manager import CacheManager
 from src.rl_optimizer.env.cost_calculator import CostCalculator
 from src.rl_optimizer.utils.setup import setup_logger
 
-logger = setup_logger(__name__)
+logger = setup_logger(__name__, level=10)  # 临时启用DEBUG级别
 
 class LayoutEnv(gym.Env):
     """
@@ -101,14 +101,14 @@ class LayoutEnv(gym.Env):
         super().reset(seed=seed)
         self._initialize_state_variables()
         self.np_random.shuffle(self.shuffled_slot_indices)
-        return self._get_obs(), self._get_info()
+        return self._get_obs(), self._get_info(terminated=False)
     
     def step(self, action: int) -> Tuple[Dict, float, bool, bool, Dict]:
         """执行一个动作：在当前槽位放置选定的科室。"""
         # 更严格的输入验证
         if not (0 <= action < self.num_depts):
             logger.error(f"无效的动作索引: {action}，有效范围是 [0, {self.num_depts-1}]")
-            return self._get_obs(), -100.0, True, False, self._get_info()
+            return self._get_obs(), -100.0, True, False, self._get_info(terminated=False)
         
         if self.placed_mask[action]:
             # 这是一个安全检查。理论上动作掩码会阻止这种情况。
@@ -116,7 +116,7 @@ class LayoutEnv(gym.Env):
             logger.error(f"严重错误：智能体选择了已被放置的科室！动作={action}, 科室={self.placeable_depts[action]}")
             logger.error(f"当前步骤: {self.current_step}, placed_mask: {self.placed_mask}")
             logger.error(f"当前动作掩码: {self.get_action_mask()}")
-            return self._get_obs(), -100.0, True, False, self._get_info()
+            return self._get_obs(), -100.0, True, False, self._get_info(terminated=False)
 
         # 确定当前要填充的物理槽位索引
         slot_to_fill = self.shuffled_slot_indices[self.current_step]
@@ -128,8 +128,15 @@ class LayoutEnv(gym.Env):
 
         terminated = (self.current_step == self.num_slots)
         reward = self._calculate_reward() if terminated else 0.0
+        info = self._get_info(terminated)
+        
+        # 调试日志：检查episode结束时的info内容
+        if terminated and logger.isEnabledFor(10):  # DEBUG级别
+            logger.debug(f"Episode结束，info内容: {info}")
+            if 'episode' in info:
+                logger.debug(f"Episode数据: {info['episode']}")
 
-        return self._get_obs(), reward, terminated, False, self._get_info()
+        return self._get_obs(), reward, terminated, False, info
     
     def _get_obs(self) -> Dict[str, Any]:
         """构建并返回当前观测字典。"""
@@ -144,9 +151,45 @@ class LayoutEnv(gym.Env):
             "current_slot_idx": np.array([current_slot_idx], dtype=np.int32)
         }
     
-    def _get_info(self) -> Dict[str, Any]:
-        """返回包含动作掩码的附加信息。"""
-        return {"action_mask": self.get_action_mask()}
+    def _get_info(self, terminated: bool = False) -> Dict[str, Any]:
+        """返回包含动作掩码和episode信息的附加信息。"""
+        info = {"action_mask": self.get_action_mask()}
+        
+        # 如果episode结束，添加训练指标信息
+        if terminated:
+            # 构造最终布局
+            final_layout_depts = [None] * self.num_slots
+            for slot_idx, dept_id in enumerate(self.layout):
+                if dept_id > 0:
+                    final_layout_depts[slot_idx] = self.placeable_depts[dept_id - 1]
+            
+            # 如果布局完整，计算时间成本
+            if None not in final_layout_depts:
+                # 计算原始的总时间成本（未缩放）
+                raw_time_cost = self.cc.calculate_total_cost(final_layout_depts)
+                
+                # 计算用于训练的缩放reward（与_calculate_reward中的逻辑一致）
+                scaled_time_reward = -raw_time_cost / 1e4
+                
+                # 调试日志：确认传递的是原始值
+                if logger.isEnabledFor(10):  # DEBUG级别
+                    logger.debug(f"Episode结束 - 原始时间成本: {raw_time_cost:.2f}, "
+                               f"缩放后训练reward: {scaled_time_reward:.6f}")
+                
+                # 添加episode信息供TrainingMetricsCallback使用
+                info['episode'] = {
+                    'time_cost': raw_time_cost,  # 明确传递原始值
+                    'scaled_reward': scaled_time_reward,  # 同时提供缩放值用于对比
+                    'layout': final_layout_depts.copy(),
+                    'r': self._calculate_reward(),  # 完整的奖励值（包含时间+邻接）
+                    'l': self.current_step  # episode长度
+                }
+                
+                # 如果启用了详细日志，还可以添加更多信息
+                if logger.isEnabledFor(20):  # INFO级别
+                    info['episode']['per_process_costs'] = self.cc.calculate_per_process_cost(final_layout_depts)
+        
+        return info
     
     def get_action_mask(self) -> np.ndarray:
         """
@@ -234,7 +277,7 @@ class LayoutEnv(gym.Env):
             return -500.0
 
         time_cost = self.cc.calculate_total_cost(final_layout_depts)
-        time_reward = -time_cost / 1e3  # 缩放以稳定训练
+        time_reward = -time_cost / 1e4  # 缩放以稳定训练
 
         adjacency_reward = self._calculate_adjacency_reward(final_layout_depts)
         
@@ -243,7 +286,7 @@ class LayoutEnv(gym.Env):
         
         return total_reward
     
-    def _calculate_adjacency_reward(self, final_layout: List[str]) -> float:
+    def _calculate_adjacency_reward(self, _final_layout: List[str]) -> float:
         """
         计算偏好相邻软约束的奖励。
         (TODO: 需要一个可靠的邻接关系数据源)

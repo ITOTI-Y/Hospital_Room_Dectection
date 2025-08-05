@@ -162,3 +162,7 @@ logs/
 models/*.pth
 debug/
 archive/
+results/comparison/
+results/plots/
+results/reports/
+results/layouts/

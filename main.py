@@ -1,390 +1,479 @@
 """
-Main entry point for the network generation and analysis application.
+医院布局优化系统主入口
 
-This script demonstrates how to:
-1. Configure logging.
-2. Load application configurations.
-3. Build a single-floor network (optional).
-4. Build a multi-floor super-network.
-5. Plot the generated network(s) using Plotly.
-6. Calculate and save room-to-room/out-door travel times.
-7. Generate and evaluate workflow paths.
+统一的命令行接口，支持网络生成、算法优化和结果对比分析。
+整合了所有功能模块，提供完整的医院布局优化解决方案。
 """
+
+import argparse
 import logging
 import sys
-import pathlib  # For path operations
-import os  # For os.path.join if needed, but prefer pathlib
-from typing import Dict, List, Optional
+import pathlib
+from typing import List, Optional, Dict, Any
+import pandas as pd
 
-# Import necessary modules from the 'src' package
-# Assuming COLOR_MAP is still defined in config
-from src.config import NetworkConfig, COLOR_MAP
-from src.network.network import Network
-from src.network.super_network import SuperNetwork
-from src.plotting.plotter import PlotlyPlotter
-from src.analysis.travel_time import calculate_room_travel_times
+# 导入核心模块
+from src.config import NetworkConfig, RLConfig, COLOR_MAP
+from src.core.network_generator import NetworkGenerator
+from src.core.algorithm_manager import AlgorithmManager
+from src.comparison.results_comparator import ResultsComparator
 
-# Analysis modules
-from src.analysis.process_flow import PathFinder
-from src.analysis.word_detect import WordDetect
+# 导入优化组件
+from src.rl_optimizer.data.cache_manager import CacheManager
+from src.rl_optimizer.env.cost_calculator import CostCalculator
+from src.algorithms.constraint_manager import ConstraintManager
 
-# Optimization modules
-from src.optimization.optimizer import (
-    PhysicalLocation,
-    FunctionalAssignment,
-    WorkflowDefinition,
-    LayoutObjectiveCalculator,  # Not directly used by main, but optimizer uses it
-    LayoutOptimizer,
-    EvaluatedWorkflowOutcome
-)
-
-# --- Global Logger Setup ---
+logger = logging.getLogger(__name__)
 
 
 def setup_logging(level=logging.INFO, log_file: Optional[pathlib.Path] = None):
-    """
-    Configures basic logging for the application.
-
-    Args:
-        level: The minimum logging level to output (e.g., logging.INFO, logging.DEBUG).
-        log_file: Optional path to a file where logs should also be written.
-    """
-    root_logger = logging.getLogger()  # Get the root logger
-
-    # Prevent adding handlers multiple times if this function is called again
+    """配置日志系统"""
+    root_logger = logging.getLogger()
+    
     if root_logger.hasHandlers():
-        # If you want to clear and reconfigure, uncomment the next line
-        # for handler in root_logger.handlers[:]: root_logger.removeHandler(handler)
-        # For now, if handlers exist, assume it's configured.
-        # Or, more robustly, check for specific handler types if needed.
-        pass  # Already configured
-
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-                                  datefmt='%Y-%m-%d %H:%M:%S')
-
-    # Console Handler
+        return
+    
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        datefmt='%Y-%m-%d %H:%M:%S'
+    )
+    
+    # 控制台处理器
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setFormatter(formatter)
-    console_handler.setLevel(level)  # Console can have its own level
+    console_handler.setLevel(level)
     root_logger.addHandler(console_handler)
-
-    # File Handler (optional)
+    
+    # 文件处理器
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(
-            log_file, mode='a', encoding='utf-8')
+        file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
         file_handler.setFormatter(formatter)
-        file_handler.setLevel(level)  # File can also have its own level
+        file_handler.setLevel(level)
         root_logger.addHandler(file_handler)
-
-    root_logger.setLevel(level)  # Set the overall level for the root logger
-
-# --- Main Application Logic ---
+    
+    root_logger.setLevel(level)
 
 
-def run_single_floor_example(app_config: NetworkConfig, app_color_map: Dict):
-    """
-    Demonstrates building and plotting a single-floor network.
-    """
-    logger = logging.getLogger(__name__)
-    logger.info("--- Running Single-Floor Network Example ---")
-
-    # Define the image path for the single floor
-    # Ensure this path is correct for your setup
-    single_image_path_str = "./data/label/1F-meng.png"  # Example path
-    single_image_path = pathlib.Path(single_image_path_str)
-
-    if not single_image_path.exists():
-        logger.error(
-            f"Single floor image not found: {single_image_path}. Skipping single-floor example.")
-        return
-
-    try:
-        # Initialize Network builder for a single floor
-        # id_generator_start_value can be 1 for a standalone single network
-        network_builder = Network(
-            config=app_config,
-            color_map_data=app_color_map,
-            id_generator_start_value=1
+class HospitalLayoutOptimizer:
+    """医院布局优化系统主类"""
+    
+    def __init__(self):
+        """初始化系统"""
+        self.network_config = NetworkConfig(color_map_data=COLOR_MAP)
+        self.rl_config = RLConfig()
+        self.network_generator = None
+        self.algorithm_manager = None
+        
+        logger.info("医院布局优化系统初始化完成")
+    
+    def run_network_generation(self, 
+                             image_dir: str = "./data/label/",
+                             visualization_filename: str = "hospital_network_3d.html",
+                             travel_times_filename: str = "hospital_travel_times.csv") -> bool:
+        """
+        运行网络生成
+        
+        Args:
+            image_dir: 楼层标注图像目录
+            visualization_filename: 可视化输出文件名
+            travel_times_filename: 行程时间输出文件名
+            
+        Returns:
+            bool: 是否成功
+        """
+        logger.info("=== 开始网络生成阶段 ===")
+        
+        self.network_generator = NetworkGenerator(self.network_config)
+        
+        success = self.network_generator.run_complete_generation(
+            image_dir=image_dir,
+            visualization_filename=visualization_filename,
+            travel_times_filename=travel_times_filename
         )
+        
+        if success:
+            network_info = self.network_generator.get_network_info()
+            logger.info("网络生成完成，统计信息:")
+            for key, value in network_info.items():
+                logger.info(f"  {key}: {value}")
+        
+        return success
+    
+    def run_single_algorithm(self, 
+                           algorithm_name: str,
+                           travel_times_file: str = None,
+                           **kwargs) -> bool:
+        """
+        运行单个优化算法
+        
+        Args:
+            algorithm_name: 算法名称
+            travel_times_file: 行程时间文件路径
+            **kwargs: 算法特定参数
+            
+        Returns:
+            bool: 是否成功
+        """
+        logger.info(f"=== 开始运行算法: {algorithm_name} ===")
+        
+        if travel_times_file is None:
+            travel_times_file = self.rl_config.TRAVEL_TIMES_CSV
+        
+        # 初始化算法管理器
+        if not self._initialize_algorithm_manager(travel_times_file):
+            return False
+        
+        try:
+            result = self.algorithm_manager.run_single_algorithm(
+                algorithm_name=algorithm_name,
+                custom_params=kwargs
+            )
+            
+            logger.info(f"算法 {algorithm_name} 执行成功:")
+            logger.info(f"  最优成本: {result.best_cost:.2f}")
+            logger.info(f"  执行时间: {result.execution_time:.2f}秒")
+            logger.info(f"  迭代次数: {result.iterations}")
+            
+            # 保存结果
+            self.algorithm_manager.save_results()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"算法执行失败: {e}", exc_info=True)
+            return False
+    
+    def run_algorithm_comparison(self, 
+                               algorithm_names: List[str],
+                               travel_times_file: str = None,
+                               parallel: bool = False,
+                               generate_plots: bool = True,
+                               generate_report: bool = True) -> bool:
+        """
+        运行算法对比分析
+        
+        Args:
+            algorithm_names: 算法名称列表
+            travel_times_file: 行程时间文件路径
+            parallel: 是否并行执行
+            generate_plots: 是否生成图表
+            generate_report: 是否生成报告
+            
+        Returns:
+            bool: 是否成功
+        """
+        logger.info(f"=== 开始算法对比分析: {algorithm_names} ===")
+        
+        if travel_times_file is None:
+            travel_times_file = self.rl_config.TRAVEL_TIMES_CSV
+        
+        # 初始化算法管理器
+        if not self._initialize_algorithm_manager(travel_times_file):
+            return False
+        
+        try:
+            # 运行多个算法
+            results = self.algorithm_manager.run_multiple_algorithms(
+                algorithm_names=algorithm_names,
+                parallel=parallel
+            )
+            
+            if not results:
+                logger.error("没有算法成功执行")
+                return False
+            
+            logger.info(f"成功执行 {len(results)} 个算法")
+            
+            # 生成对比表格
+            comparison_df = self.algorithm_manager.get_algorithm_comparison()
+            logger.info("算法对比结果:")
+            logger.info(f"\n{comparison_df.to_string(index=False)}")
+            
+            # 创建结果对比分析器
+            comparator = ResultsComparator(results)
+            
+            # 生成详细对比表格
+            detailed_df = comparator.generate_comparison_table()
+            
+            # 生成图表
+            if generate_plots:
+                comparator.create_comparison_plots()
+                logger.info("对比图表已生成")
+            
+            # 生成报告
+            if generate_report:
+                report_path = comparator.generate_detailed_report()
+                logger.info(f"详细报告已生成: {report_path}")
+            
+            # 导出布局对比
+            layouts_path = comparator.export_layouts_comparison()
+            logger.info(f"最优布局对比已导出: {layouts_path}")
+            
+            # 保存结果
+            self.algorithm_manager.save_results()
+            
+            # 输出最佳结果
+            best_result = self.algorithm_manager.get_best_result()
+            if best_result:
+                logger.info(f"整体最佳结果来自: {best_result.algorithm_name}")
+                logger.info(f"最优成本: {best_result.best_cost:.2f}")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"算法对比分析失败: {e}", exc_info=True)
+            return False
+    
+    def _initialize_algorithm_manager(self, travel_times_file: str) -> bool:
+        """初始化算法管理器"""
+        try:
+            # 检查行程时间文件
+            travel_times_path = pathlib.Path(travel_times_file)
+            if not travel_times_path.exists():
+                logger.error(f"行程时间文件不存在: {travel_times_file}")
+                logger.error("请先运行网络生成阶段：python main.py --mode network")
+                return False
+            
+            logger.info("正在初始化优化组件...")
+            
+            # 初始化缓存管理器
+            cache_manager = CacheManager(self.rl_config)
+            logger.info("缓存管理器初始化完成")
+            
+            # 初始化成本计算器
+            cost_calculator = CostCalculator(
+                config=self.rl_config,
+                resolved_pathways=cache_manager.resolved_pathways,
+                travel_times=cache_manager.travel_times_matrix,
+                placeable_slots=cache_manager.placeable_slots,
+                placeable_departments=cache_manager.placeable_departments
+            )
+            logger.info("成本计算器初始化完成")
+            
+            # 初始化约束管理器
+            constraint_manager = ConstraintManager(
+                placeable_slots=cache_manager.placeable_slots,
+                placeable_departments=cache_manager.placeable_departments,
+                travel_times=cache_manager.travel_times_matrix
+            )
+            logger.info("约束管理器初始化完成")
+            
+            # 初始化算法管理器
+            self.algorithm_manager = AlgorithmManager(
+                cost_calculator=cost_calculator,
+                constraint_manager=constraint_manager,
+                config=self.rl_config,
+                cache_manager=cache_manager
+            )
+            logger.info("算法管理器初始化完成")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"算法管理器初始化失败: {e}", exc_info=True)
+            return False
+    
+    def visualize_results(self, results_file: str):
+        """可视化算法结果"""
+        logger.info(f"=== 开始结果可视化: {results_file} ===")
+        # 这里可以添加结果可视化逻辑
+        logger.info("结果可视化功能待实现")
 
-        # Run the network generation
-        # process_outside_nodes=True to generate outside mesh if applicable for this floor
-        graph, width, height, _ = network_builder.run(
-            image_path=str(single_image_path),  # Network.run expects str
-            z_level=0,  # Example Z-level for the single floor
-            process_outside_nodes=False
-        )
 
-        logger.info(
-            f"Single-floor network generated with {graph.number_of_nodes()} nodes and {graph.number_of_edges()} edges.")
-
-        # Plot the single-floor network
-        plotter = PlotlyPlotter(
-            config=app_config, color_map_data=app_color_map)
-        plot_output_path = app_config.RESULT_PATH / "single_floor_network_3d.html"
-        plotter.plot(
-            graph=graph,
-            output_path=plot_output_path,
-            title=f"Single-Floor Network: {single_image_path.name}",
-            graph_width=width,
-            graph_height=height
-        )
-        logger.info(f"Single-floor network plot saved to {plot_output_path}")
-
-    except Exception as e:
-        logger.error(f"Error in single-floor example: {e}", exc_info=True)
-
-
-def run_multi_floor_example(app_config: NetworkConfig, app_color_map: Dict):
-    """
-    Demonstrates building, plotting, and analyzing a multi-floor super-network.
-    """
-    logger = logging.getLogger(__name__)
-    logger.info("--- Running Multi-Floor SuperNetwork Example ---")
-
-    # Define image paths for multiple floors
-    # Ensure this directory and images exist
-    label_dir_str = "./data/label/"
-    label_dir = pathlib.Path(label_dir_str)
-
-    if not label_dir.is_dir():
-        logger.error(
-            f"Label directory not found: {label_dir}. Skipping multi-floor example.")
-        return
-
-    # Collect image paths (e.g., all PNG files in the directory)
-    # Using a list of strings as SuperNetwork.run expects List[str]
-    image_file_paths_str: List[str] = [
-        str(p) for p in sorted(label_dir.glob('*.png')) if p.is_file()]
-    # Example: image_file_paths_str = ["./data/label/B1.png", "./data/label/1F.png", "./data/label/2F.png"]
-
-    if not image_file_paths_str:
-        logger.warning(
-            f"No image files found in {label_dir}. Skipping multi-floor example.")
-        return
-
-    logger.info(
-        f"Found {len(image_file_paths_str)} images for SuperNetwork: {image_file_paths_str}")
-
-    try:
-        # Initialize SuperNetwork builder
-        # base_floor=-1 if your floors are like B-1, F1, F2...
-        # num_processes can be app_config.NUM_PROCESSES if defined, or None for auto
-        super_network_builder = SuperNetwork(
-            config=app_config,
-            color_map_data=app_color_map,
-            base_floor=-1,  # Example: if B-1 is the lowest floor detected/assigned as -1
-            num_processes=None  # Use os.cpu_count() or 1 if single core
-        )
-
-        # Run the SuperNetwork generation
-        super_graph = super_network_builder.run(
-            image_file_paths=image_file_paths_str)
-
-        ground_floor_z_for_travel_calc = super_network_builder.designated_ground_floor_z
-        if ground_floor_z_for_travel_calc is not None:
-            logger.info(
-                f"Using designated ground floor Z={ground_floor_z_for_travel_calc:.2f} for travel time 'OutDoor' filtering.")
-        else:
-            logger.warning(
-                "Could not determine designated ground floor Z from SuperNetwork. 'OutDoor' filtering in travel times may be affected.")
-
-        logger.info(
-            f"SuperNetwork generated with {super_graph.number_of_nodes()} nodes and {super_graph.number_of_edges()} edges.")
-        logger.info(
-            f"Detected image dimensions for SuperNetwork: Width={super_network_builder.width}, Height={super_network_builder.height}")
-
-        # Plot the SuperNetwork
-        plotter = PlotlyPlotter(
-            config=app_config, color_map_data=app_color_map)
-        plot_output_path = app_config.RESULT_PATH / "super_network_3d.html"
-        plotter.plot(
-            graph=super_graph,
-            output_path=plot_output_path,
-            title="Multi-Floor SuperNetwork",
-            graph_width=super_network_builder.width,  # Pass determined width
-            graph_height=super_network_builder.height,  # Pass determined height
-            floor_z_map=super_network_builder.floor_z_map  # Pass for slider labels
-        )
-        logger.info(f"SuperNetwork plot saved to {plot_output_path}")
-
-        # Calculate and save room travel times for the SuperNetwork
-        logger.info("Calculating travel times for SuperNetwork...")
-        travel_times_output_dir = app_config.RESULT_PATH
-        calculate_room_travel_times(
-            graph=super_graph,
-            config=app_config,
-            output_dir=travel_times_output_dir,
-            # Specific name for super_network results
-            output_filename="super_network_travel_times.csv",
-            ground_floor_z=ground_floor_z_for_travel_calc
-        )
-
-    except Exception as e:
-        logger.error(f"Error in multi-floor example: {e}", exc_info=True)
-
-
-def run_layout_optimization_example(app_config: NetworkConfig):
-    main_logger = logging.getLogger(__name__)
-    main_logger.info("--- Running Facility Layout Optimization Example ---")
-
-    # 1. Initialize PathFinder (it loads the travel_times.csv)
-    # This CSV represents the fixed physical network.
-    try:
-        # Assumes CSV is at default path
-        path_finder = PathFinder(config=app_config)
-        if path_finder.travel_times_df is None:
-            main_logger.error(
-                "Failed to load travel times data in PathFinder. Optimization cannot proceed.")
-            return
-    except Exception as e:
-        main_logger.error(f"Error initializing PathFinder: {e}", exc_info=True)
-        return
-
-    # 2. Define Workflows
-    # These are sequences of *functional types*.
-    word_detect = WordDetect(config=app_config)
-    workflow_defs = [
-        WorkflowDefinition(workflow_id='WF_GynecologyA',
-                           functional_sequence=word_detect.detect_nearest_word(
-                               ['入口', '妇科', '采血处', '超声科', '妇科', '门诊药房', '入口']),
-                           weight=1.0),
-        WorkflowDefinition(workflow_id='WF_GynecologyB',
-                           functional_sequence=word_detect.detect_nearest_word(
-                               ['入口', '挂号收费', '妇科', '挂号收费', '采血处', '超声科', '妇科', '挂号收费', '门诊药房', '入口']),
-                           weight=1.0),
-        WorkflowDefinition(workflow_id='WF_PulmonologyA',
-                           functional_sequence=word_detect.detect_nearest_word(
-                               ['入口', '呼吸内科', '采血处', '放射科', '呼吸内科', '门诊药房', '入口']),
-                           weight=0.5),
-        WorkflowDefinition(workflow_id='WF_PulmonologyB',
-                           functional_sequence=word_detect.detect_nearest_word(
-                               ['入口', '挂号收费', '呼吸内科', '挂号收费', '采血处', '放射科', '呼吸内科', '挂号收费', '门诊药房', '入口']),
-                           weight=0.5),
-        WorkflowDefinition(workflow_id='WF_CardiologyA',
-                           functional_sequence=word_detect.detect_nearest_word(
-                               ['入口', '心血管内科', '采血处', '超声科', '放射科', '心血管内科', '门诊药房', '入口']),
-                           weight=1.2),
-        WorkflowDefinition(workflow_id='WF_CardiologyB',
-                           functional_sequence=word_detect.detect_nearest_word(
-                               ['入口', '挂号收费', '心血管内科', '挂号收费', '采血处', '超声科', '放射科', '心血管内科', '挂号收费', '门诊药房', '入口']),
-                           weight=1.2),
-    ]
-    main_logger.info(
-        f"Defined {len(workflow_defs)} workflows for optimization.")
-
-    # 3. Create Initial FunctionalAssignment
-    # This typically comes from the default `name_to_ids_map` in PathFinder,
-    # which reflects the "as-is" layout from the original drawings.
-    initial_assignment_map = path_finder.name_to_ids_map
-    if not initial_assignment_map:
-        main_logger.error(
-            "PathFinder's name_to_ids_map is empty. Cannot create initial assignment.")
-        return
-    initial_functional_assignment = FunctionalAssignment(
-        initial_assignment_map)
-    main_logger.info(
-        "Initial functional assignment created based on PathFinder's default map.")
-
-    # 4. Initialize and Run Optimizer
-    optimizer = LayoutOptimizer(
-        path_finder=path_finder,
-        workflow_definitions=workflow_defs,
-        config=app_config,
-        area_tolerance_ratio=0.3  # TODO: Allow up to 30% area difference for swaps
+def create_argument_parser() -> argparse.ArgumentParser:
+    """创建命令行参数解析器"""
+    parser = argparse.ArgumentParser(
+        description="医院布局优化系统 - 整合网络生成、算法优化和结果对比分析",
+        formatter_class=argparse.RawTextHelpFormatter
     )
-
-    best_assignment, best_objective, best_outcomes = optimizer.run_optimization(
-        initial_assignment=initial_functional_assignment,
-        max_iterations=50  # TODO: Adjust as needed
+    
+    parser.add_argument(
+        '--mode',
+        type=str,
+        choices=['network', 'optimize', 'compare', 'visualize'],
+        required=True,
+        help="运行模式:\n"
+             "  network    - 生成医院网络和行程时间矩阵\n"
+             "  optimize   - 运行单个优化算法\n"
+             "  compare    - 运行多个算法进行对比分析\n"
+             "  visualize  - 可视化算法结果"
     )
+    
+    parser.add_argument(
+        '--algorithm',
+        type=str,
+        choices=['ppo', 'simulated_annealing', 'genetic_algorithm'],
+        help="优化算法名称 (用于 optimize 模式)"
+    )
+    
+    parser.add_argument(
+        '--algorithms',
+        type=str,
+        help="算法列表，用逗号分隔 (用于 compare 模式)\n"
+             "例如: ppo,simulated_annealing,genetic_algorithm"
+    )
+    
+    parser.add_argument(
+        '--image-dir',
+        type=str,
+        default="./data/label/",
+        help="楼层标注图像目录 (默认: ./data/label/)"
+    )
+    
+    parser.add_argument(
+        '--travel-times-file',
+        type=str,
+        default=None,
+        help="行程时间文件路径 (默认: 由config.py中的RLConfig.TRAVEL_TIMES_CSV指定)"
+    )
+    
+    parser.add_argument(
+        '--parallel',
+        action='store_true',
+        help="并行执行多个算法 (用于 compare 模式)"
+    )
+    
+    parser.add_argument(
+        '--no-plots',
+        action='store_true',
+        help="不生成对比图表"
+    )
+    
+    parser.add_argument(
+        '--no-report',
+        action='store_true',
+        help="不生成详细报告"
+    )
+    
+    parser.add_argument(
+        '--results-file',
+        type=str,
+        help="结果文件路径 (用于 visualize 模式)"
+    )
+    
+    # 算法特定参数
+    parser.add_argument(
+        '--max-iterations',
+        type=int,
+        help="最大迭代次数"
+    )
+    
+    parser.add_argument(
+        '--population-size',
+        type=int,
+        help="遗传算法种群大小"
+    )
+    
+    parser.add_argument(
+        '--initial-temperature',
+        type=float,
+        help="模拟退火初始温度"
+    )
+    
+    parser.add_argument(
+        '--total-timesteps',
+        type=int,
+        help="PPO总训练步数"
+    )
+    
+    parser.add_argument(
+        '--verbose',
+        action='store_true',
+        help="详细输出"
+    )
+    
+    return parser
 
-    # 5. Report Results
-    main_logger.info("\n--- Optimization Results ---")
-    main_logger.info(f"Final Optimized Objective Value: {best_objective:.2f}")
 
-    main_logger.info(
-        "\nFinal Functional Assignment (Functional Type -> [Physical Name_IDs]):")
-    for func_type, phys_ids in sorted(best_assignment.assignment_map.items()):
-        original_ids_for_type = sorted(
-            initial_assignment_map.get(func_type, []))
-        # Should already be sorted if FunctionalAssignment does it
-        current_ids_for_type = sorted(phys_ids)
-
-        changed_marker = ""
-        if set(original_ids_for_type) != set(current_ids_for_type):  # Compare as sets for content
-            changed_marker = " << MODIFIED"
-            main_logger.info(f"  Function: {func_type}{changed_marker}")
-            main_logger.info(
-                f"    Original Locations: {original_ids_for_type}")
-            main_logger.info(f"    New Locations     : {current_ids_for_type}")
-        else:
-            # Use debug for unchanged to reduce log noise, or info if you want to see all
-            main_logger.debug(
-                f"  Function: {func_type} -> Locations: {current_ids_for_type} (Unchanged)")
-
-    main_logger.info("\nDetails of Optimized Workflows:")
-    for outcome in best_outcomes:
-        flow_details = "N/A"
-        if outcome.shortest_flow:
-            seq = outcome.shortest_flow.actual_node_id_sequence
-            if seq:
-                flow_details = f"[{seq[0]} ... {seq[-1]}] (len: {len(seq)})"
-        main_logger.info(f"  Workflow: {outcome.workflow_definition.workflow_id} "
-                         f"(Weight: {outcome.workflow_definition.weight:.1f}) - "
-                         f"Optimized Time: {outcome.average_time:.2f} - Path: {flow_details}")
-
-
-def initialize_setup():
+def main():
+    """主函数"""
+    # 创建参数解析器
+    parser = create_argument_parser()
+    args = parser.parse_args()
+    
+    # 设置日志
+    log_level = logging.DEBUG if args.verbose else logging.INFO
     log_dir = pathlib.Path("./logs")
     log_dir.mkdir(parents=True, exist_ok=True)
-    setup_logging(level=logging.INFO, log_file=log_dir / "application.log")
-
-    main_logger = logging.getLogger(__name__)  # Logger for this main script
-    main_logger.info("Application started.")
-
-    app_config = NetworkConfig(color_map_data=COLOR_MAP)
-    # Pass explicitly if needed, or rely on config's internal copy
-    app_color_map_data = COLOR_MAP
-
-    main_logger.info(f"Results will be saved in: {app_config.RESULT_PATH}")
-    main_logger.info(
-        f"Debug images (if any) will be saved in: {app_config.DEBUG_PATH}")
-
-    return main_logger, app_config, app_color_map_data
+    setup_logging(level=log_level, log_file=log_dir / "hospital_optimizer.log")
+    
+    logger.info("=== 医院布局优化系统启动 ===")
+    logger.info(f"运行模式: {args.mode}")
+    
+    # 创建系统实例
+    optimizer = HospitalLayoutOptimizer()
+    
+    success = False
+    
+    try:
+        if args.mode == 'network':
+            # 网络生成模式
+            success = optimizer.run_network_generation(
+                image_dir=args.image_dir
+            )
+            
+        elif args.mode == 'optimize':
+            # 单算法优化模式
+            if not args.algorithm:
+                logger.error("optimize 模式需要指定 --algorithm 参数")
+                sys.exit(1)
+            
+            # 构建算法参数
+            algorithm_params = {}
+            if args.max_iterations:
+                algorithm_params['max_iterations'] = args.max_iterations
+            if args.population_size:
+                algorithm_params['population_size'] = args.population_size
+            if args.initial_temperature:
+                algorithm_params['initial_temperature'] = args.initial_temperature
+            if args.total_timesteps:
+                algorithm_params['total_timesteps'] = args.total_timesteps
+            
+            success = optimizer.run_single_algorithm(
+                algorithm_name=args.algorithm,
+                travel_times_file=args.travel_times_file,
+                **algorithm_params
+            )
+            
+        elif args.mode == 'compare':
+            # 算法对比模式
+            if not args.algorithms:
+                logger.error("compare 模式需要指定 --algorithms 参数")
+                sys.exit(1)
+            
+            algorithm_names = [name.strip() for name in args.algorithms.split(',')]
+            
+            success = optimizer.run_algorithm_comparison(
+                algorithm_names=algorithm_names,
+                travel_times_file=args.travel_times_file,
+                parallel=args.parallel,
+                generate_plots=not args.no_plots,
+                generate_report=not args.no_report
+            )
+            
+        elif args.mode == 'visualize':
+            # 结果可视化模式
+            if not args.results_file:
+                logger.error("visualize 模式需要指定 --results-file 参数")
+                sys.exit(1)
+            
+            optimizer.visualize_results(args.results_file)
+            success = True
+        
+        if success:
+            logger.info("=== 系统执行成功完成 ===")
+        else:
+            logger.error("=== 系统执行失败 ===")
+            sys.exit(1)
+            
+    except KeyboardInterrupt:
+        logger.warning("用户中断执行")
+        sys.exit(1)
+    except Exception as e:
+        logger.error(f"系统执行异常: {e}", exc_info=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":
-    main_logger, app_config, app_color_map_data = initialize_setup()
-
-    # ---- Example 1: Single-floor network (optional) ----
-    # main_logger.info("Attempting to run single-floor example...")
-    # run_single_floor_example(app_config, app_color_map_data)
-
-    # ---- Example 2: Multi-floor SuperNetwork (primary use case) ----
-    main_logger.info("Attempting to run multi-floor SuperNetwork example...")
-    run_multi_floor_example(app_config, app_color_map_data)
-
-    # ---- Example 3: Process Flow ----
-    # main_logger.info("Attempting to run process flow example...")
-    # workflow_list = ['大门', '妇科', '采血处', '超声科', '妇科', '门诊药房', '入口']
-    # finder = PathFinder(config=app_config)
-    # flows = finder.generate_flows(workflow_list)
-    # for flow in flows:
-    #     total_time = finder.calculate_flow_total_time(flow)
-
-    # ---- Example 4: Layout Optimization ----
-    # travel_times_csv_path = app_config.RESULT_PATH / 'super_network_travel_times.csv'
-    # if not travel_times_csv_path.exists():
-    #     main_logger.warning(f"{travel_times_csv_path} not found.")
-    #     main_logger.warning("Please ensure `super_network_travel_times.csv` is generated first "
-    #                         "(e.g., by running `run_multi_floor_example`).")
-    #     main_logger.warning("Skipping layout optimization example.")
-    # else:
-    #     run_layout_optimization_example(app_config)
-
-    # ---- Example 5: RL Optimizer ----
-
-    # main_logger.info("Application finished.")
-    pass
+    main()

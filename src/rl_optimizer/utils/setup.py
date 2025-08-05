@@ -9,7 +9,7 @@ import pickle
 import numpy as np
 
 class NpEncoder(json.JSONEncoder):
-    """自定义JSON编码器，以处理Numpy数据类型。"""
+    """自定义JSON编码器，以处理Numpy数据类型和路径对象。"""
     def default(self, obj: Any) -> Any:
         if isinstance(obj, np.integer):
             return int(obj)
@@ -17,6 +17,8 @@ class NpEncoder(json.JSONEncoder):
             return float(obj)
         if isinstance(obj, np.ndarray):
             return obj.tolist()
+        if isinstance(obj, (pathlib.Path, pathlib.PosixPath, pathlib.WindowsPath)):
+            return str(obj)
         return super(NpEncoder, self).default(obj)
     
 def setup_logger(name: str, log_file: Optional[pathlib.Path] = None, level: int = logging.INFO) -> logging.Logger:
@@ -30,25 +32,52 @@ def setup_logger(name: str, log_file: Optional[pathlib.Path] = None, level: int 
     Returns:
         logging.Logger: 配置好的日志记录器实例。
     """
+    import os
+    import multiprocessing
+    
     logger = logging.getLogger(name)
     logger.setLevel(level)
     
-    if not logger.handlers:
-        formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-        
-        # 控制台处理器
-        console_handler = logging.StreamHandler(sys.stdout)
-        console_handler.setFormatter(formatter)
-        console_handler.setLevel(level)
-        logger.addHandler(console_handler)
-        
-        # 文件处理器（如果指定了文件路径）
-        if log_file:
-            log_file.parent.mkdir(parents=True, exist_ok=True)
-            file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
-            file_handler.setFormatter(formatter)
-            file_handler.setLevel(level)
-            logger.addHandler(file_handler)
+    # 防止日志向上级传播，避免重复输出
+    logger.propagate = False
+    
+    # 检查是否已经配置过handler，避免重复添加
+    if logger.handlers:
+        return logger
+    
+    # 在多进程环境中，只有主进程输出详细日志
+    # 这里通过检查进程名来判断是否为主进程
+    is_main_process = True
+    try:
+        # 检查是否在多进程环境中
+        current_process = multiprocessing.current_process()
+        if current_process.name != 'MainProcess':
+            is_main_process = False
+            # 子进程只使用WARNING级别以上的日志
+            logger.setLevel(logging.WARNING)
+    except:
+        # 如果无法确定进程信息，默认为主进程
+        pass
+    
+    # 创建formatter
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    
+    # 控制台处理器
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    console_handler.setLevel(level if is_main_process else logging.WARNING)
+    # 给handler添加唯一标识，防止重复添加
+    console_handler.set_name(f"console_{name}")
+    logger.addHandler(console_handler)
+    
+    # 文件处理器（只在主进程中添加，避免文件冲突）
+    if log_file and is_main_process:
+        log_file.parent.mkdir(parents=True, exist_ok=True)
+        file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
+        file_handler.setFormatter(formatter)
+        file_handler.setLevel(level)
+        file_handler.set_name(f"file_{name}")
+        logger.addHandler(file_handler)
     
     return logger
 

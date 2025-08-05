@@ -65,7 +65,7 @@ class NetworkConfig:
     """Stores configuration parameters for network generation and plotting."""
 
     def __init__(self, color_map_data: Dict[Tuple[int, int, int], Dict[str, Any]] = COLOR_MAP):
-        self.RESULT_PATH: pathlib.Path = pathlib.Path(__file__).parent.parent / 'result'
+        self.RESULT_PATH: pathlib.Path = pathlib.Path(__file__).parent.parent / 'results' / 'network'
         self.DEBUG_PATH: pathlib.Path = pathlib.Path(__file__).parent.parent / 'debug'
         self.IMAGE_ROTATE: int = 180
         self.AREA_THRESHOLD: int = 60  # Minimum area for a component to be considered a node
@@ -186,10 +186,10 @@ class RLConfig:
         self.DATA_PATH: pathlib.Path = self.RL_OPTIMIZER_PATH / 'data'
         self.CACHE_PATH: pathlib.Path = self.DATA_PATH / 'cache'
         self.LOG_PATH: pathlib.Path = self.ROOT_PATH / 'logs'
-        self.RESULT_PATH: pathlib.Path = self.ROOT_PATH / 'result'
+        self.RESULT_PATH: pathlib.Path = self.ROOT_PATH / 'results'
 
         # --- 输入文件 ---
-        self.TRAVEL_TIMES_CSV: pathlib.Path = self.ROOT_PATH / 'result' / 'super_network_travel_times.csv'
+        self.TRAVEL_TIMES_CSV: pathlib.Path = self.RESULT_PATH / 'network' / 'hospital_travel_times.csv'
         self.PROCESS_TEMPLATES_JSON: pathlib.Path = self.DATA_PATH / 'process_templates.json'
 
         # --- 自动生成/缓存的中间文件 ---
@@ -210,11 +210,17 @@ class RLConfig:
             '室外', '绿化', '中庭', '空房间'
         ]
 
-        # --- 模型超参数 ---
-        self.EMBEDDING_DIM: int = 128
-        self.TRANSFORMER_HEADS: int = 4
-        self.TRANSFORMER_LAYERS: int = 4
-        self.FEATURES_DIM: int = 256
+        # --- Transformer模型配置 ---
+        self.EMBEDDING_DIM: int = 128  # 嵌入维度
+        self.TRANSFORMER_HEADS: int = 4  # 多头注意力头数
+        self.TRANSFORMER_LAYERS: int = 4  # Transformer层数
+        self.TRANSFORMER_DROPOUT: float = 0.1  # Dropout比例
+        
+        # --- 策略网络配置 ---
+        self.POLICY_NET_ARCH: int = 128
+        self.POLICY_NET_LAYERS: int = 2
+        self.VALUE_NET_ARCH: int = 128
+        self.VALUE_NET_LAYERS: int = 2
         
         # --- 学习率调度器配置 ---
         self.LEARNING_RATE_SCHEDULE_TYPE: str = "linear"  # "linear", "constant"
@@ -224,14 +230,19 @@ class RLConfig:
 
         # --- PPO 训练超参数 ---
         self.NUM_ENVS: int = 8
-        self.NUM_STEPS: int = 512
+        self.N_STEPS: int = 512  # 修正为N_STEPS以匹配PPO参数
         self.TOTAL_TIMESTEPS: int = 5_000_000
         self.GAMMA: float = 0.99
         self.GAE_LAMBDA: float = 0.95
-        self.CLIP_EPS: float = 0.2
+        self.CLIP_RANGE: float = 0.2  # 修正为CLIP_RANGE以匹配PPO参数
         self.ENT_COEF: float = 0.01
+        self.VF_COEF: float = 0.5  # 添加值函数损失系数
+        self.MAX_GRAD_NORM: float = 0.5  # 添加梯度裁剪参数
         self.BATCH_SIZE: int = 64
-        self.NUM_EPOCHS: int = 10
+        self.N_EPOCHS: int = 10  # 修正为N_EPOCHS以匹配PPO参数
+        
+        # --- 评估和检查点配置 ---
+        self.EVAL_FREQUENCY: int = 10000  # 添加评估频率
 
         # --- 软约束奖励权重 ---
         self.REWARD_TIME_WEIGHT: float = 1.0

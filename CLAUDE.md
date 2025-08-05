@@ -8,31 +8,49 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## 项目概述
 
-医院房间检测与布局优化系统 - 基于图像处理和强化学习的多层医院网络生成与布局优化工具。
+医院房间检测与布局优化系统 - 基于图像处理和多种优化算法的医院网络生成与布局优化工具。
 
 ### 核心架构
 
-这是一个双阶段优化系统：
+系统采用统一的双阶段架构，通过 `main.py` 统一入口管理所有功能：
 
-1. **网络生成阶段** (`main.py`)：
+1. **网络生成阶段**：
    - 从楼层平面图生成多层医院网络图
    - 图像处理：识别房间、走廊、门等区域
    - 网络构建：创建节点和边的图结构
    - 行程时间计算：生成房间间行程时间矩阵
 
-2. **强化学习优化阶段** (`rl_main.py`)：
-   - 基于PPO算法的布局优化
-   - 考虑就医流程和相邻性约束
-   - 动态调整科室布局以优化总体效率
+2. **布局优化阶段**：
+   - **PPO强化学习算法**：基于深度强化学习的布局优化
+   - **模拟退火算法**：经典启发式优化算法
+   - **遗传算法**：进化计算优化算法
+   - 统一约束管理：面积匹配、固定位置、相邻性约束
+   - 统一目标函数：CostCalculator成本计算器
+
+3. **对比分析阶段**：
+   - 多算法性能对比
+   - 详细分析报告生成
+   - 可视化图表输出
 
 ### 关键模块
 
+- `src/core/`: 核心控制模块
+  - `network_generator.py`: 网络生成器（整合SuperNetwork功能）
+  - `algorithm_manager.py`: 算法管理器（统一管理所有优化算法）
+- `src/algorithms/`: 优化算法模块
+  - `base_optimizer.py`: 算法基类（统一接口）
+  - `ppo_optimizer.py`: PPO强化学习优化器
+  - `simulated_annealing.py`: 模拟退火优化器
+  - `genetic_algorithm.py`: 遗传算法优化器
+  - `constraint_manager.py`: 约束管理器（统一约束处理）
+- `src/comparison/`: 对比分析模块
+  - `results_comparator.py`: 结果对比分析器
 - `src/network/`: 网络生成核心模块
   - `network.py`: 单层网络生成器
   - `super_network.py`: 多层网络管理器
   - `node_creators.py`: 各类节点创建策略
-- `src/rl_optimizer/`: 强化学习优化器
-  - `agent/ppo_agent.py`: PPO智能体实现（支持动态学习率调度）
+- `src/rl_optimizer/`: 强化学习优化器（保留原有实现）
+  - `env/cost_calculator.py`: 成本计算器（所有算法共用）
   - `env/layout_env.py`: 布局优化环境
   - `data/cache_manager.py`: 数据缓存管理
   - `utils/lr_scheduler.py`: 学习率调度器工具
@@ -57,37 +75,88 @@ uv sync
 uv run python --version
 ```
 
-### 网络生成
+### 统一命令行接口（通过main.py）
+
+#### 1. 网络生成
 ```bash
-# 生成多层医院网络（主要功能）
-uv run python main.py
+# 生成多层医院网络和行程时间矩阵
+uv run python main.py --mode network
+
+# 自定义图像目录
+uv run python main.py --mode network --image-dir ./data/label/
 
 # 输出文件：
-# - result/super_network_3d.html (可视化)
-# - result/super_network_travel_times.csv (行程时间矩阵)
+# - result/hospital_network_3d.html (网络可视化)
+# - result/hospital_travel_times.csv (行程时间矩阵)
 ```
 
-### 强化学习优化
+#### 2. 单算法优化
 ```bash
-# 训练布局优化模型
-uv run python rl_main.py --mode train
+# 运行PPO强化学习算法
+uv run python main.py --mode optimize --algorithm ppo
 
-# 启用断点续训（自动查找最新checkpoint）
-uv run python rl_main.py --mode train --resume
+# 运行模拟退火算法
+uv run python main.py --mode optimize --algorithm simulated_annealing --max-iterations 5000
 
-# 从指定checkpoint恢复训练
-uv run python rl_main.py --mode train --resume --model-path logs/ppo_layout_YYYYMMDD-HHMMSS/checkpoints/checkpoint_12345678_steps.zip
+# 运行遗传算法
+uv run python main.py --mode optimize --algorithm genetic_algorithm --population-size 50
 
-# 设置自定义checkpoint频率（每10000步保存一次）
-uv run python rl_main.py --mode train --checkpoint-freq 10000
+# 算法特定参数示例：
+# PPO参数
+uv run python main.py --mode optimize --algorithm ppo --total-timesteps 100000
 
-# 使用已训练模型进行评估
-uv run python rl_main.py --mode evaluate --model-path logs/ppo_layout_YYYYMMDD-HHMMSS/final_model.zip
+# 模拟退火参数
+uv run python main.py --mode optimize --algorithm simulated_annealing --initial-temperature 1500.0 --max-iterations 10000
 
-# 训练输出：
-# - logs/ppo_layout_*/: 训练日志和模型
-# - logs/ppo_layout_*/checkpoints/: 训练过程中的checkpoint文件
-# - logs/ppo_layout_*/tensorboard_logs/: TensorBoard日志
+# 遗传算法参数
+uv run python main.py --mode optimize --algorithm genetic_algorithm --population-size 100 --max-iterations 500
+```
+
+#### 3. 多算法对比分析
+```bash
+# 运行所有算法进行对比
+uv run python main.py --mode compare --algorithms ppo,simulated_annealing,genetic_algorithm
+
+# 并行执行算法（谨慎使用，可能需要大量资源）
+uv run python main.py --mode compare --algorithms simulated_annealing,genetic_algorithm --parallel
+
+# 不生成图表和报告（仅获取基本对比结果）
+uv run python main.py --mode compare --algorithms ppo,simulated_annealing --no-plots --no-report
+
+# 详细输出
+uv run python main.py --mode compare --algorithms ppo,simulated_annealing,genetic_algorithm --verbose
+```
+
+#### 4. 结果可视化
+```bash
+# 可视化算法结果（功能待实现）
+uv run python main.py --mode visualize --results-file ./results/comparison/best_layouts_20231201-120000.json
+```
+
+### 输出文件结构
+```
+result/
+├── hospital_network_3d.html           # 网络可视化
+├── hospital_travel_times.csv          # 行程时间矩阵
+├── comparison/                         # 算法对比结果
+│   ├── algorithm_comparison_*.csv     # 对比表格
+│   ├── *_result_*.json               # 详细算法结果
+│   └── best_layouts_*.json           # 最优布局对比
+├── plots/                             # 对比图表
+│   ├── cost_comparison_*.png         # 成本对比图
+│   ├── time_comparison_*.png         # 时间对比图
+│   ├── convergence_curves_*.png      # 收敛曲线图
+│   ├── performance_radar_*.png       # 性能雷达图
+│   └── algorithm_heatmap_*.png       # 算法特性热力图
+└── reports/                           # 分析报告
+    └── algorithm_comparison_report_*.md
+
+logs/
+├── hospital_optimizer.log            # 系统运行日志
+└── ppo_layout_*/                     # PPO训练日志（如果使用PPO算法）
+    ├── final_model.zip
+    ├── checkpoints/
+    └── tensorboard_logs/
 ```
 
 ## 数据流程
@@ -191,3 +260,55 @@ uv run python rl_main.py --mode evaluate --model-path logs/ppo_layout_YYYYMMDD-H
 - 2025-08-05: **引入线性衰减学习率调度器** - 添加lr_scheduler.py工具模块，支持线性衰减和常数学习率调度，提高训练稳定性和收敛性
 - 2025-08-05: 添加配置管理规范：所有硬编码的配置项均应放置在config.py文件中
 - 2025-08-05: **实现完整断点续训功能** - 添加CheckpointCallback类、扩展RLConfig配置、增强PPOAgent模型恢复能力、更新命令行接口，支持训练中断恢复和精确进度跟踪
+- 2025-08-05: **重大架构重构** - 统一所有算法运行接口到main.py，实现多算法对比研究框架：
+  - 删除rl_main.py，整合所有功能到统一入口
+  - 新增传统启发式算法：模拟退火(SimulatedAnnealing)和遗传算法(GeneticAlgorithm)
+  - 创建统一优化器基类BaseOptimizer，确保所有算法使用相同的CostCalculator目标函数
+  - 实现ConstraintManager统一约束管理（面积、固定位置、相邻性约束）
+  - 新增AlgorithmManager算法管理器，支持串行/并行多算法执行
+  - 实现ResultsComparator结果对比分析器，生成详细对比表格、图表和报告
+  - 重构NetworkGenerator类整合网络生成功能
+  - 建立完整的目录结构：src/core/, src/algorithms/, src/comparison/
+  - 实现统一命令行接口，支持network/optimize/compare/visualize四种运行模式
+  - 添加全面的算法性能对比功能：成本、时间、收敛性、稳定性等多维度分析
+- 2025-08-05: **修复启发式算法配置项无效问题** - 解决模拟退火和遗传算法命令行参数无法生效的关键问题：
+  - 修改AlgorithmManager._create_optimizer()方法，使其正确接受并传递构造函数参数
+  - 更新run_single_algorithm()方法，分离构造参数和运行参数的传递逻辑
+  - 修复参数传递机制：构造函数参数在算法实例化时传递，运行时参数在optimize()调用时传递
+  - 验证修复效果：模拟退火算法的initial_temperature、max_iterations等参数现在能正确生效
+  - 验证修复效果：遗传算法的population_size、max_iterations等参数现在能正确生效
+  - 确保所有启发式算法的命令行参数配置现在完全可用
+- 2025-08-05: **实现PPO训练实时时间成本监控** - 添加训练过程中实际加权时间的可视化显示功能：
+  - 新增TrainingMetricsCallback回调类，实时跟踪和记录每个episode的实际加权时间成本
+  - 修改LayoutEnv环境，在episode结束时自动传递时间成本信息到训练回调
+  - 集成到PPOOptimizer训练流程，提供详细的训练指标日志和TensorBoard可视化
+  - 支持最佳布局跟踪、收敛性分析、训练速度统计等丰富功能
+  - 解决训练过程只能看到抽象reward值而无法了解实际优化效果的问题
+  - 训练日志现在显示：当前最佳时间成本、平均时间成本、时间成本范围、训练进度等关键指标
+  - 自动保存训练指标历史和最佳布局结果，便于后续分析和对比
+- 2025-08-05: **修复多进程环境日志重复问题** - 彻底解决Stable-baselines3多进程训练时的日志重复显示：
+  - 修复setup_logger函数：添加严格的handler重复检查、设置propagate=False防止日志传播
+  - 实现进程区分机制：只有主进程输出详细INFO级别日志，子进程仅输出WARNING以上级别
+  - 优化TrainingMetricsCallback：添加is_main_process检查，确保统计日志和文件保存只在主进程执行
+  - 保持所有监控功能完整性：TensorBoard记录、指标统计、最佳结果跟踪等功能正常工作
+  - 验证修复效果：多进程测试确认无重复日志输出，训练过程日志清晰可读
+- 2025-08-05: **确保显示原始时间成本值** - 修正训练日志显示缩放reward值而非原始时间成本的问题：
+  - 修改LayoutEnv._get_info()：明确传递原始时间成本和缩放reward，添加调试日志验证数据流
+  - 优化TrainingMetricsCallback显示格式：明确标注【原始】时间成本，提供缩放值对比参考
+  - 恢复训练进度条显示：支持总episodes目标设置，实时显示训练进度百分比和可视化进度条
+  - 改进日志内容：时间成本以"秒"为单位显示，同时提供对应的缩放reward用于对比验证
+  - 增强最佳结果记录：发现新最佳布局时同时显示原始时间成本和对应缩放reward
+  - 验证功能正确性：通过完整测试确认显示的是CostCalculator.calculate_total_cost()的原始值
+- 2025-08-05: **修复算法对比雷达图生成错误** - 解决ResultsComparator中"IndexError: single positional indexer is out-of-bounds"的关键bug：
+  - 修复_plot_performance_radar()函数中算法名称查找逻辑不匹配问题
+  - self.algorithm_names使用results的keys而DataFrame使用result.algorithm_name导致查找失败
+  - 改为直接使用DataFrame中实际算法名称进行数据查找和图表生成
+  - 添加完整的防御性检查：空数据检查、NaN值处理、异常捕获等
+  - 优化matplotlib中文字体支持，减少字体警告但不影响功能
+  - 验证修复效果：算法对比功能完全正常，所有图表包括雷达图成功生成
+  - 创建EpisodeInfoVecEnvWrapper：自定义VecEnv包装器确保episode信息在多进程环境中正确传递
+  - 增强TrainingMetricsCallback：优化info获取逻辑，支持多种episode信息格式（标准SB3格式、自定义格式等）
+  - 修复PPOOptimizer环境创建：在训练和评估环境中都使用episode信息包装器
+  - 添加详细调试日志：在环境、包装器、回调等关键位置添加DEBUG级别日志便于问题诊断
+  - 确保数据完整性：包装器自动补充标准episode字段（r、l）并保持自定义字段（time_cost、layout等）
+  - 解决核心问题：现在训练过程能正确显示原始时间成本而不是仅显示抽象reward值
