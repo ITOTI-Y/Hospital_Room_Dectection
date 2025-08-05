@@ -72,11 +72,21 @@ uv run python main.py
 # 训练布局优化模型
 uv run python rl_main.py --mode train
 
+# 启用断点续训（自动查找最新checkpoint）
+uv run python rl_main.py --mode train --resume
+
+# 从指定checkpoint恢复训练
+uv run python rl_main.py --mode train --resume --model-path logs/ppo_layout_YYYYMMDD-HHMMSS/checkpoints/checkpoint_12345678_steps.zip
+
+# 设置自定义checkpoint频率（每10000步保存一次）
+uv run python rl_main.py --mode train --checkpoint-freq 10000
+
 # 使用已训练模型进行评估
 uv run python rl_main.py --mode evaluate --model-path logs/ppo_layout_YYYYMMDD-HHMMSS/final_model.zip
 
 # 训练输出：
 # - logs/ppo_layout_*/: 训练日志和模型
+# - logs/ppo_layout_*/checkpoints/: 训练过程中的checkpoint文件
 # - logs/ppo_layout_*/tensorboard_logs/: TensorBoard日志
 ```
 
@@ -115,11 +125,12 @@ uv run python rl_main.py --mode evaluate --model-path logs/ppo_layout_YYYYMMDD-H
 - 图像处理设置
 - 可视化配置
 
-### RLConfig (src/config.py:136-233)
+### RLConfig (src/config.py:136-244)
 - 强化学习超参数
 - 训练配置
 - 约束设置
 - **学习率调度器配置**: 支持线性衰减和常数学习率
+- **断点续训配置**: 支持训练中断恢复和checkpoint管理
 
 ## 重要开发注意事项
 
@@ -139,6 +150,13 @@ uv run python rl_main.py --mode evaluate --model-path logs/ppo_layout_YYYYMMDD-H
 - 缓存机制：RL优化器使用缓存来加速重复计算
 - GPU支持：PyTorch模型支持CUDA加速
 - **学习率调度**: 支持线性衰减学习率提高训练稳定性和收敛性
+- **断点续训**: 支持长时间训练的中断恢复，定期保存checkpoint防止训练丢失
+
+### 断点续训机制
+- **自动checkpoint**: 训练过程中自动保存模型状态和训练元数据
+- **智能恢复**: 可自动查找最新checkpoint或指定特定checkpoint恢复
+- **状态完整性**: 保存模型、优化器、学习率调度器等完整训练状态
+- **进度跟踪**: 准确计算剩余训练步数，支持精确的训练进度恢复
 
 ## 动态文档更新机制
 
@@ -172,3 +190,4 @@ uv run python rl_main.py --mode evaluate --model-path logs/ppo_layout_YYYYMMDD-H
 - 2025-08-05: 完善技术栈信息，添加MaskablePPO等具体实现细节
 - 2025-08-05: **引入线性衰减学习率调度器** - 添加lr_scheduler.py工具模块，支持线性衰减和常数学习率调度，提高训练稳定性和收敛性
 - 2025-08-05: 添加配置管理规范：所有硬编码的配置项均应放置在config.py文件中
+- 2025-08-05: **实现完整断点续训功能** - 添加CheckpointCallback类、扩展RLConfig配置、增强PPOAgent模型恢复能力、更新命令行接口，支持训练中断恢复和精确进度跟踪

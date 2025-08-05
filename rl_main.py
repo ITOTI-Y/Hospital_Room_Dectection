@@ -17,7 +17,8 @@ sys.path.append(str(Path(__file__).parent / 'src'))
 logger = setup_logger(__name__)
 
 
-def run_optimization(mode: str, model_path: str = None):
+def run_optimization(mode: str, model_path: str = None, resume_training: bool = False, 
+                    checkpoint_freq: int = None):
     """
     执行强化学习布局优化的主函数。
 
@@ -27,7 +28,10 @@ def run_optimization(mode: str, model_path: str = None):
     Args:
         mode (str): 操作模式，必须是 'train' 或 'evaluate'。
         model_path (str, optional): 在 'evaluate' 模式下，需要提供的已训练模型的路径。
+                                    在启用断点续训时，可指定特定的checkpoint路径。
                                     Defaults to None.
+        resume_training (bool): 是否启用断点续训功能。Defaults to False.
+        checkpoint_freq (int, optional): checkpoint保存频率（训练步数）。Defaults to None.
     """
     logger.info(f"===== 医院布局强化学习优化器 =====")
     logger.info(f"当前操作模式: {mode.upper()}")
@@ -35,6 +39,18 @@ def run_optimization(mode: str, model_path: str = None):
     # --- 1. 初始化配置 ---
     try:
         config = RLConfig()
+        
+        # 根据命令行参数更新配置
+        if resume_training:
+            config.RESUME_TRAINING = True
+            if model_path:
+                config.PRETRAINED_MODEL_PATH = model_path
+            logger.info("启用断点续训功能")
+            
+        if checkpoint_freq is not None:
+            config.CHECKPOINT_FREQUENCY = checkpoint_freq
+            logger.info(f"设置checkpoint频率: 每{checkpoint_freq}步")
+            
         logger.info("配置模块初始化成功。")
     except Exception as e:
         logger.error(f"初始化配置时发生严重错误: {e}", exc_info=True)
@@ -122,9 +138,22 @@ if __name__ == "__main__":
         '--model-path',
         type=str,
         default=None,
-        help="在 'evaluate' 模式下，指定已训练好的模型文件路径 (.zip)。"
+        help="在 'evaluate' 模式下，指定已训练好的模型文件路径 (.zip)。\n"
+             "在 'train' 模式下结合 --resume 使用时，指定用于断点续训的模型路径。"
+    )
+    parser.add_argument(
+        '--resume',
+        action='store_true',
+        help="启用断点续训功能。自动查找最新的checkpoint继续训练，\n"
+             "或结合 --model-path 指定特定的checkpoint。"
+    )
+    parser.add_argument(
+        '--checkpoint-freq',
+        type=int,
+        default=None,
+        help="设置checkpoint保存频率（训练步数）。默认使用配置文件中的设置。"
     )
 
     args = parser.parse_args()
 
-    run_optimization(args.mode, args.model_path)
+    run_optimization(args.mode, args.model_path, args.resume, args.checkpoint_freq)

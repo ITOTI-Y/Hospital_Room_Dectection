@@ -168,6 +168,10 @@ class RLConfig:
         NUM_EPOCHS (int): 每次收集数据后，对数据进行优化的轮次。
         REWARD_TIME_WEIGHT (float): 奖励函数中通行时间成本的权重。
         REWARD_ADJACENCY_WEIGHT (float): 奖励函数中相邻性偏好的权重。
+        RESUME_TRAINING (bool): 是否启用断点续训功能。
+        PRETRAINED_MODEL_PATH (str): 预训练模型路径，用于断点续训。
+        CHECKPOINT_FREQUENCY (int): checkpoint保存频率（按训练步数计算）。
+        SAVE_TRAINING_STATE (bool): 是否保存完整训练状态（包括优化器、学习率调度器状态）。
     """
 
     def __init__(self):
@@ -232,6 +236,12 @@ class RLConfig:
         # --- 软约束奖励权重 ---
         self.REWARD_TIME_WEIGHT: float = 1.0
         self.REWARD_ADJACENCY_WEIGHT: float = 0.1
+
+        # --- 断点续训配置 ---
+        self.RESUME_TRAINING: bool = False  # 是否启用断点续训
+        self.PRETRAINED_MODEL_PATH: str = "data/model"  # 预训练模型路径（用于断点续训）
+        self.CHECKPOINT_FREQUENCY: int = 50000  # checkpoint保存频率（训练步数）
+        self.SAVE_TRAINING_STATE: bool = True  # 是否保存完整训练状态（优化器、调度器等）
 
         # 确保关键路径存在
         self.CACHE_PATH.mkdir(parents=True, exist_ok=True)
