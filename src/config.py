@@ -211,7 +211,12 @@ class RLConfig:
         self.TRANSFORMER_HEADS: int = 4
         self.TRANSFORMER_LAYERS: int = 4
         self.FEATURES_DIM: int = 256
-        self.LEARNING_RATE: float = 3e-4
+        
+        # --- 学习率调度器配置 ---
+        self.LEARNING_RATE_SCHEDULE_TYPE: str = "linear"  # "linear", "constant"
+        self.LEARNING_RATE_INITIAL: float = 3e-4  # 初始学习率
+        self.LEARNING_RATE_FINAL: float = 1e-5   # 最终学习率（线性衰减的目标值）
+        self.LEARNING_RATE: float = 3e-4  # 保持向后兼容性
 
         # --- PPO 训练超参数 ---
         self.NUM_ENVS: int = 8

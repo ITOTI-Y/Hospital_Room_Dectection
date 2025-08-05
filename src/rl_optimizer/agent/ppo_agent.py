@@ -18,6 +18,7 @@ from src.rl_optimizer.env.cost_calculator import CostCalculator
 from src.rl_optimizer.env.layout_env import LayoutEnv
 from src.rl_optimizer.model.policy_network import LayoutTransformer
 from src.rl_optimizer.utils.setup import setup_logger, save_json
+from src.rl_optimizer.utils.lr_scheduler import get_lr_scheduler
 
 logger = setup_logger(__name__)
 
@@ -85,6 +86,15 @@ class PPOAgent:
         logger.info("矢量化环境创建成功。")
 
         # --- 2. 配置PPO模型 ---
+        # 创建学习率调度器
+        lr_scheduler = get_lr_scheduler(
+            schedule_type=self.config.LEARNING_RATE_SCHEDULE_TYPE,
+            initial_lr=self.config.LEARNING_RATE_INITIAL,
+            final_lr=self.config.LEARNING_RATE_FINAL
+        )
+        logger.info(f"使用学习率调度器: {self.config.LEARNING_RATE_SCHEDULE_TYPE}")
+        logger.info(f"初始学习率: {self.config.LEARNING_RATE_INITIAL}, 最终学习率: {self.config.LEARNING_RATE_FINAL}")
+        
         # 定义策略网络的关键字参数，指定自定义的特征提取器
         policy_kwargs = {
             "features_extractor_class": LayoutTransformer,
@@ -113,7 +123,7 @@ class PPOAgent:
             MaskableActorCriticPolicy,
             vec_env,
             policy_kwargs=policy_kwargs,
-            learning_rate=self.config.LEARNING_RATE,
+            learning_rate=lr_scheduler,  # 使用学习率调度器
             n_steps=self.config.NUM_STEPS,
             batch_size=self.config.BATCH_SIZE,
             n_epochs=self.config.NUM_EPOCHS,
