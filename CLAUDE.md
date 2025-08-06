@@ -278,23 +278,13 @@ logs/
   - 验证修复效果：模拟退火算法的initial_temperature、max_iterations等参数现在能正确生效
   - 验证修复效果：遗传算法的population_size、max_iterations等参数现在能正确生效
   - 确保所有启发式算法的命令行参数配置现在完全可用
-- 2025-08-05: **实现PPO训练实时时间成本监控** - 添加训练过程中实际加权时间的可视化显示功能：
-  - 新增TrainingMetricsCallback回调类，实时跟踪和记录每个episode的实际加权时间成本
-  - 修改LayoutEnv环境，在episode结束时自动传递时间成本信息到训练回调
-  - 集成到PPOOptimizer训练流程，提供详细的训练指标日志和TensorBoard可视化
-  - 支持最佳布局跟踪、收敛性分析、训练速度统计等丰富功能
-  - 解决训练过程只能看到抽象reward值而无法了解实际优化效果的问题
-  - 训练日志现在显示：当前最佳时间成本、平均时间成本、时间成本范围、训练进度等关键指标
-  - 自动保存训练指标历史和最佳布局结果，便于后续分析和对比
 - 2025-08-05: **修复多进程环境日志重复问题** - 彻底解决Stable-baselines3多进程训练时的日志重复显示：
   - 修复setup_logger函数：添加严格的handler重复检查、设置propagate=False防止日志传播
   - 实现进程区分机制：只有主进程输出详细INFO级别日志，子进程仅输出WARNING以上级别
-  - 优化TrainingMetricsCallback：添加is_main_process检查，确保统计日志和文件保存只在主进程执行
-  - 保持所有监控功能完整性：TensorBoard记录、指标统计、最佳结果跟踪等功能正常工作
+  - 保持所有监控功能完整性：TensorBoard记录等功能正常工作
   - 验证修复效果：多进程测试确认无重复日志输出，训练过程日志清晰可读
 - 2025-08-05: **确保显示原始时间成本值** - 修正训练日志显示缩放reward值而非原始时间成本的问题：
   - 修改LayoutEnv._get_info()：明确传递原始时间成本和缩放reward，添加调试日志验证数据流
-  - 优化TrainingMetricsCallback显示格式：明确标注【原始】时间成本，提供缩放值对比参考
   - 恢复训练进度条显示：支持总episodes目标设置，实时显示训练进度百分比和可视化进度条
   - 改进日志内容：时间成本以"秒"为单位显示，同时提供对应的缩放reward用于对比验证
   - 增强最佳结果记录：发现新最佳布局时同时显示原始时间成本和对应缩放reward
@@ -307,7 +297,6 @@ logs/
   - 优化matplotlib中文字体支持，减少字体警告但不影响功能
   - 验证修复效果：算法对比功能完全正常，所有图表包括雷达图成功生成
   - 创建EpisodeInfoVecEnvWrapper：自定义VecEnv包装器确保episode信息在多进程环境中正确传递
-  - 增强TrainingMetricsCallback：优化info获取逻辑，支持多种episode信息格式（标准SB3格式、自定义格式等）
   - 修复PPOOptimizer环境创建：在训练和评估环境中都使用episode信息包装器
   - 添加详细调试日志：在环境、包装器、回调等关键位置添加DEBUG级别日志便于问题诊断
   - 确保数据完整性：包装器自动补充标准episode字段（r、l）并保持自定义字段（time_cost、layout等）
@@ -315,9 +304,13 @@ logs/
 - 2025-08-06: **彻底优化多进程训练日志输出** - 删除RL模型子进程的冗余logger显示，显著提升训练日志可读性：
   - 恢复LayoutEnv正常日志级别：移除临时DEBUG级别配置，改回默认INFO级别，减少环境层面的详细调试输出
   - 强化VecEnvWrapper进程隔离：添加multiprocessing进程检查，确保只有主进程输出详细调试日志
-  - 优化TrainingMetricsCallback子进程行为：子进程完全禁用详细输出(verbose=0)，提高日志频率阈值减少不必要计算
-  - 降低PPOOptimizer回调详细级别：将TrainingMetricsCallback的verbose从2降到1，减少调试级别的日志输出
   - 添加严格的日志级别检查：所有DEBUG级别日志都增加logger.isEnabledFor(10)检查，确保只在需要时输出
   - 验证修复效果：多进程测试确认子进程只输出WARNING以上级别日志，主进程保持完整的训练监控功能
-  - 保持功能完整性：TensorBoard记录、指标统计、最佳结果跟踪、进度条显示等核心功能完全正常
+  - 保持功能完整性：TensorBoard记录等核心功能完全正常
   - 显著改善用户体验：PPO训练过程日志现在清晰易读，无重复输出，专注于关键训练进度和性能指标
+- 2025-08-06: **删除训练指标回调类** - 简化PPO训练流程，移除不再需要的训练指标监控组件：
+  - 删除 src/rl_optimizer/utils/training_metrics_callback.py 文件（351行代码）
+  - 修改PPOOptimizer：移除TrainingMetricsCallback的导入、创建和使用
+  - 清理相关引用：删除metrics_callback相关的日志输出和统计信息显示
+  - 保持核心功能：PPO算法训练功能完全保留，仅移除额外的指标监控层
+  - 简化日志输出：训练过程专注于算法本身的基础信息，减少冗余显示

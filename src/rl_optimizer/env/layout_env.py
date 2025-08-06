@@ -176,7 +176,7 @@ class LayoutEnv(gym.Env):
                     logger.debug(f"Episode结束 - 原始时间成本: {raw_time_cost:.2f}, "
                                f"缩放后训练reward: {scaled_time_reward:.6f}")
                 
-                # 添加episode信息供TrainingMetricsCallback使用
+                # Episode结束时添加详细信息
                 info['episode'] = {
                     'time_cost': raw_time_cost,  # 明确传递原始值
                     'scaled_reward': scaled_time_reward,  # 同时提供缩放值用于对比

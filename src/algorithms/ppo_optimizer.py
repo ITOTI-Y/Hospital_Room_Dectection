@@ -23,7 +23,6 @@ from src.rl_optimizer.model.policy_network import LayoutTransformer
 from src.rl_optimizer.utils.setup import setup_logger, save_json
 from src.rl_optimizer.utils.lr_scheduler import get_lr_scheduler
 from src.rl_optimizer.utils.checkpoint_callback import CheckpointCallback
-from src.rl_optimizer.utils.training_metrics_callback import TrainingMetricsCallback
 from src.rl_optimizer.data.cache_manager import CacheManager
 from src.config import RLConfig
 
@@ -277,19 +276,6 @@ class PPOOptimizer(BaseOptimizer):
         # 设置回调
         callbacks = []
         
-        # 训练指标回调 - 优先添加，用于跟踪实际时间成本
-        # 估算总episodes数量用于进度条显示
-        estimated_episodes = remaining_steps // (self.config.NUM_ENVS * self.config.N_STEPS) * self.config.NUM_ENVS
-        
-        metrics_callback = TrainingMetricsCallback(
-            log_freq=max(1, self.config.EVAL_FREQUENCY // (self.config.NUM_ENVS * self.config.N_STEPS)),  # 与eval频率同步
-            save_freq=self.config.EVAL_FREQUENCY * 5,  # 每5次评估保存一次指标
-            save_path=str(log_dir / "metrics"),
-            window_size=100,  # 统计最近100个episodes
-            verbose=1,  # 降低到普通级别，减少调试输出
-            total_episodes_target=estimated_episodes  # 添加进度条支持
-        )
-        callbacks.append(metrics_callback)
         
         # Checkpoint回调
         checkpoint_callback = CheckpointCallback(
@@ -318,7 +304,6 @@ class PPOOptimizer(BaseOptimizer):
         
         # 开始训练
         logger.info(f"开始训练，剩余步数: {remaining_steps}")
-        logger.info(f"训练指标将每 {metrics_callback.log_freq} 个episodes记录一次")
         logger.info(f"日志保存路径: {log_dir}")
         
         self.model.learn(
@@ -329,22 +314,8 @@ class PPOOptimizer(BaseOptimizer):
             reset_num_timesteps=False if self.resume_model_path else True
         )
         
-        # 训练完成后，输出最终统计信息
-        final_stats = metrics_callback.get_current_stats()
-        best_result = metrics_callback.get_best_result()
-        
+        # 训练完成
         logger.info("🎉 训练完成！")
-        logger.info("=" * 80)
-        logger.info("📊 最终训练统计:")
-        logger.info(f"   总episodes: {final_stats.get('episode_count', 0)}")
-        if 'best_time_cost' in final_stats and final_stats['best_time_cost'] != float('inf'):
-            logger.info(f"   【原始】最佳时间成本: {final_stats['best_time_cost']:.2f} 秒 (Episode {final_stats.get('best_episode', 0)})")
-            best_scaled = -final_stats['best_time_cost'] / 1e4
-            logger.info(f"   对应缩放reward: {best_scaled:.6f}")
-            if 'avg_time_cost' in final_stats:
-                avg_scaled = -final_stats['avg_time_cost'] / 1e4
-                logger.info(f"   【原始】最近平均时间成本: {final_stats['avg_time_cost']:.2f} 秒 ± {final_stats.get('std_time_cost', 0):.2f}")
-                logger.info(f"   对应缩放reward: {avg_scaled:.6f} ± {final_stats.get('std_time_cost', 0)/1e4:.6f}")
         logger.info("=" * 80)
         
         # 保存最终模型
@@ -352,13 +323,11 @@ class PPOOptimizer(BaseOptimizer):
         self.model.save(str(final_model_path))
         logger.info(f"最终模型已保存到: {final_model_path}")
         
-        # 保存训练配置和最终统计
+        # 保存训练配置
         config_path = log_dir / "training_config.json"
         config_data = self.config.__dict__.copy()
-        config_data['final_stats'] = final_stats
-        config_data['best_result'] = best_result
         save_json(config_data, str(config_path))
-        logger.info(f"训练配置和统计已保存到: {config_path}")
+        logger.info(f"训练配置已保存到: {config_path}")
     
     def _evaluate_best_model(self) -> tuple[List[str], float]:
         """评估最佳模型并返回最优布局和成本"""
