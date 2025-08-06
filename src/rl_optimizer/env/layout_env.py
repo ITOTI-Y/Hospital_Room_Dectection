@@ -10,6 +10,7 @@ from src.config import RLConfig
 from src.rl_optimizer.data.cache_manager import CacheManager
 from src.rl_optimizer.env.cost_calculator import CostCalculator
 from src.rl_optimizer.utils.setup import setup_logger
+from src.algorithms.constraint_manager import ConstraintManager
 
 logger = setup_logger(__name__)  # 使用默认INFO级别
 
@@ -32,7 +33,7 @@ class LayoutEnv(gym.Env):
 
     metadata = {'render_modes': ['human']}
 
-    def __init__(self, config: RLConfig, cache_manager: CacheManager, cost_calculator: CostCalculator):
+    def __init__(self, config: RLConfig, cache_manager: CacheManager, cost_calculator: CostCalculator, constraint_manager: ConstraintManager):
         """
         初始化布局优化环境。
 
@@ -40,11 +41,13 @@ class LayoutEnv(gym.Env):
             config (RLConfig): RL优化器的配置对象。
             cache_manager (CacheManager): 已初始化的数据缓存管理器。
             cost_calculator (CostCalculator): 已初始化的成本计算器。
+            constraint_manager (ConstraintManager): 约束管理器。
         """
         super().__init__()
         self.config = config
         self.cm = cache_manager
         self.cc = cost_calculator
+        self.constraint_manager = constraint_manager
 
         self._initialize_nodes_and_slots()
         self._define_spaces()
@@ -69,8 +72,11 @@ class LayoutEnv(gym.Env):
 
     def _define_spaces(self):
         """定义观测空间和动作空间。"""
-        # 动作空间：选择一个科室进行放置。动作是科室的索引。
-        self.action_space = spaces.Discrete(self.num_depts)
+        # 动作空间：选择一个科室进行放置，或者跳过当前槽位
+        # 动作 0 到 num_depts-1：选择科室索引
+        # 动作 num_depts：跳过当前槽位
+        self.action_space = spaces.Discrete(self.num_depts + 1)
+        self.SKIP_ACTION = self.num_depts  # 跳过动作的索引
 
         # 观测空间：使用Box空间来明确定义形状，避免SB3的意外转换
         self.observation_space = spaces.Dict({
@@ -84,7 +90,9 @@ class LayoutEnv(gym.Env):
             # placed_mask[k] = 1 表示索引为k的科室已被放置。
             "placed_mask": spaces.MultiBinary(self.num_depts),
             # 当前待填充槽位的索引
-            "current_slot_idx": spaces.Box(low=0, high=self.num_slots - 1, shape=(1,), dtype=np.int32)
+            "current_slot_idx": spaces.Box(low=0, high=self.num_slots - 1, shape=(1,), dtype=np.int32),
+            # 跳过的槽位数量
+            "num_skipped_slots": spaces.Box(low=0, high=self.num_slots, shape=(1,), dtype=np.int32)
         })
 
     def _initialize_state_variables(self):
@@ -95,6 +103,8 @@ class LayoutEnv(gym.Env):
         self.placed_mask = np.zeros(self.num_depts, dtype=bool)
         # 每个回合开始时需要被打乱的槽位处理顺序
         self.shuffled_slot_indices = np.arange(self.num_slots)
+        # 跟踪跳过的槽位
+        self.skipped_slots = set()
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Dict, Dict]:
         """重置环境，随机化槽位顺序，并返回初始观测。"""
@@ -104,26 +114,37 @@ class LayoutEnv(gym.Env):
         return self._get_obs(), self._get_info(terminated=False)
     
     def step(self, action: int) -> Tuple[Dict, float, bool, bool, Dict]:
-        """执行一个动作：在当前槽位放置选定的科室。"""
+        """执行一个动作：在当前槽位放置选定的科室，或者跳过当前槽位。"""
         # 更严格的输入验证
-        if not (0 <= action < self.num_depts):
-            logger.error(f"无效的动作索引: {action}，有效范围是 [0, {self.num_depts-1}]")
+        if not (0 <= action <= self.num_depts):  # 包括跳过动作
+            logger.error(f"无效的动作索引: {action}，有效范围是 [0, {self.num_depts}]")
             return self._get_obs(), -100.0, True, False, self._get_info(terminated=False)
         
-        if self.placed_mask[action]:
-            # 这是一个安全检查。理论上动作掩码会阻止这种情况。
-            # 如果发生，说明上游逻辑有误，应给予重罚并终止。
-            logger.error(f"严重错误：智能体选择了已被放置的科室！动作={action}, 科室={self.placeable_depts[action]}")
-            logger.error(f"当前步骤: {self.current_step}, placed_mask: {self.placed_mask}")
-            logger.error(f"当前动作掩码: {self.get_action_mask()}")
-            return self._get_obs(), -100.0, True, False, self._get_info(terminated=False)
+        # 检查是否为跳过动作
+        if action == self.SKIP_ACTION:
+            # 跳过当前槽位
+            current_slot_idx = self.shuffled_slot_indices[self.current_step]
+            self.skipped_slots.add(current_slot_idx)
+            logger.debug(f"跳过槽位 {self.placeable_slots[current_slot_idx]} (索引: {current_slot_idx})")
+        else:
+            # 检查科室是否已被放置
+            if self.placed_mask[action]:
+                # 这是一个安全检查。理论上动作掩码会阻止这种情况。
+                # 如果发生，说明上游逻辑有误，应给予重罚并终止。
+                logger.error(f"严重错误：智能体选择了已被放置的科室！动作={action}, 科室={self.placeable_depts[action]}")
+                logger.error(f"当前步骤: {self.current_step}, placed_mask: {self.placed_mask}")
+                logger.error(f"当前动作掩码: {self.get_action_mask()}")
+                return self._get_obs(), -100.0, True, False, self._get_info(terminated=False)
 
-        # 确定当前要填充的物理槽位索引
-        slot_to_fill = self.shuffled_slot_indices[self.current_step]
+            # 确定当前要填充的物理槽位索引
+            slot_to_fill = self.shuffled_slot_indices[self.current_step]
+            
+            # 更新状态：在布局中记录放置，并标记科室为"已用"
+            self.layout[slot_to_fill] = action + 1  # 动作是科室索引，存储时+1
+            self.placed_mask[action] = True
+            logger.debug(f"在槽位 {self.placeable_slots[slot_to_fill]} 放置科室 {self.placeable_depts[action]}")
         
-        # 更新状态：在布局中记录放置，并标记科室为"已用"
-        self.layout[slot_to_fill] = action + 1  # 动作是科室索引，存储时+1
-        self.placed_mask[action] = True
+        # 更新步骤计数
         self.current_step += 1
 
         terminated = (self.current_step == self.num_slots)
@@ -148,7 +169,8 @@ class LayoutEnv(gym.Env):
         return {
             "layout": self.layout,
             "placed_mask": self.placed_mask,
-            "current_slot_idx": np.array([current_slot_idx], dtype=np.int32)
+            "current_slot_idx": np.array([current_slot_idx], dtype=np.int32),
+            "num_skipped_slots": np.array([len(self.skipped_slots)], dtype=np.int32)
         }
     
     def _get_info(self, terminated: bool = False) -> Dict[str, Any]:
@@ -157,107 +179,94 @@ class LayoutEnv(gym.Env):
         
         # 如果episode结束，添加训练指标信息
         if terminated:
-            # 构造最终布局
-            final_layout_depts = [None] * self.num_slots
-            for slot_idx, dept_id in enumerate(self.layout):
-                if dept_id > 0:
-                    final_layout_depts[slot_idx] = self.placeable_depts[dept_id - 1]
+            # 构造最终布局（包括空槽位）
+            final_layout_depts = []
+            placed_depts = []
             
-            # 如果布局完整，计算时间成本
-            if None not in final_layout_depts:
-                # 计算原始的总时间成本（未缩放）
-                raw_time_cost = self.cc.calculate_total_cost(final_layout_depts)
-                
-                # 计算用于训练的缩放reward（与_calculate_reward中的逻辑一致）
-                scaled_time_reward = -raw_time_cost / 1e4
-                
-                # 调试日志：确认传递的是原始值
-                if logger.isEnabledFor(20):  # INFO级别
-                    logger.debug(f"Episode结束 - 原始时间成本: {raw_time_cost:.2f}, "
-                               f"缩放后训练reward: {scaled_time_reward:.6f}")
-                
-                # Episode结束时添加详细信息
-                info['episode'] = {
-                    'time_cost': raw_time_cost,  # 明确传递原始值
-                    'scaled_reward': scaled_time_reward,  # 同时提供缩放值用于对比
-                    'layout': final_layout_depts.copy(),
-                    'r': self._calculate_reward(),  # 完整的奖励值（包含时间+邻接）
-                    'l': self.current_step  # episode长度
-                }
-                
-                # 如果启用了详细日志，还可以添加更多信息
-                if logger.isEnabledFor(20):  # INFO级别
-                    info['episode']['per_process_costs'] = self.cc.calculate_per_process_cost(final_layout_depts)
+            for slot_idx in range(self.num_slots):
+                dept_id = self.layout[slot_idx]
+                if dept_id > 0:
+                    dept_name = self.placeable_depts[dept_id - 1]
+                    final_layout_depts.append(dept_name)
+                    placed_depts.append(dept_name)
+                else:
+                    final_layout_depts.append(None)
+            
+            num_empty_slots = len(self.skipped_slots)
+            num_placed_depts = len(placed_depts)
+            
+            # 计算时间成本（只基于已放置的科室）
+            if num_placed_depts > 0:
+                raw_time_cost = self.cc.calculate_total_cost(placed_depts)
+            else:
+                raw_time_cost = 0.0
+            
+            # 计算缩放后的奖励
+            scaled_time_reward = -raw_time_cost / 1e4 if raw_time_cost > 0 else 0.0
+            empty_penalty = num_empty_slots * self.config.EMPTY_SLOT_PENALTY_FACTOR / 1e4
+            
+            # 调试日志：确认传递的是原始值
+            if logger.isEnabledFor(20):  # INFO级别
+                logger.debug(f"Episode结束 - 原始时间成本: {raw_time_cost:.2f}, "
+                           f"放置科室数: {num_placed_depts}, 空槽位数: {num_empty_slots}")
+            
+            # Episode结束时添加详细信息
+            info['episode'] = {
+                'time_cost': raw_time_cost,  # 原始时间成本
+                'scaled_time_reward': scaled_time_reward,  # 缩放后的时间奖励
+                'empty_penalty': empty_penalty,  # 空槽位惩罚
+                'num_placed_depts': num_placed_depts,  # 放置的科室数
+                'num_empty_slots': num_empty_slots,  # 空槽位数
+                'layout': final_layout_depts.copy(),  # 完整布局（包括None）
+                'placed_layout': placed_depts.copy(),  # 只包含已放置的科室
+                'r': self._calculate_reward(),  # 完整的奖励值
+                'l': self.current_step  # episode长度
+            }
+            
+            # 如果启用了详细日志，还可以添加更多信息
+            if logger.isEnabledFor(20):  # INFO级别
+                if num_placed_depts > 0:
+                    info['episode']['per_process_costs'] = self.cc.calculate_per_process_cost(placed_depts)
         
         return info
     
     def get_action_mask(self) -> np.ndarray:
         """
-        计算当前步骤下所有合法的科室动作掩码。
+        计算当前步骤下所有合法的动作掩码。
         
-        该方法根据当前待填充槽位的面积约束，返回一个布尔数组，指示哪些未放置的科室可被合法选择。如果所有未放置科室均不满足面积约束，将逐步放宽容差，直至至少有一个合法动作；如仍无合法动作，则强制允许所有未放置科室。
+        该方法根据当前待填充槽位的面积约束，返回一个布尔数组，指示哪些未放置的科室可被合法选择。
+        如果没有合适的科室，则允许跳过当前槽位。
         
         返回值:
-            np.ndarray: 长度等于科室数的布尔数组，True 表示对应科室当前可被选择。
+            np.ndarray: 长度等于(num_depts + 1)的布尔数组，前 num_depts 个元素对应科室，最后一个元素对应跳过动作。
         """
         if self.current_step >= self.num_slots:
-            return np.zeros(self.num_depts, dtype=bool)
+            return np.zeros(self.num_depts + 1, dtype=bool)
 
-        # 1. 初始掩码：所有未放置的科室都是潜在的合法动作
-        action_mask = ~self.placed_mask
-
-        # 2. 面积约束：科室面积必须符合当前槽位的容差
-        current_slot_idx = self.shuffled_slot_indices[self.current_step]
-        current_slot_area = self.slot_areas[current_slot_idx]
-        min_area = current_slot_area * (1 - self.config.AREA_SCALING_FACTOR)
-        max_area = current_slot_area * (1 + self.config.AREA_SCALING_FACTOR)
-
-        for dept_idx in range(self.num_depts):
-            if action_mask[dept_idx]:  # 只检查当前合法的动作
-                dept_name = self.placeable_depts[dept_idx]
-                dept_area = self.dept_areas_map[dept_name]
-                if not (min_area <= dept_area <= max_area):
-                    action_mask[dept_idx] = False
+        # 1. 初始化动作掩码（包括跳过动作）
+        action_mask = np.zeros(self.num_depts + 1, dtype=bool)
         
-        # 容错机制：如果没有合法动作，逐步放松约束
-        if np.sum(action_mask) == 0:
-            logger.warning(f"在步骤 {self.current_step}，没有找到任何合法的动作！尝试放松约束...")
-            
-            # 重新计算，使用更宽松的面积约束
-            relaxation_factors = [0.2, 0.3, 0.5, 0.7, 1.0]  # 逐步放松
-            for factor in relaxation_factors:
-                action_mask = ~self.placed_mask  # 重新开始，只考虑未放置的科室
-                min_area = current_slot_area * (1 - factor)
-                max_area = current_slot_area * (1 + factor)
-                
-                for dept_idx in range(self.num_depts):
-                    if action_mask[dept_idx]:
-                        dept_name = self.placeable_depts[dept_idx]
-                        dept_area = self.dept_areas_map[dept_name]
-                        if not (min_area <= dept_area <= max_area):
-                            action_mask[dept_idx] = False
-                
-                if np.sum(action_mask) > 0:
-                    logger.info(f"使用松弛因子 {factor} 找到了 {np.sum(action_mask)} 个合法动作")
-                    break
-            
-            # 最后的安全检查：如果仍然没有合法动作，至少允许所有未放置的科室
-            if np.sum(action_mask) == 0:
-                current_slot_name = self.placeable_slots[current_slot_idx]
-                current_slot_area = self.slot_areas[current_slot_idx]
-                
-                unplaced_indices = np.where(~self.placed_mask)[0]
-                unplaced_depts_info = [
-                    f"{self.placeable_depts[i]}({self.dept_areas_map[self.placeable_depts[i]]:.2f})"
-                    for i in unplaced_indices
-                ]
-                
-                logger.error(
-                    f"即使放松所有约束也没有为槽位 '{current_slot_name}' (面积: {current_slot_area:.2f}) 找到合法科室！"
-                    f"剩余待放置科室: [{', '.join(unplaced_depts_info)}]. "
-                    f"将强制允许所有未放置的科室。"
-                )
-                action_mask = ~self.placed_mask
+        # 2. 检查哪些科室可以放置在当前槽位
+        current_slot_idx = self.shuffled_slot_indices[self.current_step]
+        
+        # 检查每个未放置的科室的兼容性
+        for dept_idx in range(self.num_depts):
+            if not self.placed_mask[dept_idx]:  # 只检查未放置的科室
+                # 使用 ConstraintManager 的兼容性矩阵进行面积兼容性检查
+                if self.constraint_manager.area_compatibility_matrix[current_slot_idx, dept_idx]:
+                    action_mask[dept_idx] = True
+        
+        # 3. 始终允许跳过动作（如果配置允许）
+        if self.config.ALLOW_PARTIAL_LAYOUT:
+            action_mask[self.SKIP_ACTION] = True
+        
+        # 4. 如果没有任何合法动作，强制允许跳过（安全检查）
+        if not np.any(action_mask):
+            current_slot_name = self.placeable_slots[current_slot_idx]
+            logger.warning(
+                f"在步骤 {self.current_step}，槽位 '{current_slot_name}' 无可放置的科室，强制允许跳过动作"
+            )
+            action_mask[self.SKIP_ACTION] = True
         
         return action_mask
     
@@ -265,24 +274,54 @@ class LayoutEnv(gym.Env):
         """
         在回合结束时，根据最终布局计算并返回总奖励。
         
-        如果布局未完成，则返回重罚。奖励由时间成本和邻接约束两部分加权组成，其中时间成本通过 `CostCalculator` 计算并缩放，邻接奖励由 `_calculate_adjacency_reward` 计算。
+        奖励由以下部分组成：
+        1. 时间成本奖励：根据已放置科室的通行时间计算
+        2. 邻接约束奖励：软约束奖励
+        3. 空槽位惩罚：根据跳过的槽位数量给予惩罚
         """
-        final_layout_depts = [None] * self.num_slots
-        for slot_idx, dept_id in enumerate(self.layout):
+        # 构建最终布局（包括空槽位）
+        final_layout_depts = []
+        placed_depts = []
+        
+        for slot_idx in range(self.num_slots):
+            dept_id = self.layout[slot_idx]
             if dept_id > 0:
-                final_layout_depts[slot_idx] = self.placeable_depts[dept_id - 1]
+                dept_name = self.placeable_depts[dept_id - 1]
+                final_layout_depts.append(dept_name)
+                placed_depts.append(dept_name)
+            else:
+                final_layout_depts.append(None)
         
-        if None in final_layout_depts:
-            logger.error("布局计算奖励时发现未完成的布局，返回重罚。")
-            return -500.0
-
-        time_cost = self.cc.calculate_total_cost(final_layout_depts)
-        time_reward = -time_cost / 1e4  # 缩放以稳定训练
-
-        adjacency_reward = self._calculate_adjacency_reward(final_layout_depts)
+        # 计算空槽位数量
+        num_empty_slots = len(self.skipped_slots)
+        num_placed_depts = len(placed_depts)
         
-        total_reward = (self.config.REWARD_TIME_WEIGHT * time_reward + 
-                        self.config.REWARD_ADJACENCY_WEIGHT * adjacency_reward)
+        logger.debug(f"布局统计: 放置 {num_placed_depts} 个科室，跳过 {num_empty_slots} 个槽位")
+        
+        # 1. 计算时间成本奖励（只基于已放置的科室）
+        if num_placed_depts > 0:
+            # 只传递已放置的科室给成本计算器
+            time_cost = self.cc.calculate_total_cost(placed_depts)
+            time_reward = -time_cost / 1e4  # 缩放以稳定训练
+        else:
+            # 如果没有放置任何科室，时间成本为0
+            time_cost = 0.0
+            time_reward = 0.0
+        
+        # 2. 邻接约束奖励（只基于已放置的科室）
+        adjacency_reward = self._calculate_adjacency_reward(placed_depts)
+        
+        # 3. 空槽位惩罚
+        empty_penalty = num_empty_slots * self.config.EMPTY_SLOT_PENALTY_FACTOR / 1e4  # 缩放保持一致
+        
+        # 总奖励计算
+        total_reward = (
+            self.config.REWARD_TIME_WEIGHT * time_reward + 
+            self.config.REWARD_ADJACENCY_WEIGHT * adjacency_reward -
+            empty_penalty  # 直接减去惩罚
+        )
+        
+        logger.debug(f"奖励组成: 时间={time_reward:.6f}, 邻接={adjacency_reward:.6f}, 空槽位惩罚={empty_penalty:.6f}, 总计={total_reward:.6f}")
         
         return total_reward
     

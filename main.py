@@ -253,9 +253,8 @@ class HospitalLayoutOptimizer:
             
             # 初始化约束管理器
             constraint_manager = ConstraintManager(
-                placeable_slots=cache_manager.placeable_slots,
-                placeable_departments=cache_manager.placeable_departments,
-                travel_times=cache_manager.travel_times_matrix
+                config=self.rl_config,
+                cache_manager=cache_manager
             )
             logger.info("约束管理器初始化完成")
             

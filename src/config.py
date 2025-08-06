@@ -200,6 +200,8 @@ class RLConfig:
 
         # --- 约束配置 ---
         self.AREA_SCALING_FACTOR: float = 0.1
+        self.EMPTY_SLOT_PENALTY_FACTOR: float = 10000.0  # 每个空槽位的惩罚系数
+        self.ALLOW_PARTIAL_LAYOUT: bool = True  # 是否允许部分布局（跳过槽位）
         self.MANDATORY_ADJACENCY: List[List[str]] = []  # 例如: [['手术室_30007', '中心供应室_10003']]
         self.PREFERRED_ADJACENCY: Dict[str, List[List[str]]] = {
             'positive': [], # 例如: [['检验中心_10007', '采血处_20007']]

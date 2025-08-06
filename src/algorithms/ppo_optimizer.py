@@ -63,7 +63,8 @@ class PPOOptimizer(BaseOptimizer):
         self.env_kwargs = {
             "config": self.config,
             "cache_manager": self.cache_manager,
-            "cost_calculator": self.cost_calculator
+            "cost_calculator": self.cost_calculator,
+            "constraint_manager": self.constraint_manager
         }
         
         # 训练状态

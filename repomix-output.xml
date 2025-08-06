@@ -95,7 +95,6 @@ src/
       checkpoint_callback.py
       lr_scheduler.py
       setup.py
-      training_metrics_callback.py
   config.py
 main.py
 </directory_structure>
@@ -1138,404 +1137,6 @@ class GeneticAlgorithmOptimizer(BaseOptimizer):
             "convergence_rate": (self.best_fitness_history[0] - self.best_cost) / self.best_fitness_history[0] 
                                if self.best_fitness_history and self.best_fitness_history[0] > 0 else 0
         }
-</file>
-
-<file path="src/algorithms/ppo_optimizer.py">
-"""
-PPO优化器 - 基于强化学习的布局优化算法
-"""
-
-import torch
-import time
-import numpy as np
-from pathlib import Path
-from typing import List, Optional, Dict, Any
-from stable_baselines3.common.vec_env import VecNormalize
-from stable_baselines3.common.env_util import make_vec_env
-from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback as EvalCallback
-from sb3_contrib import MaskablePPO
-from sb3_contrib.common.wrappers import ActionMasker
-from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
-
-from src.algorithms.base_optimizer import BaseOptimizer, OptimizationResult
-from src.algorithms.constraint_manager import ConstraintManager
-from src.rl_optimizer.env.cost_calculator import CostCalculator
-from src.rl_optimizer.env.layout_env import LayoutEnv
-from src.rl_optimizer.env.vec_env_wrapper import EpisodeInfoVecEnvWrapper
-from src.rl_optimizer.model.policy_network import LayoutTransformer
-from src.rl_optimizer.utils.setup import setup_logger, save_json
-from src.rl_optimizer.utils.lr_scheduler import get_lr_scheduler
-from src.rl_optimizer.utils.checkpoint_callback import CheckpointCallback
-from src.rl_optimizer.utils.training_metrics_callback import TrainingMetricsCallback
-from src.rl_optimizer.data.cache_manager import CacheManager
-from src.config import RLConfig
-
-logger = setup_logger(__name__)
-
-
-def get_action_mask_from_info(infos: List[Dict]) -> np.ndarray:
-    """从矢量化环境的info字典列表中提取动作掩码"""
-    return np.array([info.get("action_mask", []) for info in infos])
-
-
-class PPOOptimizer(BaseOptimizer):
-    """
-    PPO优化器
-    
-    基于强化学习的PPO算法实现布局优化，使用MaskablePPO来处理动作掩码约束。
-    """
-    
-    def __init__(self, 
-                 cost_calculator: CostCalculator,
-                 constraint_manager: ConstraintManager,
-                 config: RLConfig,
-                 cache_manager: CacheManager):
-        """
-        初始化PPO优化器
-        
-        Args:
-            cost_calculator: 成本计算器
-            constraint_manager: 约束管理器
-            config: RL配置
-            cache_manager: 缓存管理器
-        """
-        super().__init__(cost_calculator, constraint_manager, "PPO")
-        self.config = config
-        self.cache_manager = cache_manager
-        
-        # 环境参数
-        self.env_kwargs = {
-            "config": self.config,
-            "cache_manager": self.cache_manager,
-            "cost_calculator": self.cost_calculator
-        }
-        
-        # 训练状态
-        self.model = None
-        self.vec_env = None
-        self.resume_model_path = None
-        self.completed_steps = 0
-    
-    def optimize(self, 
-                 initial_layout: Optional[List[str]] = None,
-                 max_iterations: int = None,
-                 total_timesteps: int = None,
-                 **kwargs) -> OptimizationResult:
-        """
-        执行PPO优化
-        
-        Args:
-            initial_layout: 初始布局（PPO会自动探索）
-            max_iterations: 最大迭代次数（使用total_timesteps代替）
-            total_timesteps: 总训练步数
-            **kwargs: 其他PPO参数
-            
-        Returns:
-            OptimizationResult: 优化结果
-        """
-        self.start_optimization()
-        
-        # 使用配置中的参数或传入的参数
-        if total_timesteps is None:
-            total_timesteps = self.config.TOTAL_TIMESTEPS
-        
-        logger.info(f"开始PPO优化，总训练步数: {total_timesteps}")
-        
-        try:
-            # 检查是否需要恢复训练
-            self._check_for_resume()
-            
-            # 计算剩余训练步数
-            remaining_steps = max(0, total_timesteps - self.completed_steps)
-            if remaining_steps == 0:
-                logger.info("训练已完成，加载最佳模型进行评估")
-                best_layout, best_cost = self._evaluate_best_model()
-                self.update_best_solution(best_layout, best_cost)
-                return self.finish_optimization()
-            
-            # 创建环境和模型
-            self._setup_environment_and_model(remaining_steps)
-            
-            # 执行训练
-            self._train_model(remaining_steps)
-            
-            # 评估最佳模型
-            best_layout, best_cost = self._evaluate_best_model()
-            self.update_best_solution(best_layout, best_cost)
-            
-        except KeyboardInterrupt:
-            logger.warning("训练被用户中断")
-            if self.model:
-                self._save_interrupted_model()
-        except Exception as e:
-            logger.error(f"PPO优化过程中发生错误: {e}", exc_info=True)
-            raise
-        
-        return self.finish_optimization()
-    
-    def _check_for_resume(self):
-        """检查是否需要从checkpoint恢复训练"""
-        if not self.config.RESUME_TRAINING:
-            return
-            
-        if self.config.PRETRAINED_MODEL_PATH:
-            model_path = Path(self.config.PRETRAINED_MODEL_PATH)
-            if not model_path.exists():
-                logger.warning(f"指定的预训练模型不存在: {model_path}")
-                return
-            self.resume_model_path = str(model_path)
-        else:
-            # 自动查找最新的checkpoint
-            checkpoint_callback = CheckpointCallback(
-                save_freq=1,
-                save_path=self.config.LOG_PATH
-            )
-            model_path = checkpoint_callback.get_latest_checkpoint()
-            if model_path:
-                self.resume_model_path = str(model_path)
-            else:
-                logger.info("未找到可用的checkpoint，将开始全新训练")
-                return
-        
-        # 加载checkpoint元数据
-        metadata = CheckpointCallback.load_checkpoint_metadata(self.resume_model_path)
-        if metadata:
-            self.completed_steps = metadata.get("training_progress", {}).get("num_timesteps", 0)
-            logger.info(f"从checkpoint恢复训练，已完成步数: {self.completed_steps}")
-        else:
-            logger.warning("无法加载checkpoint元数据，从步数0开始")
-    
-    def _setup_environment_and_model(self, remaining_steps: int):
-        """设置环境和模型"""
-        logger.info(f"正在创建 {self.config.NUM_ENVS} 个并行环境...")
-        
-        # 创建矢量化环境
-        vec_env = make_vec_env(
-            lambda: ActionMasker(LayoutEnv(**self.env_kwargs), LayoutEnv._action_mask_fn),
-            n_envs=self.config.NUM_ENVS
-        )
-        
-        # 使用自定义包装器确保episode信息正确传递
-        self.vec_env = EpisodeInfoVecEnvWrapper(vec_env)
-        
-        logger.info("矢量化环境创建成功，已添加episode信息包装器")
-        
-        # 创建或加载模型
-        if self.resume_model_path:
-            self._load_pretrained_model()
-        else:
-            self._create_new_model()
-    
-    def _load_pretrained_model(self):
-        """加载预训练模型"""
-        logger.info(f"正在加载预训练模型: {self.resume_model_path}")
-        
-        try:
-            self.model = MaskablePPO.load(
-                self.resume_model_path,
-                env=self.vec_env,
-                device='cuda' if torch.cuda.is_available() else 'cpu'
-            )
-            
-            # 重新设置学习率调度器
-            if hasattr(self.model, 'lr_schedule'):
-                lr_scheduler = get_lr_scheduler(
-                    schedule_type=self.config.LEARNING_RATE_SCHEDULE_TYPE,
-                    initial_lr=self.config.LEARNING_RATE_INITIAL,
-                    final_lr=self.config.LEARNING_RATE_FINAL
-                )
-                self.model.lr_schedule = lr_scheduler
-                logger.info("学习率调度器已重新设置")
-                
-            logger.info("预训练模型加载成功")
-            
-        except Exception as e:
-            logger.error(f"加载预训练模型失败: {e}")
-            raise
-    
-    def _create_new_model(self):
-        """创建新的PPO模型"""
-        logger.info("创建全新的PPO模型...")
-        
-        # 创建学习率调度器
-        lr_scheduler = get_lr_scheduler(
-            schedule_type=self.config.LEARNING_RATE_SCHEDULE_TYPE,
-            initial_lr=self.config.LEARNING_RATE_INITIAL,
-            final_lr=self.config.LEARNING_RATE_FINAL
-        )
-        
-        logger.info(f"使用学习率调度器: {self.config.LEARNING_RATE_SCHEDULE_TYPE}")
-        logger.info(f"初始学习率: {self.config.LEARNING_RATE_INITIAL}, 最终学习率: {self.config.LEARNING_RATE_FINAL}")
-        
-        # 定义策略网络参数
-        policy_kwargs = {
-            "features_extractor_class": LayoutTransformer,
-            "features_extractor_kwargs": {
-                "features_dim": self.config.EMBEDDING_DIM,  # 使用统一的配置属性
-                "config": self.config
-            },
-            "net_arch": dict(pi=[self.config.POLICY_NET_ARCH] * self.config.POLICY_NET_LAYERS,
-                            vf=[self.config.VALUE_NET_ARCH] * self.config.VALUE_NET_LAYERS)
-        }
-        
-        # 创建PPO模型
-        self.model = MaskablePPO(
-            MaskableActorCriticPolicy,
-            self.vec_env,
-            learning_rate=lr_scheduler,
-            n_steps=self.config.N_STEPS,
-            batch_size=self.config.BATCH_SIZE,
-            n_epochs=self.config.N_EPOCHS,
-            gamma=self.config.GAMMA,
-            gae_lambda=self.config.GAE_LAMBDA,
-            clip_range=self.config.CLIP_RANGE,
-            ent_coef=self.config.ENT_COEF,
-            vf_coef=self.config.VF_COEF,
-            max_grad_norm=self.config.MAX_GRAD_NORM,
-            policy_kwargs=policy_kwargs,
-            verbose=1,
-            device='cuda' if torch.cuda.is_available() else 'cpu',
-            tensorboard_log=str(self.config.LOG_PATH)
-        )
-        
-        logger.info("PPO模型创建成功")
-    
-    def _train_model(self, remaining_steps: int):
-        """训练模型"""
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        log_dir = self.config.LOG_PATH / f"ppo_layout_{timestamp}"
-        result_dir = self.config.RESULT_PATH / "model" / f"ppo_layout_{timestamp}"
-        
-        # 如果是恢复训练，使用原有目录
-        if self.resume_model_path:
-            checkpoint_path = Path(self.resume_model_path)
-            if "ppo_layout_" in checkpoint_path.parent.name:
-                log_dir = checkpoint_path.parent
-                result_dir = self.config.RESULT_PATH / checkpoint_path.parent.name
-        
-        # 创建目录
-        log_dir.mkdir(parents=True, exist_ok=True)
-        result_dir.mkdir(parents=True, exist_ok=True)
-        
-        # 设置回调
-        callbacks = []
-        
-        # 训练指标回调 - 优先添加，用于跟踪实际时间成本
-        # 估算总episodes数量用于进度条显示
-        estimated_episodes = remaining_steps // (self.config.NUM_ENVS * self.config.N_STEPS) * self.config.NUM_ENVS
-        
-        metrics_callback = TrainingMetricsCallback(
-            log_freq=max(1, self.config.EVAL_FREQUENCY // (self.config.NUM_ENVS * self.config.N_STEPS)),  # 与eval频率同步
-            save_freq=self.config.EVAL_FREQUENCY * 5,  # 每5次评估保存一次指标
-            save_path=str(log_dir / "metrics"),
-            window_size=100,  # 统计最近100个episodes
-            verbose=1,  # 降低到普通级别，减少调试输出
-            total_episodes_target=estimated_episodes  # 添加进度条支持
-        )
-        callbacks.append(metrics_callback)
-        
-        # Checkpoint回调
-        checkpoint_callback = CheckpointCallback(
-            save_freq=self.config.CHECKPOINT_FREQUENCY,
-            save_path=str(log_dir / "checkpoints"),
-            name_prefix="checkpoint"
-        )
-        callbacks.append(checkpoint_callback)
-        
-        # 评估回调
-        eval_vec_env = make_vec_env(
-            lambda: ActionMasker(LayoutEnv(**self.env_kwargs), LayoutEnv._action_mask_fn),
-            n_envs=1
-        )
-        eval_env = EpisodeInfoVecEnvWrapper(eval_vec_env)
-        
-        eval_callback = EvalCallback(
-            eval_env,
-            best_model_save_path=str(result_dir / "best_model"),
-            log_path=str(log_dir / "eval_logs"),
-            eval_freq=self.config.EVAL_FREQUENCY,
-            deterministic=True,
-            render=False
-        )
-        callbacks.append(eval_callback)
-        
-        # 开始训练
-        logger.info(f"开始训练，剩余步数: {remaining_steps}")
-        logger.info(f"训练指标将每 {metrics_callback.log_freq} 个episodes记录一次")
-        logger.info(f"日志保存路径: {log_dir}")
-        
-        self.model.learn(
-            total_timesteps=remaining_steps,
-            callback=callbacks,
-            tb_log_name="PPO",
-            reset_num_timesteps=False if self.resume_model_path else True
-        )
-        
-        # 训练完成后，输出最终统计信息
-        final_stats = metrics_callback.get_current_stats()
-        best_result = metrics_callback.get_best_result()
-        
-        logger.info("🎉 训练完成！")
-        logger.info("=" * 80)
-        logger.info("📊 最终训练统计:")
-        logger.info(f"   总episodes: {final_stats.get('episode_count', 0)}")
-        if 'best_time_cost' in final_stats and final_stats['best_time_cost'] != float('inf'):
-            logger.info(f"   【原始】最佳时间成本: {final_stats['best_time_cost']:.2f} 秒 (Episode {final_stats.get('best_episode', 0)})")
-            best_scaled = -final_stats['best_time_cost'] / 1e4
-            logger.info(f"   对应缩放reward: {best_scaled:.6f}")
-            if 'avg_time_cost' in final_stats:
-                avg_scaled = -final_stats['avg_time_cost'] / 1e4
-                logger.info(f"   【原始】最近平均时间成本: {final_stats['avg_time_cost']:.2f} 秒 ± {final_stats.get('std_time_cost', 0):.2f}")
-                logger.info(f"   对应缩放reward: {avg_scaled:.6f} ± {final_stats.get('std_time_cost', 0)/1e4:.6f}")
-        logger.info("=" * 80)
-        
-        # 保存最终模型
-        final_model_path = log_dir / "final_model.zip"
-        self.model.save(str(final_model_path))
-        logger.info(f"最终模型已保存到: {final_model_path}")
-        
-        # 保存训练配置和最终统计
-        config_path = log_dir / "training_config.json"
-        config_data = self.config.__dict__.copy()
-        config_data['final_stats'] = final_stats
-        config_data['best_result'] = best_result
-        save_json(config_data, str(config_path))
-        logger.info(f"训练配置和统计已保存到: {config_path}")
-    
-    def _evaluate_best_model(self) -> tuple[List[str], float]:
-        """评估最佳模型并返回最优布局和成本"""
-        # 这里简化实现，实际应该加载最佳模型进行评估
-        # 返回一个示例布局和成本
-        best_layout = self.generate_initial_layout()
-        best_cost = self.evaluate_layout(best_layout)
-        
-        logger.info(f"最佳模型评估完成，成本: {best_cost:.2f}")
-        return best_layout, best_cost
-    
-    def _save_interrupted_model(self):
-        """保存被中断的模型"""
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        interrupted_path = self.config.LOG_PATH / f"interrupted_model_{timestamp}.zip"
-        self.model.save(str(interrupted_path))
-        logger.info(f"中断的模型已保存到: {interrupted_path}")
-    
-    def get_additional_metrics(self) -> Dict[str, Any]:
-        """获取PPO特定的额外指标"""
-        metrics = {
-            "total_timesteps": self.config.TOTAL_TIMESTEPS,
-            "completed_steps": self.completed_steps,
-            "num_envs": self.config.NUM_ENVS,
-            "learning_rate_schedule": self.config.LEARNING_RATE_SCHEDULE_TYPE,
-            "resume_training": self.config.RESUME_TRAINING
-        }
-        
-        if self.model is not None:
-            metrics.update({
-                "model_device": str(self.model.device),
-                "policy_class": str(type(self.model.policy))
-            })
-        
-        return metrics
 </file>
 
 <file path="src/algorithms/simulated_annealing.py">
@@ -4316,90 +3917,6 @@ class CostCalculator:
         return time_vector
 </file>
 
-<file path="src/rl_optimizer/env/vec_env_wrapper.py">
-# src/rl_optimizer/env/vec_env_wrapper.py
-
-from typing import Any, Dict, List, Optional, Tuple
-import numpy as np
-from stable_baselines3.common.vec_env import VecEnvWrapper
-from stable_baselines3.common.vec_env.base_vec_env import VecEnvStepReturn
-import multiprocessing
-
-from src.rl_optimizer.utils.setup import setup_logger
-
-logger = setup_logger(__name__)
-
-
-class EpisodeInfoVecEnvWrapper(VecEnvWrapper):
-    """
-    VecEnv包装器，确保episode信息能正确传递给回调函数。
-    
-    解决SB3中VecEnv环境episode信息传递的问题，特别是自定义info字典的传递。
-    """
-    
-    def __init__(self, venv):
-        """
-        初始化包装器
-        
-        Args:
-            venv: 要包装的VecEnv
-        """
-        super().__init__(venv)
-        self.episode_rewards = np.zeros(self.num_envs)
-        self.episode_lengths = np.zeros(self.num_envs, dtype=int)
-        self.episode_count = 0
-        
-        # 检查是否为主进程，只有主进程才输出详细日志
-        try:
-            self.is_main_process = multiprocessing.current_process().name == 'MainProcess'
-        except:
-            self.is_main_process = True
-        
-    def step_wait(self) -> VecEnvStepReturn:
-        """
-        等待并处理环境步骤结果，确保episode信息正确传递
-        """
-        observations, rewards, dones, infos = self.venv.step_wait()
-        
-        # 更新episode统计
-        self.episode_rewards += rewards
-        self.episode_lengths += 1
-        
-        # 处理episode结束
-        for i, (done, info) in enumerate(zip(dones, infos)):
-            if done:
-                self.episode_count += 1
-                
-                # 如果环境提供了episode信息，确保它能被正确传递
-                if 'episode' in info:
-                    episode_info = info['episode'].copy()
-                    
-                    # 添加标准的SB3 episode信息字段
-                    episode_info['r'] = float(self.episode_rewards[i])
-                    episode_info['l'] = int(self.episode_lengths[i])
-                    
-                    # 确保episode信息在正确的位置
-                    info['episode'] = episode_info
-                    
-                    # 只有主进程输出调试日志，且仅在真正需要时输出
-                    if self.is_main_process and logger.isEnabledFor(10):  # DEBUG级别
-                        logger.debug(f"环境{i} Episode {self.episode_count}结束")
-                        if 'time_cost' in episode_info:
-                            logger.debug(f"时间成本: {episode_info['time_cost']:.2f}")
-                
-                # 重置统计
-                self.episode_rewards[i] = 0
-                self.episode_lengths[i] = 0
-        
-        return observations, rewards, dones, infos
-    
-    def reset(self) -> np.ndarray:
-        """重置环境"""
-        self.episode_rewards.fill(0)
-        self.episode_lengths.fill(0)
-        return self.venv.reset()
-</file>
-
 <file path="src/rl_optimizer/utils/checkpoint_callback.py">
 # src/rl_optimizer/utils/checkpoint_callback.py
 
@@ -4691,360 +4208,6 @@ def get_lr_scheduler(schedule_type: str, initial_lr: float, final_lr: float = 0.
             f"不支持的学习率调度器类型: '{schedule_type}'. "
             f"支持的类型: 'linear', 'constant'"
         )
-</file>
-
-<file path="src/rl_optimizer/utils/training_metrics_callback.py">
-# src/rl_optimizer/utils/training_metrics_callback.py
-
-import time
-import numpy as np
-from typing import Dict, Any, List, Optional
-from collections import deque
-from pathlib import Path
-
-from stable_baselines3.common.callbacks import BaseCallback
-from stable_baselines3.common.logger import Logger
-
-from src.rl_optimizer.utils.setup import setup_logger
-
-logger = setup_logger(__name__)
-
-
-class TrainingMetricsCallback(BaseCallback):
-    """
-    训练指标回调类，用于跟踪和记录PPO训练过程中的关键指标。
-    
-    主要功能：
-    - 记录每个episode的实际加权时间
-    - 跟踪最佳布局和最低时间成本
-    - 提供训练进度的实时反馈
-    - 集成到TensorBoard进行可视化
-    """
-    
-    def __init__(
-        self,
-        log_freq: int = 100,
-        save_freq: int = 1000,
-        save_path: Optional[str] = None,
-        window_size: int = 100,
-        verbose: int = 1,
-        total_episodes_target: Optional[int] = None
-    ):
-        """
-        初始化训练指标回调。
-        
-        Args:
-            log_freq (int): 每多少个episode记录一次日志
-            save_freq (int): 每多少个episode保存一次指标历史
-            save_path (Optional[str]): 指标保存路径
-            window_size (int): 滑动窗口大小，用于计算平均值
-            verbose (int): 日志详细级别
-            total_episodes_target (Optional[int]): 总的目标episodes数量，用于显示进度条
-        """
-        super().__init__(verbose)
-        self.log_freq = log_freq
-        self.save_freq = save_freq
-        self.save_path = Path(save_path) if save_path else None
-        self.window_size = window_size
-        self.total_episodes_target = total_episodes_target
-        
-        # 检查是否为主进程
-        import multiprocessing
-        try:
-            self.is_main_process = multiprocessing.current_process().name == 'MainProcess'
-        except:
-            self.is_main_process = True
-        
-        # 如果不是主进程，降低日志详细程度并禁用大部分输出
-        if not self.is_main_process:
-            self.verbose = 0  # 完全禁用详细输出
-            # 进一步提高日志频率以减少不必要的计算
-            self.log_freq = max(self.log_freq * 10, 1000)  # 子进程减少日志频率
-        
-        # 指标跟踪
-        self.episode_count = 0
-        self.time_costs = deque(maxlen=window_size)
-        self.rewards = deque(maxlen=window_size)
-        self.episode_lengths = deque(maxlen=window_size)
-        
-        # 最佳结果跟踪
-        self.best_time_cost = float('inf')
-        self.best_layout = None
-        self.best_episode = 0
-        
-        # 历史记录
-        self.history = {
-            'episodes': [],
-            'time_costs': [],
-            'rewards': [],
-            'episode_lengths': [],
-            'best_time_costs': [],
-            'timestamps': []
-        }
-        
-        # 时间跟踪
-        self.start_time = time.time()
-        self.last_log_time = time.time()
-        
-        if self.save_path:
-            self.save_path.mkdir(parents=True, exist_ok=True)
-            
-    def _init_callback(self) -> None:
-        """初始化回调时的操作。"""
-        if self.verbose >= 1 and self.is_main_process:
-            logger.info("训练指标回调已初始化")
-            logger.info(f"日志频率: {self.log_freq} episodes")
-            logger.info(f"保存频率: {self.save_freq} episodes")
-            if self.save_path:
-                logger.info(f"指标保存路径: {self.save_path}")
-                
-    def _on_step(self) -> bool:
-        """每个训练步后的回调。"""
-        # 在SB3的VecEnv中，episode信息通过不同方式传递
-        # 检查self.locals中的infos
-        infos = self.locals.get('infos', [])
-        
-        if self.verbose >= 2 and self.is_main_process and logger.isEnabledFor(10):
-            logger.debug(f"回调接收到 {len(infos)} 个info，内容: {infos}")
-        
-        if len(infos) > 0:
-            for i, info in enumerate(infos):
-                # 检查是否有episode结束信息
-                if 'episode' in info:
-                    if self.verbose >= 2 and self.is_main_process and logger.isEnabledFor(10):
-                        logger.debug(f"发现episode结束信息: {info['episode']}")
-                    self._process_episode_end(info['episode'])
-                
-                # 检查SB3标准的episode信息格式
-                elif '_episode' in info:
-                    episode_data = info['_episode']
-                    if self.verbose >= 2 and self.is_main_process and logger.isEnabledFor(10):
-                        logger.debug(f"发现SB3格式episode信息: {episode_data}")
-                    self._process_episode_end(episode_data)
-                
-                # 检查其他可能的episode信息字段
-                elif any(key in info for key in ['terminal_observation', 'episode_info']):
-                    if self.verbose >= 2 and self.is_main_process and logger.isEnabledFor(10):
-                        logger.debug(f"发现其他格式episode信息: {info}")
-                    # 尝试构造episode数据
-                    episode_data = {}
-                    if 'episode_info' in info:
-                        episode_data = info['episode_info']
-                    self._process_episode_end(episode_data)
-        
-        return True
-        
-    def _process_episode_end(self, episode_info: Dict[str, Any]) -> None:
-        """处理episode结束时的指标。"""
-        self.episode_count += 1
-        
-        # 提取episode信息
-        episode_reward = episode_info.get('r', 0.0)
-        episode_length = episode_info.get('l', 0)
-        
-        # 提取时间成本（如果环境提供了的话）
-        time_cost = episode_info.get('time_cost', None)
-        layout = episode_info.get('layout', None)
-        
-        # 记录到滑动窗口
-        self.rewards.append(episode_reward)
-        self.episode_lengths.append(episode_length)
-        
-        if time_cost is not None:
-            self.time_costs.append(time_cost)
-            
-            # 更新最佳结果
-            if time_cost < self.best_time_cost:
-                self.best_time_cost = time_cost
-                self.best_layout = layout
-                self.best_episode = self.episode_count
-                
-                # 只有主进程记录最佳结果发现日志
-                if self.verbose >= 1 and self.is_main_process:
-                    scaled_reward = -time_cost / 1e4
-                    logger.info(f"🎉 发现新的最佳布局！Episode {self.episode_count}: "
-                              f"【原始】时间成本 = {time_cost:.2f} 秒 "
-                              f"(对应缩放reward: {scaled_reward:.6f})")
-        
-        # 记录到历史（所有进程都记录，但只有主进程保存文件）
-        current_time = time.time()
-        self.history['episodes'].append(self.episode_count)
-        self.history['time_costs'].append(time_cost if time_cost is not None else float('nan'))
-        self.history['rewards'].append(episode_reward)
-        self.history['episode_lengths'].append(episode_length)
-        self.history['best_time_costs'].append(self.best_time_cost)
-        self.history['timestamps'].append(current_time)
-        
-        # 定期日志输出（只有主进程）
-        if self.episode_count % self.log_freq == 0 and self.is_main_process:
-            self._log_metrics()
-            
-        # 定期保存指标（只有主进程）
-        if (self.save_freq > 0 and self.episode_count % self.save_freq == 0 and 
-            self.is_main_process):
-            self._save_metrics()
-            
-        # TensorBoard日志
-        self._log_to_tensorboard(time_cost, episode_reward, episode_length)
-        
-    def _log_metrics(self) -> None:
-        """输出训练指标日志。"""
-        current_time = time.time()
-        elapsed_time = current_time - self.start_time
-        time_since_last_log = current_time - self.last_log_time
-        
-        # 计算统计信息
-        if self.time_costs:
-            avg_time_cost = np.mean(self.time_costs)
-            std_time_cost = np.std(self.time_costs)
-            min_time_cost = np.min(self.time_costs)
-            max_time_cost = np.max(self.time_costs)
-        else:
-            avg_time_cost = std_time_cost = min_time_cost = max_time_cost = float('nan')
-            
-        avg_reward = np.mean(self.rewards) if self.rewards else float('nan')
-        avg_length = np.mean(self.episode_lengths) if self.episode_lengths else float('nan')
-        
-        # 计算训练速度
-        episodes_per_second = self.log_freq / time_since_last_log if time_since_last_log > 0 else 0
-        
-        logger.info("=" * 80)
-        logger.info(f"📊 训练指标报告 - Episode {self.episode_count}")
-        logger.info("-" * 80)
-        logger.info(f"⏱️  训练时间: {elapsed_time/3600:.2f} 小时")
-        logger.info(f"🚀 训练速度: {episodes_per_second:.2f} episodes/秒")
-        logger.info("")
-        
-        if not np.isnan(avg_time_cost):
-            logger.info(f"🎯 【原始】加权时间成本 (最近{len(self.time_costs)}个episodes):")
-            logger.info(f"   平均值: {avg_time_cost:.2f} 秒 ± {std_time_cost:.2f}")
-            logger.info(f"   范围: [{min_time_cost:.2f}, {max_time_cost:.2f}] 秒")
-            logger.info(f"   最佳值: {self.best_time_cost:.2f} 秒 (Episode {self.best_episode})")
-            
-            # 显示对应的缩放值用于对比
-            avg_scaled = -avg_time_cost / 1e4
-            best_scaled = -self.best_time_cost / 1e4
-            logger.info(f"   对比：平均缩放reward: {avg_scaled:.6f}, 最佳缩放reward: {best_scaled:.6f}")
-            logger.info("")
-            
-        logger.info(f"🏆 奖励统计 (最近{len(self.rewards)}个episodes):")
-        logger.info(f"   平均奖励: {avg_reward:.4f}")
-        logger.info(f"   平均长度: {avg_length:.1f} 步")
-        
-        # 添加进度条显示（如果有总目标的话）
-        if hasattr(self, 'total_episodes_target') and self.total_episodes_target > 0:
-            progress_percent = (self.episode_count / self.total_episodes_target) * 100
-            progress_bar_length = 40
-            filled_length = int(progress_bar_length * self.episode_count // self.total_episodes_target)
-            bar = '█' * filled_length + '░' * (progress_bar_length - filled_length)
-            logger.info(f"📈 训练进度: [{bar}] {progress_percent:.1f}% ({self.episode_count}/{self.total_episodes_target})")
-        
-        logger.info("=" * 80)
-        
-        self.last_log_time = current_time
-        
-    def _log_to_tensorboard(self, time_cost: Optional[float], reward: float, length: int) -> None:
-        """记录指标到TensorBoard。"""
-        # 检查是否有可用的logger（在回调正式使用时才有）
-        try:
-            if hasattr(self, 'logger') and self.logger is not None:
-                # 基本指标
-                self.logger.record("episode/reward", reward)
-                self.logger.record("episode/length", length)
-                self.logger.record("episode/count", self.episode_count)
-                
-                # 时间成本指标
-                if time_cost is not None:
-                    self.logger.record("episode/time_cost", time_cost)
-                    self.logger.record("episode/best_time_cost", self.best_time_cost)
-                    
-                    # 相对改进
-                    if self.best_time_cost > 0:
-                        improvement = (time_cost - self.best_time_cost) / self.best_time_cost * 100
-                        self.logger.record("episode/time_cost_vs_best_percent", improvement)
-                
-                # 滑动平均
-                if len(self.time_costs) > 0:
-                    self.logger.record("episode/avg_time_cost", np.mean(self.time_costs))
-                if len(self.rewards) > 0:
-                    self.logger.record("episode/avg_reward", np.mean(self.rewards))
-                if len(self.episode_lengths) > 0:
-                    self.logger.record("episode/avg_length", np.mean(self.episode_lengths))
-        except Exception as e:
-            # 在测试或其他特殊情况下，logger可能不可用，这是正常的
-            if self.verbose >= 2:
-                logger.warning(f"TensorBoard日志记录失败: {e}")
-            
-    def _save_metrics(self) -> None:
-        """保存指标历史到文件。"""
-        if not self.save_path or not self.is_main_process:
-            return
-            
-        try:
-            import json
-            
-            # 保存完整历史
-            history_file = self.save_path / f"training_metrics_ep{self.episode_count}.json"
-            with open(history_file, 'w', encoding='utf-8') as f:
-                # 转换numpy类型为Python原生类型
-                history_to_save = {}
-                for key, values in self.history.items():
-                    history_to_save[key] = [
-                        float(v) if isinstance(v, (np.integer, np.floating)) else v 
-                        for v in values
-                    ]
-                json.dump(history_to_save, f, ensure_ascii=False, indent=2)
-                
-            # 保存最佳结果
-            if self.best_layout is not None:
-                best_file = self.save_path / f"best_layout_ep{self.episode_count}.json"
-                best_info = {
-                    "episode": self.best_episode,
-                    "time_cost": float(self.best_time_cost),
-                    "layout": self.best_layout,
-                    "timestamp": time.time()
-                }
-                with open(best_file, 'w', encoding='utf-8') as f:
-                    json.dump(best_info, f, ensure_ascii=False, indent=2)
-                    
-            if self.verbose >= 2:
-                logger.info(f"训练指标已保存到: {self.save_path}")
-                
-        except Exception as e:
-            logger.error(f"保存训练指标时发生错误: {e}", exc_info=True)
-            
-    def get_best_result(self) -> Dict[str, Any]:
-        """获取当前最佳结果。"""
-        return {
-            "episode": self.best_episode,
-            "time_cost": self.best_time_cost,
-            "layout": self.best_layout,
-            "total_episodes": self.episode_count
-        }
-        
-    def get_current_stats(self) -> Dict[str, Any]:
-        """获取当前统计信息。"""
-        stats = {
-            "episode_count": self.episode_count,
-            "best_time_cost": self.best_time_cost,
-            "best_episode": self.best_episode
-        }
-        
-        if self.time_costs:
-            stats.update({
-                "avg_time_cost": float(np.mean(self.time_costs)),
-                "std_time_cost": float(np.std(self.time_costs)),
-                "min_time_cost": float(np.min(self.time_costs)),
-                "max_time_cost": float(np.max(self.time_costs))
-            })
-            
-        if self.rewards:
-            stats.update({
-                "avg_reward": float(np.mean(self.rewards)),
-                "std_reward": float(np.std(self.rewards))
-            })
-            
-        return stats
 </file>
 
 <file path="src/analysis/process_flow.py">
@@ -6630,6 +5793,90 @@ class PlotlyPlotter(BasePlotter):
 ]
 </file>
 
+<file path="src/rl_optimizer/env/vec_env_wrapper.py">
+# src/rl_optimizer/env/vec_env_wrapper.py
+
+from typing import Any, Dict, List, Optional, Tuple
+import numpy as np
+from stable_baselines3.common.vec_env import VecEnvWrapper
+from stable_baselines3.common.vec_env.base_vec_env import VecEnvStepReturn
+import multiprocessing
+
+from src.rl_optimizer.utils.setup import setup_logger
+
+logger = setup_logger(__name__)
+
+
+class EpisodeInfoVecEnvWrapper(VecEnvWrapper):
+    """
+    VecEnv包装器，确保episode信息能正确传递给回调函数。
+    
+    解决SB3中VecEnv环境episode信息传递的问题，特别是自定义info字典的传递。
+    """
+    
+    def __init__(self, venv):
+        """
+        初始化包装器
+        
+        Args:
+            venv: 要包装的VecEnv
+        """
+        super().__init__(venv)
+        self.episode_rewards = np.zeros(self.num_envs)
+        self.episode_lengths = np.zeros(self.num_envs, dtype=int)
+        self.episode_count = 0
+        
+        # 检查是否为主进程，只有主进程才输出详细日志
+        try:
+            self.is_main_process = multiprocessing.current_process().name == 'MainProcess'
+        except:
+            self.is_main_process = True
+        
+    def step_wait(self) -> VecEnvStepReturn:
+        """
+        等待并处理环境步骤结果，确保episode信息正确传递
+        """
+        observations, rewards, dones, infos = self.venv.step_wait()
+        
+        # 更新episode统计
+        self.episode_rewards += rewards
+        self.episode_lengths += 1
+        
+        # 处理episode结束
+        for i, (done, info) in enumerate(zip(dones, infos)):
+            if done:
+                self.episode_count += 1
+                
+                # 如果环境提供了episode信息，确保它能被正确传递
+                if 'episode' in info:
+                    episode_info = info['episode'].copy()
+                    
+                    # 添加标准的SB3 episode信息字段
+                    episode_info['r'] = float(self.episode_rewards[i])
+                    episode_info['l'] = int(self.episode_lengths[i])
+                    
+                    # 确保episode信息在正确的位置
+                    info['episode'] = episode_info
+                    
+                    # 只有主进程输出调试日志，且仅在真正需要时输出
+                    if self.is_main_process and logger.isEnabledFor(10):  # DEBUG级别
+                        logger.debug(f"环境{i} Episode {self.episode_count}结束")
+                        if 'time_cost' in episode_info:
+                            logger.debug(f"时间成本: {episode_info['time_cost']:.2f}")
+                
+                # 重置统计
+                self.episode_rewards[i] = 0
+                self.episode_lengths[i] = 0
+        
+        return observations, rewards, dones, infos
+    
+    def reset(self) -> np.ndarray:
+        """重置环境"""
+        self.episode_rewards.fill(0)
+        self.episode_lengths.fill(0)
+        return self.venv.reset()
+</file>
+
 <file path="src/rl_optimizer/model/policy_network.py">
 # src/rl_optimizer/model/policy_network.py
 
@@ -6879,6 +6126,374 @@ def load_pickle(path: pathlib.Path) -> Any:
     """从pickle文件加载Python对象。"""
     with open(path, 'rb') as f:
         return pickle.load(f)
+</file>
+
+<file path="src/algorithms/ppo_optimizer.py">
+"""
+PPO优化器 - 基于强化学习的布局优化算法
+"""
+
+import torch
+import time
+import numpy as np
+from pathlib import Path
+from typing import List, Optional, Dict, Any
+from stable_baselines3.common.vec_env import VecNormalize
+from stable_baselines3.common.env_util import make_vec_env
+from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback as EvalCallback
+from sb3_contrib import MaskablePPO
+from sb3_contrib.common.wrappers import ActionMasker
+from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
+
+from src.algorithms.base_optimizer import BaseOptimizer, OptimizationResult
+from src.algorithms.constraint_manager import ConstraintManager
+from src.rl_optimizer.env.cost_calculator import CostCalculator
+from src.rl_optimizer.env.layout_env import LayoutEnv
+from src.rl_optimizer.env.vec_env_wrapper import EpisodeInfoVecEnvWrapper
+from src.rl_optimizer.model.policy_network import LayoutTransformer
+from src.rl_optimizer.utils.setup import setup_logger, save_json
+from src.rl_optimizer.utils.lr_scheduler import get_lr_scheduler
+from src.rl_optimizer.utils.checkpoint_callback import CheckpointCallback
+from src.rl_optimizer.data.cache_manager import CacheManager
+from src.config import RLConfig
+
+logger = setup_logger(__name__)
+
+
+def get_action_mask_from_info(infos: List[Dict]) -> np.ndarray:
+    """从矢量化环境的info字典列表中提取动作掩码"""
+    return np.array([info.get("action_mask", []) for info in infos])
+
+
+class PPOOptimizer(BaseOptimizer):
+    """
+    PPO优化器
+    
+    基于强化学习的PPO算法实现布局优化，使用MaskablePPO来处理动作掩码约束。
+    """
+    
+    def __init__(self, 
+                 cost_calculator: CostCalculator,
+                 constraint_manager: ConstraintManager,
+                 config: RLConfig,
+                 cache_manager: CacheManager):
+        """
+        初始化PPO优化器
+        
+        Args:
+            cost_calculator: 成本计算器
+            constraint_manager: 约束管理器
+            config: RL配置
+            cache_manager: 缓存管理器
+        """
+        super().__init__(cost_calculator, constraint_manager, "PPO")
+        self.config = config
+        self.cache_manager = cache_manager
+        
+        # 环境参数
+        self.env_kwargs = {
+            "config": self.config,
+            "cache_manager": self.cache_manager,
+            "cost_calculator": self.cost_calculator
+        }
+        
+        # 训练状态
+        self.model = None
+        self.vec_env = None
+        self.resume_model_path = None
+        self.completed_steps = 0
+    
+    def optimize(self, 
+                 initial_layout: Optional[List[str]] = None,
+                 max_iterations: int = None,
+                 total_timesteps: int = None,
+                 **kwargs) -> OptimizationResult:
+        """
+        执行PPO优化
+        
+        Args:
+            initial_layout: 初始布局（PPO会自动探索）
+            max_iterations: 最大迭代次数（使用total_timesteps代替）
+            total_timesteps: 总训练步数
+            **kwargs: 其他PPO参数
+            
+        Returns:
+            OptimizationResult: 优化结果
+        """
+        self.start_optimization()
+        
+        # 使用配置中的参数或传入的参数
+        if total_timesteps is None:
+            total_timesteps = self.config.TOTAL_TIMESTEPS
+        
+        logger.info(f"开始PPO优化，总训练步数: {total_timesteps}")
+        
+        try:
+            # 检查是否需要恢复训练
+            self._check_for_resume()
+            
+            # 计算剩余训练步数
+            remaining_steps = max(0, total_timesteps - self.completed_steps)
+            if remaining_steps == 0:
+                logger.info("训练已完成，加载最佳模型进行评估")
+                best_layout, best_cost = self._evaluate_best_model()
+                self.update_best_solution(best_layout, best_cost)
+                return self.finish_optimization()
+            
+            # 创建环境和模型
+            self._setup_environment_and_model(remaining_steps)
+            
+            # 执行训练
+            self._train_model(remaining_steps)
+            
+            # 评估最佳模型
+            best_layout, best_cost = self._evaluate_best_model()
+            self.update_best_solution(best_layout, best_cost)
+            
+        except KeyboardInterrupt:
+            logger.warning("训练被用户中断")
+            if self.model:
+                self._save_interrupted_model()
+        except Exception as e:
+            logger.error(f"PPO优化过程中发生错误: {e}", exc_info=True)
+            raise
+        
+        return self.finish_optimization()
+    
+    def _check_for_resume(self):
+        """检查是否需要从checkpoint恢复训练"""
+        if not self.config.RESUME_TRAINING:
+            return
+            
+        if self.config.PRETRAINED_MODEL_PATH:
+            model_path = Path(self.config.PRETRAINED_MODEL_PATH)
+            if not model_path.exists():
+                logger.warning(f"指定的预训练模型不存在: {model_path}")
+                return
+            self.resume_model_path = str(model_path)
+        else:
+            # 自动查找最新的checkpoint
+            checkpoint_callback = CheckpointCallback(
+                save_freq=1,
+                save_path=self.config.LOG_PATH
+            )
+            model_path = checkpoint_callback.get_latest_checkpoint()
+            if model_path:
+                self.resume_model_path = str(model_path)
+            else:
+                logger.info("未找到可用的checkpoint，将开始全新训练")
+                return
+        
+        # 加载checkpoint元数据
+        metadata = CheckpointCallback.load_checkpoint_metadata(self.resume_model_path)
+        if metadata:
+            self.completed_steps = metadata.get("training_progress", {}).get("num_timesteps", 0)
+            logger.info(f"从checkpoint恢复训练，已完成步数: {self.completed_steps}")
+        else:
+            logger.warning("无法加载checkpoint元数据，从步数0开始")
+    
+    def _setup_environment_and_model(self, remaining_steps: int):
+        """设置环境和模型"""
+        logger.info(f"正在创建 {self.config.NUM_ENVS} 个并行环境...")
+        
+        # 创建矢量化环境
+        vec_env = make_vec_env(
+            lambda: ActionMasker(LayoutEnv(**self.env_kwargs), LayoutEnv._action_mask_fn),
+            n_envs=self.config.NUM_ENVS
+        )
+        
+        # 使用自定义包装器确保episode信息正确传递
+        self.vec_env = EpisodeInfoVecEnvWrapper(vec_env)
+        
+        logger.info("矢量化环境创建成功，已添加episode信息包装器")
+        
+        # 创建或加载模型
+        if self.resume_model_path:
+            self._load_pretrained_model()
+        else:
+            self._create_new_model()
+    
+    def _load_pretrained_model(self):
+        """加载预训练模型"""
+        logger.info(f"正在加载预训练模型: {self.resume_model_path}")
+        
+        try:
+            self.model = MaskablePPO.load(
+                self.resume_model_path,
+                env=self.vec_env,
+                device='cuda' if torch.cuda.is_available() else 'cpu'
+            )
+            
+            # 重新设置学习率调度器
+            if hasattr(self.model, 'lr_schedule'):
+                lr_scheduler = get_lr_scheduler(
+                    schedule_type=self.config.LEARNING_RATE_SCHEDULE_TYPE,
+                    initial_lr=self.config.LEARNING_RATE_INITIAL,
+                    final_lr=self.config.LEARNING_RATE_FINAL
+                )
+                self.model.lr_schedule = lr_scheduler
+                logger.info("学习率调度器已重新设置")
+                
+            logger.info("预训练模型加载成功")
+            
+        except Exception as e:
+            logger.error(f"加载预训练模型失败: {e}")
+            raise
+    
+    def _create_new_model(self):
+        """创建新的PPO模型"""
+        logger.info("创建全新的PPO模型...")
+        
+        # 创建学习率调度器
+        lr_scheduler = get_lr_scheduler(
+            schedule_type=self.config.LEARNING_RATE_SCHEDULE_TYPE,
+            initial_lr=self.config.LEARNING_RATE_INITIAL,
+            final_lr=self.config.LEARNING_RATE_FINAL
+        )
+        
+        logger.info(f"使用学习率调度器: {self.config.LEARNING_RATE_SCHEDULE_TYPE}")
+        logger.info(f"初始学习率: {self.config.LEARNING_RATE_INITIAL}, 最终学习率: {self.config.LEARNING_RATE_FINAL}")
+        
+        # 定义策略网络参数
+        policy_kwargs = {
+            "features_extractor_class": LayoutTransformer,
+            "features_extractor_kwargs": {
+                "features_dim": self.config.EMBEDDING_DIM,  # 使用统一的配置属性
+                "config": self.config
+            },
+            "net_arch": dict(pi=[self.config.POLICY_NET_ARCH] * self.config.POLICY_NET_LAYERS,
+                            vf=[self.config.VALUE_NET_ARCH] * self.config.VALUE_NET_LAYERS)
+        }
+        
+        # 创建PPO模型
+        self.model = MaskablePPO(
+            MaskableActorCriticPolicy,
+            self.vec_env,
+            learning_rate=lr_scheduler,
+            n_steps=self.config.N_STEPS,
+            batch_size=self.config.BATCH_SIZE,
+            n_epochs=self.config.N_EPOCHS,
+            gamma=self.config.GAMMA,
+            gae_lambda=self.config.GAE_LAMBDA,
+            clip_range=self.config.CLIP_RANGE,
+            ent_coef=self.config.ENT_COEF,
+            vf_coef=self.config.VF_COEF,
+            max_grad_norm=self.config.MAX_GRAD_NORM,
+            policy_kwargs=policy_kwargs,
+            verbose=1,
+            device='cuda' if torch.cuda.is_available() else 'cpu',
+            tensorboard_log=str(self.config.LOG_PATH)
+        )
+        
+        logger.info("PPO模型创建成功")
+    
+    def _train_model(self, remaining_steps: int):
+        """训练模型"""
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        log_dir = self.config.LOG_PATH / f"ppo_layout_{timestamp}"
+        result_dir = self.config.RESULT_PATH / "model" / f"ppo_layout_{timestamp}"
+        
+        # 如果是恢复训练，使用原有目录
+        if self.resume_model_path:
+            checkpoint_path = Path(self.resume_model_path)
+            if "ppo_layout_" in checkpoint_path.parent.name:
+                log_dir = checkpoint_path.parent
+                result_dir = self.config.RESULT_PATH / checkpoint_path.parent.name
+        
+        # 创建目录
+        log_dir.mkdir(parents=True, exist_ok=True)
+        result_dir.mkdir(parents=True, exist_ok=True)
+        
+        # 设置回调
+        callbacks = []
+        
+        
+        # Checkpoint回调
+        checkpoint_callback = CheckpointCallback(
+            save_freq=self.config.CHECKPOINT_FREQUENCY,
+            save_path=str(log_dir / "checkpoints"),
+            name_prefix="checkpoint"
+        )
+        callbacks.append(checkpoint_callback)
+        
+        # 评估回调
+        eval_vec_env = make_vec_env(
+            lambda: ActionMasker(LayoutEnv(**self.env_kwargs), LayoutEnv._action_mask_fn),
+            n_envs=1
+        )
+        eval_env = EpisodeInfoVecEnvWrapper(eval_vec_env)
+        
+        eval_callback = EvalCallback(
+            eval_env,
+            best_model_save_path=str(result_dir / "best_model"),
+            log_path=str(log_dir / "eval_logs"),
+            eval_freq=self.config.EVAL_FREQUENCY,
+            deterministic=True,
+            render=False
+        )
+        callbacks.append(eval_callback)
+        
+        # 开始训练
+        logger.info(f"开始训练，剩余步数: {remaining_steps}")
+        logger.info(f"日志保存路径: {log_dir}")
+        
+        self.model.learn(
+            total_timesteps=remaining_steps,
+            callback=callbacks,
+            tb_log_name="PPO",
+            progress_bar=True,
+            reset_num_timesteps=False if self.resume_model_path else True
+        )
+        
+        # 训练完成
+        logger.info("🎉 训练完成！")
+        logger.info("=" * 80)
+        
+        # 保存最终模型
+        final_model_path = log_dir / "final_model.zip"
+        self.model.save(str(final_model_path))
+        logger.info(f"最终模型已保存到: {final_model_path}")
+        
+        # 保存训练配置
+        config_path = log_dir / "training_config.json"
+        config_data = self.config.__dict__.copy()
+        save_json(config_data, str(config_path))
+        logger.info(f"训练配置已保存到: {config_path}")
+    
+    def _evaluate_best_model(self) -> tuple[List[str], float]:
+        """评估最佳模型并返回最优布局和成本"""
+        # 这里简化实现，实际应该加载最佳模型进行评估
+        # 返回一个示例布局和成本
+        best_layout = self.generate_initial_layout()
+        best_cost = self.evaluate_layout(best_layout)
+        
+        logger.info(f"最佳模型评估完成，成本: {best_cost:.2f}")
+        return best_layout, best_cost
+    
+    def _save_interrupted_model(self):
+        """保存被中断的模型"""
+        timestamp = time.strftime("%Y%m%d-%H%M%S")
+        interrupted_path = self.config.LOG_PATH / f"interrupted_model_{timestamp}.zip"
+        self.model.save(str(interrupted_path))
+        logger.info(f"中断的模型已保存到: {interrupted_path}")
+    
+    def get_additional_metrics(self) -> Dict[str, Any]:
+        """获取PPO特定的额外指标"""
+        metrics = {
+            "total_timesteps": self.config.TOTAL_TIMESTEPS,
+            "completed_steps": self.completed_steps,
+            "num_envs": self.config.NUM_ENVS,
+            "learning_rate_schedule": self.config.LEARNING_RATE_SCHEDULE_TYPE,
+            "resume_training": self.config.RESUME_TRAINING
+        }
+        
+        if self.model is not None:
+            metrics.update({
+                "model_device": str(self.model.device),
+                "policy_class": str(type(self.model.policy))
+            })
+        
+        return metrics
 </file>
 
 <file path="src/analysis/travel_time.py">
@@ -7956,350 +7571,6 @@ class LayoutOptimizer:
         return current_best_assignment, current_best_objective, current_best_outcomes
 </file>
 
-<file path="src/rl_optimizer/env/layout_env.py">
-# src/rl_optimizer/env/layout_env.py
-
-import gymnasium as gym
-from gymnasium import spaces
-import numpy as np
-from typing import List, Dict, Any, Tuple, Optional
-from collections import defaultdict
-
-from src.config import RLConfig
-from src.rl_optimizer.data.cache_manager import CacheManager
-from src.rl_optimizer.env.cost_calculator import CostCalculator
-from src.rl_optimizer.utils.setup import setup_logger
-
-logger = setup_logger(__name__)  # 使用默认INFO级别
-
-class LayoutEnv(gym.Env):
-    """
-    医院布局优化的强化学习环境 (范式A: 选科室，填槽位)。
-
-    遵循Gymnasium接口，通过自回归方式构建布局。环境按照一个在每个回合
-    开始时随机打乱的槽位顺序进行填充。在每一步，智能体从所有尚未被
-    放置的科室中选择一个，放入当前待填充的槽位。
-
-    - **状态 (Observation)**: 字典，包含当前部分布局、已放置科室的掩码、
-                              以及当前待填充槽位的面积信息。
-    - **动作 (Action)**: 离散值，代表在 `placeable_depts` 列表中的科室索引。
-    - **奖励 (Reward)**: 仅在回合结束时给予的稀疏奖励，基于加权总通行时间
-                      和软约束。
-    - **约束 (Constraints)**: 硬约束（面积、强制相邻）通过动作掩码实现，
-                          确保智能体只能选择合法的科室。
-    """
-
-    metadata = {'render_modes': ['human']}
-
-    def __init__(self, config: RLConfig, cache_manager: CacheManager, cost_calculator: CostCalculator):
-        """
-        初始化布局优化环境。
-
-        Args:
-            config (RLConfig): RL优化器的配置对象。
-            cache_manager (CacheManager): 已初始化的数据缓存管理器。
-            cost_calculator (CostCalculator): 已初始化的成本计算器。
-        """
-        super().__init__()
-        self.config = config
-        self.cm = cache_manager
-        self.cc = cost_calculator
-
-        self._initialize_nodes_and_slots()
-        self._define_spaces()
-        self._initialize_state_variables()
-
-        logger.info(f"环境初始化完成：{self.num_slots}个可用槽位，{self.num_depts}个待放置科室。")
-
-    def _initialize_nodes_and_slots(self):
-        """从CacheManager获取并设置节点和槽位信息。"""
-        self.placeable_slots = self.cm.placeable_slots
-        self.slot_areas = self.cm.placeable_nodes_df['area'].values
-        self.num_slots = len(self.placeable_slots)
-
-        self.placeable_depts = self.cm.placeable_departments
-        self.dept_areas_map = dict(zip(self.cm.placeable_nodes_df['node_id'], self.cm.placeable_nodes_df['area']))
-        self.num_depts = len(self.placeable_depts)
-        
-        if self.num_slots != self.num_depts:
-            raise ValueError(f"槽位数 ({self.num_slots}) 与待布局科室数 ({self.num_depts}) 不匹配!")
-        
-        self.dept_to_idx = {dept: i for i, dept in enumerate(self.placeable_depts)}
-
-    def _define_spaces(self):
-        """定义观测空间和动作空间。"""
-        # 动作空间：选择一个科室进行放置。动作是科室的索引。
-        self.action_space = spaces.Discrete(self.num_depts)
-
-        # 观测空间：使用Box空间来明确定义形状，避免SB3的意外转换
-        self.observation_space = spaces.Dict({
-            # layout[i] = k+1 表示槽位i放置了索引为k的科室。0表示空。
-            "layout": spaces.Box(
-                low=0, 
-                high=self.num_depts, # 最大值为科室数 (num_depts-1)+1
-                shape=(self.num_slots,), 
-                dtype=np.int32
-            ),
-            # placed_mask[k] = 1 表示索引为k的科室已被放置。
-            "placed_mask": spaces.MultiBinary(self.num_depts),
-            # 当前待填充槽位的索引
-            "current_slot_idx": spaces.Box(low=0, high=self.num_slots - 1, shape=(1,), dtype=np.int32)
-        })
-
-    def _initialize_state_variables(self):
-        """初始化每个回合都会改变的状态变量。"""
-        self.current_step = 0
-        # layout的索引是物理槽位索引，值是科室索引+1
-        self.layout = np.zeros(self.num_slots, dtype=np.int32)
-        self.placed_mask = np.zeros(self.num_depts, dtype=bool)
-        # 每个回合开始时需要被打乱的槽位处理顺序
-        self.shuffled_slot_indices = np.arange(self.num_slots)
-
-    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Dict, Dict]:
-        """重置环境，随机化槽位顺序，并返回初始观测。"""
-        super().reset(seed=seed)
-        self._initialize_state_variables()
-        self.np_random.shuffle(self.shuffled_slot_indices)
-        return self._get_obs(), self._get_info(terminated=False)
-    
-    def step(self, action: int) -> Tuple[Dict, float, bool, bool, Dict]:
-        """执行一个动作：在当前槽位放置选定的科室。"""
-        # 更严格的输入验证
-        if not (0 <= action < self.num_depts):
-            logger.error(f"无效的动作索引: {action}，有效范围是 [0, {self.num_depts-1}]")
-            return self._get_obs(), -100.0, True, False, self._get_info(terminated=False)
-        
-        if self.placed_mask[action]:
-            # 这是一个安全检查。理论上动作掩码会阻止这种情况。
-            # 如果发生，说明上游逻辑有误，应给予重罚并终止。
-            logger.error(f"严重错误：智能体选择了已被放置的科室！动作={action}, 科室={self.placeable_depts[action]}")
-            logger.error(f"当前步骤: {self.current_step}, placed_mask: {self.placed_mask}")
-            logger.error(f"当前动作掩码: {self.get_action_mask()}")
-            return self._get_obs(), -100.0, True, False, self._get_info(terminated=False)
-
-        # 确定当前要填充的物理槽位索引
-        slot_to_fill = self.shuffled_slot_indices[self.current_step]
-        
-        # 更新状态：在布局中记录放置，并标记科室为"已用"
-        self.layout[slot_to_fill] = action + 1  # 动作是科室索引，存储时+1
-        self.placed_mask[action] = True
-        self.current_step += 1
-
-        terminated = (self.current_step == self.num_slots)
-        reward = self._calculate_reward() if terminated else 0.0
-        info = self._get_info(terminated)
-        
-        # 调试日志：检查episode结束时的info内容
-        if terminated and logger.isEnabledFor(20):  # INFO级别
-            logger.debug(f"Episode结束，info内容: {info}")
-            if 'episode' in info:
-                logger.debug(f"Episode数据: {info['episode']}")
-
-        return self._get_obs(), reward, terminated, False, info
-    
-    def _get_obs(self) -> Dict[str, Any]:
-        """构建并返回当前观测字典。"""
-        if self.current_step >= self.num_slots:
-            current_slot_idx = 0
-        else:
-            current_slot_idx = self.shuffled_slot_indices[self.current_step]
-
-        return {
-            "layout": self.layout,
-            "placed_mask": self.placed_mask,
-            "current_slot_idx": np.array([current_slot_idx], dtype=np.int32)
-        }
-    
-    def _get_info(self, terminated: bool = False) -> Dict[str, Any]:
-        """返回包含动作掩码和episode信息的附加信息。"""
-        info = {"action_mask": self.get_action_mask()}
-        
-        # 如果episode结束，添加训练指标信息
-        if terminated:
-            # 构造最终布局
-            final_layout_depts = [None] * self.num_slots
-            for slot_idx, dept_id in enumerate(self.layout):
-                if dept_id > 0:
-                    final_layout_depts[slot_idx] = self.placeable_depts[dept_id - 1]
-            
-            # 如果布局完整，计算时间成本
-            if None not in final_layout_depts:
-                # 计算原始的总时间成本（未缩放）
-                raw_time_cost = self.cc.calculate_total_cost(final_layout_depts)
-                
-                # 计算用于训练的缩放reward（与_calculate_reward中的逻辑一致）
-                scaled_time_reward = -raw_time_cost / 1e4
-                
-                # 调试日志：确认传递的是原始值
-                if logger.isEnabledFor(20):  # INFO级别
-                    logger.debug(f"Episode结束 - 原始时间成本: {raw_time_cost:.2f}, "
-                               f"缩放后训练reward: {scaled_time_reward:.6f}")
-                
-                # 添加episode信息供TrainingMetricsCallback使用
-                info['episode'] = {
-                    'time_cost': raw_time_cost,  # 明确传递原始值
-                    'scaled_reward': scaled_time_reward,  # 同时提供缩放值用于对比
-                    'layout': final_layout_depts.copy(),
-                    'r': self._calculate_reward(),  # 完整的奖励值（包含时间+邻接）
-                    'l': self.current_step  # episode长度
-                }
-                
-                # 如果启用了详细日志，还可以添加更多信息
-                if logger.isEnabledFor(20):  # INFO级别
-                    info['episode']['per_process_costs'] = self.cc.calculate_per_process_cost(final_layout_depts)
-        
-        return info
-    
-    def get_action_mask(self) -> np.ndarray:
-        """
-        计算当前步骤下所有合法的科室动作掩码。
-        
-        该方法根据当前待填充槽位的面积约束，返回一个布尔数组，指示哪些未放置的科室可被合法选择。如果所有未放置科室均不满足面积约束，将逐步放宽容差，直至至少有一个合法动作；如仍无合法动作，则强制允许所有未放置科室。
-        
-        返回值:
-            np.ndarray: 长度等于科室数的布尔数组，True 表示对应科室当前可被选择。
-        """
-        if self.current_step >= self.num_slots:
-            return np.zeros(self.num_depts, dtype=bool)
-
-        # 1. 初始掩码：所有未放置的科室都是潜在的合法动作
-        action_mask = ~self.placed_mask
-
-        # 2. 面积约束：科室面积必须符合当前槽位的容差
-        current_slot_idx = self.shuffled_slot_indices[self.current_step]
-        current_slot_area = self.slot_areas[current_slot_idx]
-        min_area = current_slot_area * (1 - self.config.AREA_SCALING_FACTOR)
-        max_area = current_slot_area * (1 + self.config.AREA_SCALING_FACTOR)
-
-        for dept_idx in range(self.num_depts):
-            if action_mask[dept_idx]:  # 只检查当前合法的动作
-                dept_name = self.placeable_depts[dept_idx]
-                dept_area = self.dept_areas_map[dept_name]
-                if not (min_area <= dept_area <= max_area):
-                    action_mask[dept_idx] = False
-        
-        # 容错机制：如果没有合法动作，逐步放松约束
-        if np.sum(action_mask) == 0:
-            logger.warning(f"在步骤 {self.current_step}，没有找到任何合法的动作！尝试放松约束...")
-            
-            # 重新计算，使用更宽松的面积约束
-            relaxation_factors = [0.2, 0.3, 0.5, 0.7, 1.0]  # 逐步放松
-            for factor in relaxation_factors:
-                action_mask = ~self.placed_mask  # 重新开始，只考虑未放置的科室
-                min_area = current_slot_area * (1 - factor)
-                max_area = current_slot_area * (1 + factor)
-                
-                for dept_idx in range(self.num_depts):
-                    if action_mask[dept_idx]:
-                        dept_name = self.placeable_depts[dept_idx]
-                        dept_area = self.dept_areas_map[dept_name]
-                        if not (min_area <= dept_area <= max_area):
-                            action_mask[dept_idx] = False
-                
-                if np.sum(action_mask) > 0:
-                    logger.info(f"使用松弛因子 {factor} 找到了 {np.sum(action_mask)} 个合法动作")
-                    break
-            
-            # 最后的安全检查：如果仍然没有合法动作，至少允许所有未放置的科室
-            if np.sum(action_mask) == 0:
-                current_slot_name = self.placeable_slots[current_slot_idx]
-                current_slot_area = self.slot_areas[current_slot_idx]
-                
-                unplaced_indices = np.where(~self.placed_mask)[0]
-                unplaced_depts_info = [
-                    f"{self.placeable_depts[i]}({self.dept_areas_map[self.placeable_depts[i]]:.2f})"
-                    for i in unplaced_indices
-                ]
-                
-                logger.error(
-                    f"即使放松所有约束也没有为槽位 '{current_slot_name}' (面积: {current_slot_area:.2f}) 找到合法科室！"
-                    f"剩余待放置科室: [{', '.join(unplaced_depts_info)}]. "
-                    f"将强制允许所有未放置的科室。"
-                )
-                action_mask = ~self.placed_mask
-        
-        return action_mask
-    
-    def _calculate_reward(self) -> float:
-        """
-        在回合结束时，根据最终布局计算并返回总奖励。
-        
-        如果布局未完成，则返回重罚。奖励由时间成本和邻接约束两部分加权组成，其中时间成本通过 `CostCalculator` 计算并缩放，邻接奖励由 `_calculate_adjacency_reward` 计算。
-        """
-        final_layout_depts = [None] * self.num_slots
-        for slot_idx, dept_id in enumerate(self.layout):
-            if dept_id > 0:
-                final_layout_depts[slot_idx] = self.placeable_depts[dept_id - 1]
-        
-        if None in final_layout_depts:
-            logger.error("布局计算奖励时发现未完成的布局，返回重罚。")
-            return -500.0
-
-        time_cost = self.cc.calculate_total_cost(final_layout_depts)
-        time_reward = -time_cost / 1e4  # 缩放以稳定训练
-
-        adjacency_reward = self._calculate_adjacency_reward(final_layout_depts)
-        
-        total_reward = (self.config.REWARD_TIME_WEIGHT * time_reward + 
-                        self.config.REWARD_ADJACENCY_WEIGHT * adjacency_reward)
-        
-        return total_reward
-    
-    def _calculate_adjacency_reward(self, _final_layout: List[str]) -> float:
-        """
-        计算偏好相邻软约束的奖励。
-        (TODO: 需要一个可靠的邻接关系数据源)
-        """
-        # 这是一个示例实现，实际部署时需要替换为真实邻接数据
-        # 假设 travel_times 矩阵中时间小于某个阈值（例如 10）即为相邻
-        reward = 0.0
-        # ... 实现软约束奖励计算 ...
-        return reward
-    
-    def render(self, mode="human"):
-        """(可选) 渲染环境状态，用于调试。"""
-        if mode == "human":
-            print(f"--- Step: {self.current_step} ---")
-            current_slot_idx = self.shuffled_slot_indices[self.current_step]
-            current_slot = self.placeable_slots[current_slot_idx]
-            print(f"Current Slot to Fill: {current_slot} (Area: {self.slot_areas[current_slot_idx]:.2f})")
-            
-            layout_str = []
-            for i in range(self.num_slots):
-                dept_id = self.layout[i]
-                if dept_id > 0:
-                    layout_str.append(f"{self.placeable_slots[i]}: {self.placeable_depts[dept_id-1]}")
-                else:
-                    layout_str.append(f"{self.placeable_slots[i]}: EMPTY")
-            print("Current Layout:\n" + "\n".join(layout_str))
-
-    @staticmethod
-    def _action_mask_fn(env: 'LayoutEnv') -> np.ndarray:
-        """
-        ActionMasker 包装器所需的静态方法，用于提取动作掩码。
-        
-        Args:
-            env (LayoutEnv): 环境实例。
-            
-        Returns:
-            np.ndarray: 当前状态下的动作掩码。
-        """
-        return env.get_action_mask()
-
-    def _get_final_layout_str(self) -> List[str]:
-        """
-        获取最终布局的科室名称列表。
-        
-        Returns:
-            List[str]: 按槽位顺序排列的科室名称列表。
-        """
-        final_layout = [None] * self.num_slots
-        for slot_idx, dept_id in enumerate(self.layout):
-            if dept_id > 0:
-                final_layout[slot_idx] = self.placeable_depts[dept_id - 1]
-        return final_layout
-</file>
-
 <file path="src/rl_optimizer/agent/ppo_agent.py">
 # src/rl_optimizer/agent/ppo_agent.py
 
@@ -8625,6 +7896,350 @@ class PPOAgent:
         logger.info(f"最优布局的总加权成本为: {total_cost:.2f}")
 
         return results
+</file>
+
+<file path="src/rl_optimizer/env/layout_env.py">
+# src/rl_optimizer/env/layout_env.py
+
+import gymnasium as gym
+from gymnasium import spaces
+import numpy as np
+from typing import List, Dict, Any, Tuple, Optional
+from collections import defaultdict
+
+from src.config import RLConfig
+from src.rl_optimizer.data.cache_manager import CacheManager
+from src.rl_optimizer.env.cost_calculator import CostCalculator
+from src.rl_optimizer.utils.setup import setup_logger
+
+logger = setup_logger(__name__)  # 使用默认INFO级别
+
+class LayoutEnv(gym.Env):
+    """
+    医院布局优化的强化学习环境 (范式A: 选科室，填槽位)。
+
+    遵循Gymnasium接口，通过自回归方式构建布局。环境按照一个在每个回合
+    开始时随机打乱的槽位顺序进行填充。在每一步，智能体从所有尚未被
+    放置的科室中选择一个，放入当前待填充的槽位。
+
+    - **状态 (Observation)**: 字典，包含当前部分布局、已放置科室的掩码、
+                              以及当前待填充槽位的面积信息。
+    - **动作 (Action)**: 离散值，代表在 `placeable_depts` 列表中的科室索引。
+    - **奖励 (Reward)**: 仅在回合结束时给予的稀疏奖励，基于加权总通行时间
+                      和软约束。
+    - **约束 (Constraints)**: 硬约束（面积、强制相邻）通过动作掩码实现，
+                          确保智能体只能选择合法的科室。
+    """
+
+    metadata = {'render_modes': ['human']}
+
+    def __init__(self, config: RLConfig, cache_manager: CacheManager, cost_calculator: CostCalculator):
+        """
+        初始化布局优化环境。
+
+        Args:
+            config (RLConfig): RL优化器的配置对象。
+            cache_manager (CacheManager): 已初始化的数据缓存管理器。
+            cost_calculator (CostCalculator): 已初始化的成本计算器。
+        """
+        super().__init__()
+        self.config = config
+        self.cm = cache_manager
+        self.cc = cost_calculator
+
+        self._initialize_nodes_and_slots()
+        self._define_spaces()
+        self._initialize_state_variables()
+
+        logger.info(f"环境初始化完成：{self.num_slots}个可用槽位，{self.num_depts}个待放置科室。")
+
+    def _initialize_nodes_and_slots(self):
+        """从CacheManager获取并设置节点和槽位信息。"""
+        self.placeable_slots = self.cm.placeable_slots
+        self.slot_areas = self.cm.placeable_nodes_df['area'].values
+        self.num_slots = len(self.placeable_slots)
+
+        self.placeable_depts = self.cm.placeable_departments
+        self.dept_areas_map = dict(zip(self.cm.placeable_nodes_df['node_id'], self.cm.placeable_nodes_df['area']))
+        self.num_depts = len(self.placeable_depts)
+        
+        if self.num_slots != self.num_depts:
+            raise ValueError(f"槽位数 ({self.num_slots}) 与待布局科室数 ({self.num_depts}) 不匹配!")
+        
+        self.dept_to_idx = {dept: i for i, dept in enumerate(self.placeable_depts)}
+
+    def _define_spaces(self):
+        """定义观测空间和动作空间。"""
+        # 动作空间：选择一个科室进行放置。动作是科室的索引。
+        self.action_space = spaces.Discrete(self.num_depts)
+
+        # 观测空间：使用Box空间来明确定义形状，避免SB3的意外转换
+        self.observation_space = spaces.Dict({
+            # layout[i] = k+1 表示槽位i放置了索引为k的科室。0表示空。
+            "layout": spaces.Box(
+                low=0, 
+                high=self.num_depts, # 最大值为科室数 (num_depts-1)+1
+                shape=(self.num_slots,), 
+                dtype=np.int32
+            ),
+            # placed_mask[k] = 1 表示索引为k的科室已被放置。
+            "placed_mask": spaces.MultiBinary(self.num_depts),
+            # 当前待填充槽位的索引
+            "current_slot_idx": spaces.Box(low=0, high=self.num_slots - 1, shape=(1,), dtype=np.int32)
+        })
+
+    def _initialize_state_variables(self):
+        """初始化每个回合都会改变的状态变量。"""
+        self.current_step = 0
+        # layout的索引是物理槽位索引，值是科室索引+1
+        self.layout = np.zeros(self.num_slots, dtype=np.int32)
+        self.placed_mask = np.zeros(self.num_depts, dtype=bool)
+        # 每个回合开始时需要被打乱的槽位处理顺序
+        self.shuffled_slot_indices = np.arange(self.num_slots)
+
+    def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Dict, Dict]:
+        """重置环境，随机化槽位顺序，并返回初始观测。"""
+        super().reset(seed=seed)
+        self._initialize_state_variables()
+        self.np_random.shuffle(self.shuffled_slot_indices)
+        return self._get_obs(), self._get_info(terminated=False)
+    
+    def step(self, action: int) -> Tuple[Dict, float, bool, bool, Dict]:
+        """执行一个动作：在当前槽位放置选定的科室。"""
+        # 更严格的输入验证
+        if not (0 <= action < self.num_depts):
+            logger.error(f"无效的动作索引: {action}，有效范围是 [0, {self.num_depts-1}]")
+            return self._get_obs(), -100.0, True, False, self._get_info(terminated=False)
+        
+        if self.placed_mask[action]:
+            # 这是一个安全检查。理论上动作掩码会阻止这种情况。
+            # 如果发生，说明上游逻辑有误，应给予重罚并终止。
+            logger.error(f"严重错误：智能体选择了已被放置的科室！动作={action}, 科室={self.placeable_depts[action]}")
+            logger.error(f"当前步骤: {self.current_step}, placed_mask: {self.placed_mask}")
+            logger.error(f"当前动作掩码: {self.get_action_mask()}")
+            return self._get_obs(), -100.0, True, False, self._get_info(terminated=False)
+
+        # 确定当前要填充的物理槽位索引
+        slot_to_fill = self.shuffled_slot_indices[self.current_step]
+        
+        # 更新状态：在布局中记录放置，并标记科室为"已用"
+        self.layout[slot_to_fill] = action + 1  # 动作是科室索引，存储时+1
+        self.placed_mask[action] = True
+        self.current_step += 1
+
+        terminated = (self.current_step == self.num_slots)
+        reward = self._calculate_reward() if terminated else 0.0
+        info = self._get_info(terminated)
+        
+        # 调试日志：检查episode结束时的info内容
+        if terminated and logger.isEnabledFor(20):  # INFO级别
+            logger.debug(f"Episode结束，info内容: {info}")
+            if 'episode' in info:
+                logger.debug(f"Episode数据: {info['episode']}")
+
+        return self._get_obs(), reward, terminated, False, info
+    
+    def _get_obs(self) -> Dict[str, Any]:
+        """构建并返回当前观测字典。"""
+        if self.current_step >= self.num_slots:
+            current_slot_idx = 0
+        else:
+            current_slot_idx = self.shuffled_slot_indices[self.current_step]
+
+        return {
+            "layout": self.layout,
+            "placed_mask": self.placed_mask,
+            "current_slot_idx": np.array([current_slot_idx], dtype=np.int32)
+        }
+    
+    def _get_info(self, terminated: bool = False) -> Dict[str, Any]:
+        """返回包含动作掩码和episode信息的附加信息。"""
+        info = {"action_mask": self.get_action_mask()}
+        
+        # 如果episode结束，添加训练指标信息
+        if terminated:
+            # 构造最终布局
+            final_layout_depts = [None] * self.num_slots
+            for slot_idx, dept_id in enumerate(self.layout):
+                if dept_id > 0:
+                    final_layout_depts[slot_idx] = self.placeable_depts[dept_id - 1]
+            
+            # 如果布局完整，计算时间成本
+            if None not in final_layout_depts:
+                # 计算原始的总时间成本（未缩放）
+                raw_time_cost = self.cc.calculate_total_cost(final_layout_depts)
+                
+                # 计算用于训练的缩放reward（与_calculate_reward中的逻辑一致）
+                scaled_time_reward = -raw_time_cost / 1e4
+                
+                # 调试日志：确认传递的是原始值
+                if logger.isEnabledFor(20):  # INFO级别
+                    logger.debug(f"Episode结束 - 原始时间成本: {raw_time_cost:.2f}, "
+                               f"缩放后训练reward: {scaled_time_reward:.6f}")
+                
+                # Episode结束时添加详细信息
+                info['episode'] = {
+                    'time_cost': raw_time_cost,  # 明确传递原始值
+                    'scaled_reward': scaled_time_reward,  # 同时提供缩放值用于对比
+                    'layout': final_layout_depts.copy(),
+                    'r': self._calculate_reward(),  # 完整的奖励值（包含时间+邻接）
+                    'l': self.current_step  # episode长度
+                }
+                
+                # 如果启用了详细日志，还可以添加更多信息
+                if logger.isEnabledFor(20):  # INFO级别
+                    info['episode']['per_process_costs'] = self.cc.calculate_per_process_cost(final_layout_depts)
+        
+        return info
+    
+    def get_action_mask(self) -> np.ndarray:
+        """
+        计算当前步骤下所有合法的科室动作掩码。
+        
+        该方法根据当前待填充槽位的面积约束，返回一个布尔数组，指示哪些未放置的科室可被合法选择。如果所有未放置科室均不满足面积约束，将逐步放宽容差，直至至少有一个合法动作；如仍无合法动作，则强制允许所有未放置科室。
+        
+        返回值:
+            np.ndarray: 长度等于科室数的布尔数组，True 表示对应科室当前可被选择。
+        """
+        if self.current_step >= self.num_slots:
+            return np.zeros(self.num_depts, dtype=bool)
+
+        # 1. 初始掩码：所有未放置的科室都是潜在的合法动作
+        action_mask = ~self.placed_mask
+
+        # 2. 面积约束：科室面积必须符合当前槽位的容差
+        current_slot_idx = self.shuffled_slot_indices[self.current_step]
+        current_slot_area = self.slot_areas[current_slot_idx]
+        min_area = current_slot_area * (1 - self.config.AREA_SCALING_FACTOR)
+        max_area = current_slot_area * (1 + self.config.AREA_SCALING_FACTOR)
+
+        for dept_idx in range(self.num_depts):
+            if action_mask[dept_idx]:  # 只检查当前合法的动作
+                dept_name = self.placeable_depts[dept_idx]
+                dept_area = self.dept_areas_map[dept_name]
+                if not (min_area <= dept_area <= max_area):
+                    action_mask[dept_idx] = False
+        
+        # 容错机制：如果没有合法动作，逐步放松约束
+        if np.sum(action_mask) == 0:
+            logger.warning(f"在步骤 {self.current_step}，没有找到任何合法的动作！尝试放松约束...")
+            
+            # 重新计算，使用更宽松的面积约束
+            relaxation_factors = [0.2, 0.3, 0.5, 0.7, 1.0]  # 逐步放松
+            for factor in relaxation_factors:
+                action_mask = ~self.placed_mask  # 重新开始，只考虑未放置的科室
+                min_area = current_slot_area * (1 - factor)
+                max_area = current_slot_area * (1 + factor)
+                
+                for dept_idx in range(self.num_depts):
+                    if action_mask[dept_idx]:
+                        dept_name = self.placeable_depts[dept_idx]
+                        dept_area = self.dept_areas_map[dept_name]
+                        if not (min_area <= dept_area <= max_area):
+                            action_mask[dept_idx] = False
+                
+                if np.sum(action_mask) > 0:
+                    logger.info(f"使用松弛因子 {factor} 找到了 {np.sum(action_mask)} 个合法动作")
+                    break
+            
+            # 最后的安全检查：如果仍然没有合法动作，至少允许所有未放置的科室
+            if np.sum(action_mask) == 0:
+                current_slot_name = self.placeable_slots[current_slot_idx]
+                current_slot_area = self.slot_areas[current_slot_idx]
+                
+                unplaced_indices = np.where(~self.placed_mask)[0]
+                unplaced_depts_info = [
+                    f"{self.placeable_depts[i]}({self.dept_areas_map[self.placeable_depts[i]]:.2f})"
+                    for i in unplaced_indices
+                ]
+                
+                logger.error(
+                    f"即使放松所有约束也没有为槽位 '{current_slot_name}' (面积: {current_slot_area:.2f}) 找到合法科室！"
+                    f"剩余待放置科室: [{', '.join(unplaced_depts_info)}]. "
+                    f"将强制允许所有未放置的科室。"
+                )
+                action_mask = ~self.placed_mask
+        
+        return action_mask
+    
+    def _calculate_reward(self) -> float:
+        """
+        在回合结束时，根据最终布局计算并返回总奖励。
+        
+        如果布局未完成，则返回重罚。奖励由时间成本和邻接约束两部分加权组成，其中时间成本通过 `CostCalculator` 计算并缩放，邻接奖励由 `_calculate_adjacency_reward` 计算。
+        """
+        final_layout_depts = [None] * self.num_slots
+        for slot_idx, dept_id in enumerate(self.layout):
+            if dept_id > 0:
+                final_layout_depts[slot_idx] = self.placeable_depts[dept_id - 1]
+        
+        if None in final_layout_depts:
+            logger.error("布局计算奖励时发现未完成的布局，返回重罚。")
+            return -500.0
+
+        time_cost = self.cc.calculate_total_cost(final_layout_depts)
+        time_reward = -time_cost / 1e4  # 缩放以稳定训练
+
+        adjacency_reward = self._calculate_adjacency_reward(final_layout_depts)
+        
+        total_reward = (self.config.REWARD_TIME_WEIGHT * time_reward + 
+                        self.config.REWARD_ADJACENCY_WEIGHT * adjacency_reward)
+        
+        return total_reward
+    
+    def _calculate_adjacency_reward(self, _final_layout: List[str]) -> float:
+        """
+        计算偏好相邻软约束的奖励。
+        (TODO: 需要一个可靠的邻接关系数据源)
+        """
+        # 这是一个示例实现，实际部署时需要替换为真实邻接数据
+        # 假设 travel_times 矩阵中时间小于某个阈值（例如 10）即为相邻
+        reward = 0.0
+        # ... 实现软约束奖励计算 ...
+        return reward
+    
+    def render(self, mode="human"):
+        """(可选) 渲染环境状态，用于调试。"""
+        if mode == "human":
+            print(f"--- Step: {self.current_step} ---")
+            current_slot_idx = self.shuffled_slot_indices[self.current_step]
+            current_slot = self.placeable_slots[current_slot_idx]
+            print(f"Current Slot to Fill: {current_slot} (Area: {self.slot_areas[current_slot_idx]:.2f})")
+            
+            layout_str = []
+            for i in range(self.num_slots):
+                dept_id = self.layout[i]
+                if dept_id > 0:
+                    layout_str.append(f"{self.placeable_slots[i]}: {self.placeable_depts[dept_id-1]}")
+                else:
+                    layout_str.append(f"{self.placeable_slots[i]}: EMPTY")
+            print("Current Layout:\n" + "\n".join(layout_str))
+
+    @staticmethod
+    def _action_mask_fn(env: 'LayoutEnv') -> np.ndarray:
+        """
+        ActionMasker 包装器所需的静态方法，用于提取动作掩码。
+        
+        Args:
+            env (LayoutEnv): 环境实例。
+            
+        Returns:
+            np.ndarray: 当前状态下的动作掩码。
+        """
+        return env.get_action_mask()
+
+    def _get_final_layout_str(self) -> List[str]:
+        """
+        获取最终布局的科室名称列表。
+        
+        Returns:
+            List[str]: 按槽位顺序排列的科室名称列表。
+        """
+        final_layout = [None] * self.num_slots
+        for slot_idx, dept_id in enumerate(self.layout):
+            if dept_id > 0:
+                final_layout[slot_idx] = self.placeable_depts[dept_id - 1]
+        return final_layout
 </file>
 
 <file path="src/network/network.py">
