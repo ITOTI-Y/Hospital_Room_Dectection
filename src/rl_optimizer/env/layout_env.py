@@ -11,7 +11,7 @@ from src.rl_optimizer.data.cache_manager import CacheManager
 from src.rl_optimizer.env.cost_calculator import CostCalculator
 from src.rl_optimizer.utils.setup import setup_logger
 
-logger = setup_logger(__name__, level=10)  # 临时启用DEBUG级别
+logger = setup_logger(__name__)  # 使用默认INFO级别
 
 class LayoutEnv(gym.Env):
     """
@@ -131,7 +131,7 @@ class LayoutEnv(gym.Env):
         info = self._get_info(terminated)
         
         # 调试日志：检查episode结束时的info内容
-        if terminated and logger.isEnabledFor(10):  # DEBUG级别
+        if terminated and logger.isEnabledFor(20):  # INFO级别
             logger.debug(f"Episode结束，info内容: {info}")
             if 'episode' in info:
                 logger.debug(f"Episode数据: {info['episode']}")
@@ -172,7 +172,7 @@ class LayoutEnv(gym.Env):
                 scaled_time_reward = -raw_time_cost / 1e4
                 
                 # 调试日志：确认传递的是原始值
-                if logger.isEnabledFor(10):  # DEBUG级别
+                if logger.isEnabledFor(20):  # INFO级别
                     logger.debug(f"Episode结束 - 原始时间成本: {raw_time_cost:.2f}, "
                                f"缩放后训练reward: {scaled_time_reward:.6f}")
                 

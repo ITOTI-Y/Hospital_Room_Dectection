@@ -261,7 +261,7 @@ class PPOOptimizer(BaseOptimizer):
         """训练模型"""
         timestamp = time.strftime("%Y%m%d-%H%M%S")
         log_dir = self.config.LOG_PATH / f"ppo_layout_{timestamp}"
-        result_dir = self.config.RESULT_PATH / f"ppo_layout_{timestamp}"
+        result_dir = self.config.RESULT_PATH / "model" / f"ppo_layout_{timestamp}"
         
         # 如果是恢复训练，使用原有目录
         if self.resume_model_path:
@@ -286,7 +286,7 @@ class PPOOptimizer(BaseOptimizer):
             save_freq=self.config.EVAL_FREQUENCY * 5,  # 每5次评估保存一次指标
             save_path=str(log_dir / "metrics"),
             window_size=100,  # 统计最近100个episodes
-            verbose=2,  # 临时提高日志级别用于调试
+            verbose=1,  # 降低到普通级别，减少调试输出
             total_episodes_target=estimated_episodes  # 添加进度条支持
         )
         callbacks.append(metrics_callback)
@@ -325,6 +325,7 @@ class PPOOptimizer(BaseOptimizer):
             total_timesteps=remaining_steps,
             callback=callbacks,
             tb_log_name="PPO",
+            progress_bar=True,
             reset_num_timesteps=False if self.resume_model_path else True
         )
         

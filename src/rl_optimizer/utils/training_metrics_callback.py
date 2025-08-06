@@ -59,9 +59,11 @@ class TrainingMetricsCallback(BaseCallback):
         except:
             self.is_main_process = True
         
-        # 如果不是主进程，降低日志详细程度
+        # 如果不是主进程，降低日志详细程度并禁用大部分输出
         if not self.is_main_process:
-            self.verbose = 0
+            self.verbose = 0  # 完全禁用详细输出
+            # 进一步提高日志频率以减少不必要的计算
+            self.log_freq = max(self.log_freq * 10, 1000)  # 子进程减少日志频率
         
         # 指标跟踪
         self.episode_count = 0
@@ -106,27 +108,27 @@ class TrainingMetricsCallback(BaseCallback):
         # 检查self.locals中的infos
         infos = self.locals.get('infos', [])
         
-        if self.verbose >= 2 and self.is_main_process:
+        if self.verbose >= 2 and self.is_main_process and logger.isEnabledFor(10):
             logger.debug(f"回调接收到 {len(infos)} 个info，内容: {infos}")
         
         if len(infos) > 0:
             for i, info in enumerate(infos):
                 # 检查是否有episode结束信息
                 if 'episode' in info:
-                    if self.verbose >= 2 and self.is_main_process:
+                    if self.verbose >= 2 and self.is_main_process and logger.isEnabledFor(10):
                         logger.debug(f"发现episode结束信息: {info['episode']}")
                     self._process_episode_end(info['episode'])
                 
                 # 检查SB3标准的episode信息格式
                 elif '_episode' in info:
                     episode_data = info['_episode']
-                    if self.verbose >= 2 and self.is_main_process:
+                    if self.verbose >= 2 and self.is_main_process and logger.isEnabledFor(10):
                         logger.debug(f"发现SB3格式episode信息: {episode_data}")
                     self._process_episode_end(episode_data)
                 
                 # 检查其他可能的episode信息字段
                 elif any(key in info for key in ['terminal_observation', 'episode_info']):
-                    if self.verbose >= 2 and self.is_main_process:
+                    if self.verbose >= 2 and self.is_main_process and logger.isEnabledFor(10):
                         logger.debug(f"发现其他格式episode信息: {info}")
                     # 尝试构造episode数据
                     episode_data = {}

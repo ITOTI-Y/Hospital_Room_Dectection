@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 from stable_baselines3.common.vec_env import VecEnvWrapper
 from stable_baselines3.common.vec_env.base_vec_env import VecEnvStepReturn
+import multiprocessing
 
 from src.rl_optimizer.utils.setup import setup_logger
 
@@ -28,6 +29,12 @@ class EpisodeInfoVecEnvWrapper(VecEnvWrapper):
         self.episode_rewards = np.zeros(self.num_envs)
         self.episode_lengths = np.zeros(self.num_envs, dtype=int)
         self.episode_count = 0
+        
+        # 检查是否为主进程，只有主进程才输出详细日志
+        try:
+            self.is_main_process = multiprocessing.current_process().name == 'MainProcess'
+        except:
+            self.is_main_process = True
         
     def step_wait(self) -> VecEnvStepReturn:
         """
@@ -55,11 +62,11 @@ class EpisodeInfoVecEnvWrapper(VecEnvWrapper):
                     # 确保episode信息在正确的位置
                     info['episode'] = episode_info
                     
-                    if logger.isEnabledFor(10):  # DEBUG级别
+                    # 只有主进程输出调试日志，且仅在真正需要时输出
+                    if self.is_main_process and logger.isEnabledFor(10):  # DEBUG级别
                         logger.debug(f"环境{i} Episode {self.episode_count}结束")
-                        logger.debug(f"包装器传递episode信息: {episode_info}")
                         if 'time_cost' in episode_info:
-                            logger.debug(f"时间成本: {episode_info['time_cost']}")
+                            logger.debug(f"时间成本: {episode_info['time_cost']:.2f}")
                 
                 # 重置统计
                 self.episode_rewards[i] = 0
