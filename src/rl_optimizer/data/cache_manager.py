@@ -125,8 +125,8 @@ class CacheManager:
     def _resolve_single_template(self, template: Dict[str, Any]) -> List[Tuple[List[str], float]]:
         """
         根据单个流程模板，高效地解析出所有可能的具体流线及其权重。
-        该方法能正确处理端点（如门）和核心路径节点权重的不同计算逻辑。
-
+        改进版：使用生成器和批处理来避免内存爆炸。
+        
         Args:
             template (Dict[str, Any]): 单个就医流程的模板字典。
 
@@ -134,22 +134,31 @@ class CacheManager:
             List[Tuple[List[str], float]]: 一个包含(具体流线, 最终权重)元组的列表。
         """
         base_weight = template.get('base_weight', 1.0)
+        max_combinations = getattr(self.config, 'MAX_PATHWAY_COMBINATIONS', 10000)
 
         # 1. 准备所有部分的选项列表
         start_nodes_options = [self.variants.get(gn, [gn]) for gn in template['start_nodes']]
         core_sequences_options = [self.variants.get(gn, [gn]) for gn in template['core_sequence']]
         end_nodes_options = [self.variants.get(gn, [gn]) for gn in template['end_nodes']]
 
-        # 2. 一次性计算所有组合的笛卡尔积
-        # 注意：我们将起点、核心和终点的组合分开处理，以便应用不同的权重逻辑
-        start_combinations = list(itertools.product(*start_nodes_options))
-        core_combinations = list(itertools.product(*core_sequences_options))
-        end_combinations = list(itertools.product(*end_nodes_options))
-
+        # 2. 计算总组合数，如果太大则采样
+        total_combinations = 1
+        for options in start_nodes_options + core_sequences_options + end_nodes_options:
+            total_combinations *= len(options)
+        
+        # 如果组合数太大，使用采样策略
+        if total_combinations > max_combinations:
+            logger.warning(f"流程 {template['process_id']} 的组合数 {total_combinations} 超过限制 {max_combinations}，将进行采样")
+            return self._resolve_template_sampled(template, max_combinations)
+        
+        # 3. 使用生成器来减少内存占用
         pathways = []
-        # 3. 组合并计算权重 (恢复使用清晰的三重循环，因为逻辑已变得复杂)
+        start_combinations = itertools.product(*start_nodes_options)
+        
         for start_combo in start_combinations:
+            core_combinations = itertools.product(*core_sequences_options)
             for core_combo in core_combinations:
+                end_combinations = itertools.product(*end_nodes_options)
                 for end_combo in end_combinations:
                     
                     # --- 权重计算开始 ---
@@ -181,6 +190,51 @@ class CacheManager:
                         "weight": final_weight
                     })
             
+        return pathways
+    
+    def _resolve_template_sampled(self, template: Dict[str, Any], max_samples: int) -> List[Tuple[List[str], float]]:
+        """
+        使用采样策略解析模板，避免组合爆炸。
+        """
+        import random
+        
+        base_weight = template.get('base_weight', 1.0)
+        pathways = []
+        
+        # 准备选项
+        start_nodes_options = [self.variants.get(gn, [gn]) for gn in template['start_nodes']]
+        core_sequences_options = [self.variants.get(gn, [gn]) for gn in template['core_sequence']]
+        end_nodes_options = [self.variants.get(gn, [gn]) for gn in template['end_nodes']]
+        
+        # 随机采样
+        for _ in range(max_samples):
+            start_combo = tuple(random.choice(opts) for opts in start_nodes_options)
+            core_combo = tuple(random.choice(opts) for opts in core_sequences_options)
+            end_combo = tuple(random.choice(opts) for opts in end_nodes_options)
+            
+            # 计算权重
+            final_weight = base_weight
+            for node in start_combo:
+                final_weight *= self._get_normalized_weight(node)
+            
+            processed_core_generics = set()
+            for node in core_combo:
+                generic_name = str(node).split('_')[0]
+                if generic_name not in processed_core_generics:
+                    final_weight *= self._get_normalized_weight(node)
+                    processed_core_generics.add(generic_name)
+            
+            for node in end_combo:
+                final_weight *= self._get_normalized_weight(node)
+            
+            # 组合路径
+            full_path = list(start_combo) + list(core_combo) + list(end_combo)
+            pathways.append({
+                "process_id": template['process_id'],
+                "path": full_path,
+                "weight": final_weight
+            })
+        
         return pathways
     
     def _get_normalized_weight(self, node_name: str) -> float:

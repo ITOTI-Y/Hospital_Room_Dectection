@@ -293,7 +293,10 @@ class GeneticAlgorithmOptimizer(BaseOptimizer):
         return child1, child2
     
     def _order_crossover(self, parent1: List[str], parent2: List[str]) -> Tuple[List[str], List[str]]:
-        """顺序交叉操作"""
+        """
+        改进的顺序交叉操作（OX）
+        确保不产生重复科室，保持布局的有效性
+        """
         length = len(parent1)
         
         # 随机选择交叉区间
@@ -308,22 +311,74 @@ class GeneticAlgorithmOptimizer(BaseOptimizer):
         child1[start:end+1] = parent1[start:end+1]
         child2[start:end+1] = parent2[start:end+1]
         
-        # 填充剩余位置
-        self._fill_remaining_positions(child1, parent2, start, end)
-        self._fill_remaining_positions(child2, parent1, start, end)
+        # 填充剩余位置（改进的填充策略）
+        self._fill_remaining_positions_improved(child1, parent2, start, end)
+        self._fill_remaining_positions_improved(child2, parent1, start, end)
+        
+        # 验证并修复可能的问题
+        child1 = self._validate_and_repair_child(child1, parent1)
+        child2 = self._validate_and_repair_child(child2, parent2)
         
         return child1, child2
     
-    def _fill_remaining_positions(self, child: List[str], parent: List[str], start: int, end: int):
-        """填充顺序交叉中的剩余位置"""
-        child_set = set(child[start:end+1]) - {None}
-        fill_items = [item for item in parent if item not in child_set and item is not None]
+    def _fill_remaining_positions_improved(self, child: List[str], parent: List[str], start: int, end: int):
+        """
+        改进的填充策略，确保不产生重复
+        使用循环填充法保持父代顺序
+        """
+        length = len(child)
+        # 获取已经在子代中的科室集合
+        child_set = set(item for item in child if item is not None)
         
+        # 从parent中按顺序提取未在child中的科室
+        fill_items = []
+        for item in parent:
+            if item is not None and item not in child_set:
+                fill_items.append(item)
+                child_set.add(item)  # 立即添加到集合中，防止重复
+        
+        # 循环填充：从end+1位置开始，循环到start-1
         fill_index = 0
-        for i in range(len(child)):
-            if child[i] is None and fill_index < len(fill_items):
-                child[i] = fill_items[fill_index]
+        for offset in range(1, length):
+            pos = (end + offset) % length
+            if child[pos] is None and fill_index < len(fill_items):
+                child[pos] = fill_items[fill_index]
                 fill_index += 1
+    
+    def _validate_and_repair_child(self, child: List[str], parent: List[str]) -> List[str]:
+        """
+        验证子代有效性，修复可能的问题
+        """
+        # 检查是否有None值
+        if None in child:
+            # 用父代对应位置的值填充None
+            for i, val in enumerate(child):
+                if val is None:
+                    child[i] = parent[i]
+        
+        # 检查是否有重复
+        seen = set()
+        duplicates = []
+        for i, dept in enumerate(child):
+            if dept in seen:
+                duplicates.append(i)
+            else:
+                seen.add(dept)
+        
+        # 如果有重复，用缺失的科室替换
+        if duplicates:
+            all_depts = set(self.constraint_manager.placeable_departments)
+            missing_depts = list(all_depts - seen)
+            for i, dup_idx in enumerate(duplicates):
+                if i < len(missing_depts):
+                    child[dup_idx] = missing_depts[i]
+                    seen.add(missing_depts[i])
+        
+        return child
+    
+    def _fill_remaining_positions(self, child: List[str], parent: List[str], start: int, end: int):
+        """保留原方法签名以兼容，但使用改进的实现"""
+        self._fill_remaining_positions_improved(child, parent, start, end)
     
     def _repair_layout_constraints(self, layout: List[str]) -> List[str]:
         """修复布局约束违反"""

@@ -118,7 +118,7 @@ class LayoutEnv(gym.Env):
         # 更严格的输入验证
         if not (0 <= action <= self.num_depts):  # 包括跳过动作
             logger.error(f"无效的动作索引: {action}，有效范围是 [0, {self.num_depts}]")
-            return self._get_obs(), -100.0, True, False, self._get_info(terminated=False)
+            return self._get_obs(), self.config.INVALID_ACTION_PENALTY, True, False, self._get_info(terminated=False)
         
         # 检查是否为跳过动作
         if action == self.SKIP_ACTION:
@@ -134,7 +134,7 @@ class LayoutEnv(gym.Env):
                 logger.error(f"严重错误：智能体选择了已被放置的科室！动作={action}, 科室={self.placeable_depts[action]}")
                 logger.error(f"当前步骤: {self.current_step}, placed_mask: {self.placed_mask}")
                 logger.error(f"当前动作掩码: {self.get_action_mask()}")
-                return self._get_obs(), -100.0, True, False, self._get_info(terminated=False)
+                return self._get_obs(), self.config.INVALID_ACTION_PENALTY, True, False, self._get_info(terminated=False)
 
             # 确定当前要填充的物理槽位索引
             slot_to_fill = self.shuffled_slot_indices[self.current_step]
@@ -147,7 +147,15 @@ class LayoutEnv(gym.Env):
         # 更新步骤计数
         self.current_step += 1
 
-        terminated = (self.current_step == self.num_slots)
+        # 改进的终止条件：考虑所有科室都已放置或所有槽位都已处理
+        all_departments_placed = all(self.placed_mask)
+        all_slots_processed = (self.current_step >= self.num_slots)
+        terminated = all_departments_placed or all_slots_processed
+        
+        # 如果终止但还有未放置的科室，需要特殊处理
+        if terminated and not all_departments_placed:
+            logger.warning(f"Episode终止但仍有 {sum(~self.placed_mask)} 个科室未放置")
+        
         reward = self._calculate_reward() if terminated else 0.0
         info = self._get_info(terminated)
         

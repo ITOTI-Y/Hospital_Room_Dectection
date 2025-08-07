@@ -198,7 +198,10 @@ class SimulatedAnnealingOptimizer(BaseOptimizer):
             layout[pos1], layout[pos2] = layout[pos2], layout[pos1]
     
     def _relocate_department(self, layout: List[str]):
-        """重新定位一个科室到新位置"""
+        """
+        改进的重定位操作：安全地将一个科室移动到新位置
+        使用更温和的方式保持布局结构完整性
+        """
         if len(layout) < 2:
             return
             
@@ -207,17 +210,20 @@ class SimulatedAnnealingOptimizer(BaseOptimizer):
         new_pos = random.randint(0, len(layout) - 1)
         
         if old_pos != new_pos:
+            # 保存要移动的科室
             dept = layout[old_pos]
-            # 移除科室
-            layout[old_pos] = None
-            # 将后续科室前移
-            for i in range(old_pos, len(layout) - 1):
-                layout[i] = layout[i + 1]
-            # 在新位置插入科室
-            layout.insert(new_pos, dept)
-            # 保持长度一致
-            if len(layout) > len(self.constraint_manager.slots_info):
-                layout.pop()
+            
+            # 使用安全的移动策略：通过一系列交换来实现重定位
+            if old_pos < new_pos:
+                # 向右移动：依次与右边元素交换
+                for i in range(old_pos, new_pos):
+                    layout[i] = layout[i + 1]
+                layout[new_pos] = dept
+            else:
+                # 向左移动：依次与左边元素交换
+                for i in range(old_pos, new_pos, -1):
+                    layout[i] = layout[i - 1]
+                layout[new_pos] = dept
     
     def _repair_layout(self, layout: List[str]) -> Optional[List[str]]:
         """
@@ -232,7 +238,8 @@ class SimulatedAnnealingOptimizer(BaseOptimizer):
         repaired = layout.copy()
         
         # 简单修复策略：随机重新分配违反约束的科室
-        for attempt in range(10):  # 最多尝试10次
+        max_attempts = getattr(self.constraint_manager.config, 'SA_MAX_REPAIR_ATTEMPTS', 10)
+        for attempt in range(max_attempts):  # 最多尝试次数从配置读取
             if self.constraint_manager.is_valid_layout(repaired):
                 return repaired
                 

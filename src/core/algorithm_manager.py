@@ -8,6 +8,7 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Type
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import copy
 
 from src.algorithms.base_optimizer import BaseOptimizer, OptimizationResult
 from src.algorithms.constraint_manager import ConstraintManager
@@ -186,15 +187,38 @@ class AlgorithmManager:
                                algorithm_names: List[str],
                                initial_layout: Optional[List[str]],
                                custom_params: Optional[Dict[str, Dict[str, Any]]]) -> Dict[str, OptimizationResult]:
-        """并行运行算法"""
+        """
+        并行运行算法（改进版：每个算法使用独立的资源实例）
+        """
         results = {}
+        
+        def run_algorithm_independent(alg_name: str, init_layout: Optional[List[str]], params: Dict[str, Any]):
+            """在独立的上下文中运行算法"""
+            # 创建独立的优化器实例
+            optimizer = self._create_optimizer(alg_name, params, create_independent=True)
+            
+            # 准备运行时参数
+            runtime_params = params.copy()
+            if alg_name == 'simulated_annealing':
+                for key in ['initial_temperature', 'final_temperature', 'cooling_rate', 'temperature_length']:
+                    runtime_params.pop(key, None)
+            elif alg_name == 'genetic_algorithm':
+                for key in ['population_size', 'elite_size', 'mutation_rate', 'crossover_rate', 'tournament_size', 'max_age']:
+                    runtime_params.pop(key, None)
+            
+            # 运行优化
+            start_time = time.time()
+            result = optimizer.optimize(initial_layout=init_layout, **runtime_params)
+            result.execution_time = time.time() - start_time
+            
+            return result
         
         with ThreadPoolExecutor(max_workers=min(len(algorithm_names), 3)) as executor:
             # 提交任务
             future_to_algorithm = {}
             for algorithm_name in algorithm_names:
                 params = custom_params.get(algorithm_name, {}) if custom_params else {}
-                future = executor.submit(self.run_single_algorithm, algorithm_name, initial_layout, params)
+                future = executor.submit(run_algorithm_independent, algorithm_name, initial_layout, params)
                 future_to_algorithm[future] = algorithm_name
             
             # 收集结果
@@ -208,14 +232,31 @@ class AlgorithmManager:
         
         return results
     
-    def _create_optimizer(self, algorithm_name: str, custom_params: Optional[Dict[str, Any]] = None) -> BaseOptimizer:
-        """创建优化器实例"""
+    def _create_optimizer(self, algorithm_name: str, custom_params: Optional[Dict[str, Any]] = None, 
+                         create_independent: bool = False) -> BaseOptimizer:
+        """
+        创建优化器实例
+        
+        Args:
+            algorithm_name: 算法名称
+            custom_params: 自定义参数
+            create_independent: 是否创建独立的calculator和manager实例（用于并发执行）
+        """
         optimizer_class = self.algorithm_registry[algorithm_name]
+        
+        # 如果需要独立实例（并发执行），创建新的calculator和manager
+        if create_independent:
+            # 深拷贝以避免共享状态
+            cost_calculator = copy.deepcopy(self.cost_calculator)
+            constraint_manager = copy.deepcopy(self.constraint_manager)
+        else:
+            cost_calculator = self.cost_calculator
+            constraint_manager = self.constraint_manager
         
         if algorithm_name == 'ppo':
             return optimizer_class(
-                cost_calculator=self.cost_calculator,
-                constraint_manager=self.constraint_manager,
+                cost_calculator=cost_calculator,
+                constraint_manager=constraint_manager,
                 config=self.config,
                 cache_manager=self.cache_manager
             )
@@ -233,8 +274,8 @@ class AlgorithmManager:
                     sa_params['temperature_length'] = custom_params['temperature_length']
             
             return optimizer_class(
-                cost_calculator=self.cost_calculator,
-                constraint_manager=self.constraint_manager,
+                cost_calculator=cost_calculator,
+                constraint_manager=constraint_manager,
                 **sa_params
             )
         elif algorithm_name == 'genetic_algorithm':
@@ -255,8 +296,8 @@ class AlgorithmManager:
                     ga_params['max_age'] = custom_params['max_age']
             
             return optimizer_class(
-                cost_calculator=self.cost_calculator,
-                constraint_manager=self.constraint_manager,
+                cost_calculator=cost_calculator,
+                constraint_manager=constraint_manager,
                 **ga_params
             )
         else:

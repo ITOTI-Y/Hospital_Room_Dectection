@@ -68,6 +68,14 @@ class ConstraintManager:
         self.slots_info = self._initialize_slots_info()
         self.departments_info = self._initialize_departments_info()
         
+        # 构建索引映射（优化查找性能）
+        self.dept_name_to_index = {
+            dept.name: i for i, dept in enumerate(self.departments_info)
+        }
+        self.slot_name_to_index = {
+            slot.name: i for i, slot in enumerate(self.slots_info)
+        }
+        
         # 构建约束关系
         self.area_compatibility_matrix = self._build_area_compatibility_matrix()
         self.fixed_assignments = self._build_fixed_assignments()
@@ -231,7 +239,7 @@ class ConstraintManager:
     
     def is_valid_layout(self, layout: List[str]) -> bool:
         """
-        检查布局是否满足所有约束
+        检查布局是否满足所有约束（优化检查顺序：先简单后复杂）
         
         Args:
             layout: 布局列表，索引为槽位，值为科室名
@@ -239,19 +247,41 @@ class ConstraintManager:
         Returns:
             bool: 是否有效
         """
+        # 1. 最快的检查：长度匹配
         if len(layout) != len(self.slots_info):
             return False
         
-        # 检查固定位置约束
+        # 2. 快速检查：唯一性约束（O(n)）
+        if not self._check_uniqueness_constraints(layout):
+            return False
+        
+        # 3. 中等复杂度：固定位置约束（O(固定数量)）
         if not self._check_fixed_constraints(layout):
             return False
         
-        # 检查面积约束
+        # 4. 最复杂的检查：面积约束（需要矩阵查找）
         if not self._check_area_constraints(layout):
             return False
         
-        # 检查唯一性约束（每个科室只能出现一次）
-        if not self._check_uniqueness_constraints(layout):
+        return True
+    
+    def _check_uniqueness_constraints(self, layout: List[str]) -> bool:
+        """检查唯一性约束（每个科室只能出现一次）- 优化版"""
+        seen = set()
+        for dept_name in layout:
+            if dept_name is None:
+                continue
+            if dept_name in seen:
+                return False  # 发现重复，立即返回
+            seen.add(dept_name)
+        
+        # 检查是否所有科室都被放置
+        placed_depts = seen
+        all_depts = set(dept.name for dept in self.departments_info)
+        missing_depts = all_depts - placed_depts
+        
+        if missing_depts:
+            logger.debug(f"缺少科室: {missing_depts}")
             return False
         
         return True
@@ -284,11 +314,8 @@ class ConstraintManager:
         return len(non_none_depts) == len(set(non_none_depts))
     
     def _get_department_index(self, dept_name: str) -> Optional[int]:
-        """获取科室在departments_info中的索引"""
-        for i, dept in enumerate(self.departments_info):
-            if dept.name == dept_name:
-                return i
-        return None
+        """获取科室在departments_info中的索引（使用哈希表优化）"""
+        return self.dept_name_to_index.get(dept_name)
     
     def generate_valid_layout(self) -> List[str]:
         """

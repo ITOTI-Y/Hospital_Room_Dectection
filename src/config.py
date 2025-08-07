@@ -243,6 +243,31 @@ class RLConfig:
         self.BATCH_SIZE: int = 64
         self.N_EPOCHS: int = 10  # 修正为N_EPOCHS以匹配PPO参数
         
+        # --- 性能优化参数 ---
+        self.COST_CACHE_SIZE: int = 1000  # LRU缓存大小
+        self.MAX_PATHWAY_COMBINATIONS: int = 10000  # 最大流线组合数
+        
+        # --- 算法默认参数 ---
+        self.DEFAULT_PENALTY: float = 1000.0  # 默认惩罚值
+        self.LARGE_PENALTY: float = 10000.0  # 大惩罚值
+        self.INVALID_ACTION_PENALTY: float = -100.0  # 无效动作惩罚
+        
+        # --- 模拟退火默认参数 ---
+        self.SA_MAX_REPAIR_ATTEMPTS: int = 10
+        self.SA_DEFAULT_INITIAL_TEMP: float = 1000.0
+        self.SA_DEFAULT_FINAL_TEMP: float = 1.0
+        self.SA_DEFAULT_COOLING_RATE: float = 0.95
+        
+        # --- 遗传算法默认参数 ---
+        self.GA_DEFAULT_POPULATION_SIZE: int = 50
+        self.GA_DEFAULT_ELITE_SIZE: int = 5
+        self.GA_DEFAULT_MUTATION_RATE: float = 0.1
+        self.GA_DEFAULT_CROSSOVER_RATE: float = 0.8
+        self.GA_DEFAULT_TOURNAMENT_SIZE: int = 3
+        
+        # --- 并发控制 ---
+        self.MAX_PARALLEL_ALGORITHMS: int = 3
+        
         # --- 评估和检查点配置 ---
         self.EVAL_FREQUENCY: int = 10000  # 添加评估频率
 
