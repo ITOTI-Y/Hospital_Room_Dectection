@@ -106,10 +106,19 @@ class LayoutEnv(gym.Env):
         self.skipped_slots = set()
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Dict, Dict]:
-        """重置环境，随机化槽位顺序，并返回初始观测。"""
+        """重置环境，按面积从小到大排序槽位，并返回初始观测。"""
         super().reset(seed=seed)
         self._initialize_state_variables()
-        self.np_random.shuffle(self.shuffled_slot_indices)
+        # 修改：按槽位面积从小到大排序，而不是随机打乱
+        self.shuffled_slot_indices = np.argsort(self.slot_areas)
+        
+        # 添加调试日志，显示槽位填充顺序
+        logger.debug(f"槽位填充顺序（按面积从小到大）:")
+        for i, slot_idx in enumerate(self.shuffled_slot_indices[:5]):  # 只显示前5个
+            logger.debug(f"  {i+1}. {self.placeable_slots[slot_idx]} - 面积: {self.slot_areas[slot_idx]:.2f}")
+        if len(self.shuffled_slot_indices) > 5:
+            logger.debug(f"  ... 共 {len(self.shuffled_slot_indices)} 个槽位")
+        
         return self._get_obs(), self._get_info(terminated=False)
     
     def step(self, action: int) -> Tuple[Dict, float, bool, bool, Dict]:
