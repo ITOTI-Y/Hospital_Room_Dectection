@@ -274,6 +274,9 @@ class RLConfig:
         # --- 软约束奖励权重 ---
         self.REWARD_TIME_WEIGHT: float = 1.0
         self.REWARD_ADJACENCY_WEIGHT: float = 0.1
+        self.REWARD_PLACEMENT_BONUS: float = 1.0  # 成功放置一个科室的即时奖励
+        self.REWARD_EMPTY_SLOT_PENALTY: float = 5.0  # 每个空槽位的最终惩罚
+        self.REWARD_SCALE_FACTOR: float = 10000.0  # 奖励缩放因子, 仅对加权总时间成本有效
 
         # --- 断点续训配置 ---
         self.RESUME_TRAINING: bool = False  # 是否启用断点续训

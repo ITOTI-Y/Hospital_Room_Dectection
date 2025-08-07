@@ -4,7 +4,6 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 from typing import List, Dict, Any, Tuple, Optional
-from collections import defaultdict
 
 from src.config import RLConfig
 from src.rl_optimizer.data.cache_manager import CacheManager
@@ -126,6 +125,7 @@ class LayoutEnv(gym.Env):
             current_slot_idx = self.shuffled_slot_indices[self.current_step]
             self.skipped_slots.add(current_slot_idx)
             logger.debug(f"跳过槽位 {self.placeable_slots[current_slot_idx]} (索引: {current_slot_idx})")
+            immediate_reward = 0.0  # 跳过动作不给奖励
         else:
             # 检查科室是否已被放置
             if self.placed_mask[action]:
@@ -143,6 +143,9 @@ class LayoutEnv(gym.Env):
             self.layout[slot_to_fill] = action + 1  # 动作是科室索引，存储时+1
             self.placed_mask[action] = True
             logger.debug(f"在槽位 {self.placeable_slots[slot_to_fill]} 放置科室 {self.placeable_depts[action]}")
+            
+            # 成功放置一个科室，给予即时奖励
+            immediate_reward = self.config.REWARD_PLACEMENT_BONUS
         
         # 更新步骤计数
         self.current_step += 1
@@ -152,11 +155,13 @@ class LayoutEnv(gym.Env):
         all_slots_processed = (self.current_step >= self.num_slots)
         terminated = all_departments_placed or all_slots_processed
         
-        # 如果终止但还有未放置的科室，需要特殊处理
-        if terminated and not all_departments_placed:
-            logger.warning(f"Episode终止但仍有 {sum(~self.placed_mask)} 个科室未放置")
+        # 计算奖励：即时奖励（成功放置）+ 最终奖励（终止时的总体评分）
+        if terminated:
+            self.cached_final_reward = self._calculate_final_reward()  # 缓存最终奖励，避免重复计算
+            reward = immediate_reward + self.cached_final_reward
+        else:
+            reward = immediate_reward  # 只有即时奖励
         
-        reward = self._calculate_reward() if terminated else 0.0
         info = self._get_info(terminated)
         
         # 调试日志：检查episode结束时的info内容
@@ -206,12 +211,13 @@ class LayoutEnv(gym.Env):
             # 计算时间成本（只基于已放置的科室）
             if num_placed_depts > 0:
                 raw_time_cost = self.cc.calculate_total_cost(placed_depts)
+                time_reward = -raw_time_cost / self.config.REWARD_SCALE_FACTOR
             else:
                 raw_time_cost = 0.0
+                time_reward = -1000.0
             
-            # 计算缩放后的奖励
-            scaled_time_reward = -raw_time_cost / 1e4 if raw_time_cost > 0 else 0.0
-            empty_penalty = num_empty_slots * self.config.EMPTY_SLOT_PENALTY_FACTOR / 1e4
+            # 计算空槽位惩罚
+            empty_penalty = -num_empty_slots * self.config.REWARD_EMPTY_SLOT_PENALTY
             
             # 调试日志：确认传递的是原始值
             if logger.isEnabledFor(20):  # INFO级别
@@ -221,13 +227,15 @@ class LayoutEnv(gym.Env):
             # Episode结束时添加详细信息
             info['episode'] = {
                 'time_cost': raw_time_cost,  # 原始时间成本
-                'scaled_time_reward': scaled_time_reward,  # 缩放后的时间奖励
+                'time_reward': time_reward,  # 时间奖励部分
                 'empty_penalty': empty_penalty,  # 空槽位惩罚
+                'placement_bonus': num_placed_depts * self.config.REWARD_PLACEMENT_BONUS,  # 成功放置的累积奖励
+                'final_reward': self.cached_final_reward if hasattr(self, 'cached_final_reward') else 0.0,  # 使用缓存的最终奖励
                 'num_placed_depts': num_placed_depts,  # 放置的科室数
                 'num_empty_slots': num_empty_slots,  # 空槽位数
                 'layout': final_layout_depts.copy(),  # 完整布局（包括None）
                 'placed_layout': placed_depts.copy(),  # 只包含已放置的科室
-                'r': self._calculate_reward(),  # 完整的奖励值
+                'r': time_reward + empty_penalty + num_placed_depts * self.config.REWARD_PLACEMENT_BONUS,  # 总奖励
                 'l': self.current_step  # episode长度
             }
             
@@ -277,6 +285,63 @@ class LayoutEnv(gym.Env):
             action_mask[self.SKIP_ACTION] = True
         
         return action_mask
+    
+    def _calculate_final_reward(self) -> float:
+        """
+        在回合结束时，计算最终奖励。
+        
+        最终奖励 = -(路程加权时间) / 缩放因子 - 空槽位数 * 惩罚
+        注意：成功放置的奖励已经在每步动作时给出
+        """
+        # 构建最终布局（包括空槽位）
+        final_layout_depts = []
+        placed_depts = []
+        
+        for slot_idx in range(self.num_slots):
+            dept_id = self.layout[slot_idx]
+            if dept_id > 0:
+                dept_name = self.placeable_depts[dept_id - 1]
+                final_layout_depts.append(dept_name)
+                placed_depts.append(dept_name)
+            else:
+                final_layout_depts.append(None)
+        
+        # 计算空槽位数量
+        num_empty_slots = len(self.skipped_slots)
+        num_placed_depts = len(placed_depts)
+        
+        # 如果终止但还有未放置的科室，显示警告
+        if num_placed_depts < self.num_depts:
+            num_unplaced = self.num_depts - num_placed_depts
+            logger.warning(f"Episode终止但仍有 {num_unplaced} 个科室未放置")
+        
+        logger.debug(f"布局统计: 放置 {num_placed_depts} 个科室，跳过 {num_empty_slots} 个槽位")
+        
+        # 1. 计算时间成本（只基于已放置的科室）
+        if num_placed_depts > 0:
+            raw_time_cost = self.cc.calculate_total_cost(placed_depts)
+            # 将时间成本转换为负奖励（时间越少越好）
+            time_reward = -raw_time_cost / self.config.REWARD_SCALE_FACTOR
+        else:
+            # 如果没有放置任何科室，给予极大惩罚
+            raw_time_cost = float('inf')
+            time_reward = -1000.0
+            logger.warning("没有放置任何科室，给予极大惩罚")
+        
+        # 2. 计算空槽位惩罚
+        empty_slot_penalty = -num_empty_slots * self.config.REWARD_EMPTY_SLOT_PENALTY
+        
+        # 3. 计算成功放置奖励（累积值）
+        placement_bonus = num_placed_depts * self.config.REWARD_PLACEMENT_BONUS
+        
+        # 4. 计算总奖励
+        total_reward = time_reward * self.config.REWARD_TIME_WEIGHT + empty_slot_penalty + placement_bonus
+        
+        logger.info(f"最终奖励计算: 时间成本={raw_time_cost:.2f}, "
+                   f"时间奖励={time_reward:.2f}, 成功放置奖励={placement_bonus:.2f}, "
+                   f"空槽位惩罚={empty_slot_penalty:.2f}, 总奖励={total_reward:.2f}")
+        
+        return total_reward
     
     def _calculate_reward(self) -> float:
         """
