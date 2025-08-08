@@ -218,7 +218,7 @@ class PPOAgent:
                 n_epochs=self.config.NUM_EPOCHS,
                 gamma=self.config.GAMMA,
                 gae_lambda=self.config.GAE_LAMBDA,
-                clip_range=self.config.CLIP_EPS,
+                clip_range=self.config.CLIP_RANGE,
                 ent_coef=self.config.ENT_COEF,
                 verbose=1,
                 tensorboard_log=str(log_dir / 'tensorboard_logs'),

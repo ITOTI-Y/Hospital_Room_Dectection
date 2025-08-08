@@ -13,7 +13,7 @@ from typing import List, Dict, Tuple, Optional, Any
 from scipy.spatial import KDTree
 
 from src.config import NetworkConfig
-from src.graph.node import Node
+from .node import Node
 from .network import Network  # The single-floor network builder
 from .floor_manager import FloorManager
 

@@ -1,6 +1,6 @@
 import pandas as pd
 from pathlib import Path
-from typing import Dict, List, Tuple, Any
+from typing import Dict, List, Any
 from collections import defaultdict
 import itertools
 
@@ -98,7 +98,7 @@ class CacheManager:
         logger.info(f"初始流量分布已生成并缓存至: {self.config.TRAFFIC_DISTRIBUTION_JSON}")
         return traffic_distribution
     
-    def get_resolved_pathways(self) -> List[Tuple[List[str], float]]:
+    def get_resolved_pathways(self) -> List[Dict[str, Any]]:
         """
         获取最终解析出的流线列表。这是调度核心，如果缓存不存在则触发解析。
         """
@@ -122,7 +122,7 @@ class CacheManager:
         logger.info(f"所有流线已解析并缓存 ({len(resolved_pathways)}条): {self.config.RESOLVED_PATHWAYS_PKL}")
         return resolved_pathways
     
-    def _resolve_single_template(self, template: Dict[str, Any]) -> List[Tuple[List[str], float]]:
+    def _resolve_single_template(self, template: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
         根据单个流程模板，高效地解析出所有可能的具体流线及其权重。
         改进版：使用生成器和批处理来避免内存爆炸。
@@ -131,7 +131,7 @@ class CacheManager:
             template (Dict[str, Any]): 单个就医流程的模板字典。
 
         Returns:
-            List[Tuple[List[str], float]]: 一个包含(具体流线, 最终权重)元组的列表。
+            List[Dict[str, Any]]: 一个包含流线字典的列表，每个字典包含process_id、path和weight字段。
         """
         base_weight = template.get('base_weight', 1.0)
         max_combinations = getattr(self.config, 'MAX_PATHWAY_COMBINATIONS', 10000)
@@ -192,7 +192,7 @@ class CacheManager:
             
         return pathways
     
-    def _resolve_template_sampled(self, template: Dict[str, Any], max_samples: int) -> List[Tuple[List[str], float]]:
+    def _resolve_template_sampled(self, template: Dict[str, Any], max_samples: int) -> List[Dict[str, Any]]:
         """
         使用采样策略解析模板，避免组合爆炸。
         """

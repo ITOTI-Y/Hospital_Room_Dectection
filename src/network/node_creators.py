@@ -14,8 +14,8 @@ from scipy.spatial import KDTree
 from typing import Dict, Tuple, List, Any, Optional
 
 from src.config import NetworkConfig
-from src.graph.node import Node
-from src.graph.graph_manager import GraphManager
+from .node import Node
+from .graph_manager import GraphManager
 from src.image_processing.processor import ImageProcessor
 
 logger = logging.getLogger(__name__)

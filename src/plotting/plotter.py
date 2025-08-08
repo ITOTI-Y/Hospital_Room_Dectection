@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 from typing import Dict, Tuple, Any, List, Optional
 
 from src.config import NetworkConfig  # 依赖配置类
-from src.graph.node import Node     # 依赖节点类
+from src.network.node import Node     # 依赖节点类
 
 logger = logging.getLogger(__name__)
 

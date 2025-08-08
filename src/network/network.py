@@ -6,13 +6,13 @@ import numpy as np
 import networkx as nx
 import logging
 from typing import Dict, Tuple, Any, List, Optional
-from scipy.spatial import KDTree  # For connecting doors to mesh nodes
+from scipy.spatial import KDTree  # 用于连接门节点到mesh节点
 
 from src.config import NetworkConfig
-from src.graph.graph_manager import GraphManager
-from src.graph.node import Node
+from .graph_manager import GraphManager
+from .node import Node
 from src.image_processing.processor import ImageProcessor
-from .node_creators import (  # Assuming node_creators.py is in the same directory
+from .node_creators import (  # 节点创建器模块
     BaseNodeCreator,
     RoomNodeCreator,
     VerticalNodeCreator,
@@ -50,12 +50,12 @@ class Network:
                                       when processing multiple floors in parallel.
         """
         self.config = config
-        self.color_map_data = color_map_data  # Passed to creators
+        self.color_map_data = color_map_data  # 传递给创建器的颜色映射数据
 
         self.image_processor = ImageProcessor(config, color_map_data)
         self.graph_manager = GraphManager(id_generator_start_value)
 
-        # Initialize node creators
+        # 初始化节点创建器
         self._node_creators: List[BaseNodeCreator] = [
             RoomNodeCreator(config, color_map_data,
                             self.image_processor, self.graph_manager),
@@ -66,7 +66,7 @@ class Network:
             PedestrianNodeCreator(config, color_map_data,
                                   self.image_processor, self.graph_manager),
             # Outside creator might be conditional based on 'outside' flag in run()
-            # Connection creator should run after rooms, vertical, pedestrian, outside areas are marked/created
+            # 连接创建器应该在房间、垂直、行人、室外区域被标记/创建之后运行
             ConnectionNodeCreator(config, color_map_data,
                                   self.image_processor, self.graph_manager)
         ]
@@ -92,19 +92,19 @@ class Network:
 
         # id_map stores the ID of the node occupying each pixel, or special area IDs
         self._id_map = np.full((self._image_height, self._image_width),
-                               self.config.BACKGROUND_ID_MAP_VALUE, dtype=np.int32)  # Use int32 for IDs
+                               self.config.BACKGROUND_ID_MAP_VALUE, dtype=np.int32)  # 使用int32类型存储ID
 
-        # This ensures 'out' doors can be identified even if OutsideNodeCreator doesn't run
+        # 这确保即使OutsideNodeCreator不运行，'out'类型的门也能被正确识别
         # to create detailed outside mesh nodes.
-        if self.config.OUTSIDE_TYPES:  # Check if there are any outside types defined
+        if self.config.OUTSIDE_TYPES:  # 检查是否定义了室外类型
             for outside_type_name in self.config.OUTSIDE_TYPES:
-                # Create a mask for this outside type from the quantized image
+                # 从量化图像中为此室外类型创建掩码
                 # We don't need full morphology here, just the raw areas.
                 # ConnectionNodeCreator will use its own dilation.
                 outside_mask = self._outside_node_creator._create_mask_for_type(
                     self._current_image_data,
                     outside_type_name,
-                    apply_morphology=True  # Apply basic morphology to clean up the mask
+                    apply_morphology=True  # 应用基础形态学操作清理掩码
                 )
                 if outside_mask is not None:
                     self._id_map[outside_mask !=
@@ -128,12 +128,10 @@ class Network:
             creator.create_nodes(self._current_image_data,
                                  self._id_map, z_level)
 
-        # Conditionally run the OutsideNodeCreator to create actual mesh nodes for outside
-        # FIXME: 不需要室外节点
+        # 注意：室外节点创建已被禁用，因为在医院室内布局优化中不需要室外节点
+        # 如果将来需要处理室外区域，可以通过配置参数process_outside_nodes来启用
         # if process_outside_nodes:
-        #     logger.info(f"Running creator: {self._outside_node_creator.__class__.__name__} (for mesh)")
-        #     # Note: _create_mesh_nodes_for_mask in OutsideNodeCreator also sets id_map,
-        #     # but it's okay as it will set the same OUTSIDE_ID_MAP_VALUE before creating nodes.
+        #     logger.info(f"运行节点创建器: {self._outside_node_creator.__class__.__name__} (mesh节点)")
         #     self._outside_node_creator.create_nodes(
         #         self._current_image_data, self._id_map, z_level)
 

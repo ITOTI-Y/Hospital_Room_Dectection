@@ -3,7 +3,7 @@
 import pathlib
 from typing import Dict, Tuple, List, Any, Optional
 
-# Global COLOR_MAP - Consider encapsulating or making it part of a config loader
+# 全局颜色映射表 - 医院区域类型的RGB颜色编码
 COLOR_MAP: Dict[Tuple[int, int, int], Dict[str, Any]] = {
     (244, 67, 54): {'name': '内诊药房', 'time': 46},
     (0, 150, 136): {'name': '挂号收费', 'time': 79},
@@ -68,7 +68,7 @@ class NetworkConfig:
         self.RESULT_PATH: pathlib.Path = pathlib.Path(__file__).parent.parent / 'results' / 'network'
         self.DEBUG_PATH: pathlib.Path = pathlib.Path(__file__).parent.parent / 'debug'
         self.IMAGE_ROTATE: int = 180
-        self.AREA_THRESHOLD: int = 60  # Minimum area for a component to be considered a node
+        self.AREA_THRESHOLD: int = 60  # 被视为节点的连通区域最小面积阈值
 
         # Node Type Definitions (derived from COLOR_MAP)
         self.ALL_TYPES: List[str] = [v['name'] for v in color_map_data.values()]
@@ -85,20 +85,20 @@ class NetworkConfig:
         self.PEDESTRIAN_TYPES: List[str] = [name for name in ['走廊'] if name in self.ALL_TYPES]
         self.OUTSIDE_TYPES: List[str] = [name for name in ['室外'] if name in self.ALL_TYPES]
 
-        # Grid and Special IDs for pixel-level identification in id_map
-        self.GRID_SIZE: int = 40  # Base grid size for mesh node generation
-        self.OUTSIDE_ID_MAP_VALUE: int = -1  # Special ID for 'outside' areas in the id_map
-        self.BACKGROUND_ID_MAP_VALUE: int = -2 # Special ID for 'background' in the id_map
-        self.PEDESTRIAN_ID_MAP_VALUE: int = -3 # Special ID for 'pedestrian' areas in the id_map
+        # 网格和特殊ID用于在id_map中进行像素级别的识别
+        self.GRID_SIZE: int = 40  # mesh节点生成的基础网格大小
+        self.OUTSIDE_ID_MAP_VALUE: int = -1  # id_map中'室外'区域的特殊ID
+        self.BACKGROUND_ID_MAP_VALUE: int = -2  # id_map中'背景'区域的特殊ID
+        self.PEDESTRIAN_ID_MAP_VALUE: int = -3  # id_map中'行人通道'区域的特殊ID
 
-        # Node Property Times
-        self.OUTSIDE_MESH_TIMES_FACTOR: int = 2  # Multiplier for grid size and time for outside nodes
-        self.PEDESTRIAN_TIME: float = 1.75  # Default time for pedestrian nodes
+        # 节点属性时间配置
+        self.OUTSIDE_MESH_TIMES_FACTOR: int = 2  # 室外节点的网格大小和时间乘数因子
+        self.PEDESTRIAN_TIME: float = 1.75  # 行人节点的默认通行时间
         self.CONNECTION_TIME: float = 3.0  # Default time for connection nodes (e.g., doors)
 
-        # Plotting and Visualization
-        self.IMAGE_MIRROR: bool = True  # Whether to mirror the image horizontally in plots
-        self.NODE_COLOR_FROM_MAP: bool = True  # Use colors from COLOR_MAP for nodes in plots
+        # 绘图和可视化配置
+        self.IMAGE_MIRROR: bool = True  # 是否在绘图中水平镜像图像
+        self.NODE_COLOR_FROM_MAP: bool = True  # 在绘图中是否使用COLOR_MAP的颜色显示节点
 
         self.NODE_SIZE_DEFAULT: int = 10
         self.NODE_SIZE_PEDESTRIAN: int = 5
@@ -113,9 +113,9 @@ class NetworkConfig:
         self.VERTICAL_EDGE_COLOR: str = "#ff7f0e"
         self.EDGE_WIDTH: float = 0.5
 
-        # SuperNetwork Specific
+        # SuperNetwork多层网络专用配置
         self.DEFAULT_FLOOR_HEIGHT: float = 10.0
-        self.DEFAULT_VERTICAL_CONNECTION_TOLERANCE: int = 0 # Default pixel distance for connecting vertical nodes across floors
+        self.DEFAULT_VERTICAL_CONNECTION_TOLERANCE: int = 0  # 跨楼层连接垂直节点的默认像素距离容差
         # Estimated max nodes per floor. Used for pre-allocating ID ranges in multi-processing.
         # Should be an overestimate to avoid ID collisions.
         self.ESTIMATED_MAX_NODES_PER_FLOOR: int = 10000

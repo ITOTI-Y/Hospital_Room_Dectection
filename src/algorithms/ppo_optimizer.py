@@ -228,7 +228,7 @@ class PPOOptimizer(BaseOptimizer):
         policy_kwargs = {
             "features_extractor_class": LayoutTransformer,
             "features_extractor_kwargs": {
-                "features_dim": self.config.EMBEDDING_DIM,  # 使用统一的配置属性
+                "features_dim": self.config.FEATURES_DIM,  # 使用统一的配置属性
                 "config": self.config
             },
             "net_arch": dict(pi=[self.config.POLICY_NET_ARCH] * self.config.POLICY_NET_LAYERS,

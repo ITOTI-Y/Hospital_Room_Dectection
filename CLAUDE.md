@@ -32,7 +32,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
    - 详细分析报告生成
    - 可视化图表输出
 
-### 关键模块
+## 关键模块
 
 - `src/core/`: 核心控制模块
   - `network_generator.py`: 网络生成器（整合SuperNetwork功能）
@@ -49,7 +49,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `network.py`: 单层网络生成器
   - `super_network.py`: 多层网络管理器
   - `node_creators.py`: 各类节点创建策略
-- `src/rl_optimizer/`: 强化学习优化器（保留原有实现）
+  - `node.py`: 节点定义类
+  - `graph_manager.py`: 图管理器
+- `src/rl_optimizer/`: 强化学习优化器
   - `env/cost_calculator.py`: 成本计算器（所有算法共用）
   - `env/layout_env.py`: 布局优化环境
   - `data/cache_manager.py`: 数据缓存管理
@@ -57,6 +59,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `src/analysis/`: 分析工具
   - `travel_time.py`: 行程时间计算
   - `process_flow.py`: 就医流程分析
+  - `word_detect.py`: 词汇检测工具
+- `src/image_processing/`: 图像处理模块
+- `src/plotting/`: 可视化模块
 - `src/config.py`: 配置管理（NetworkConfig、RLConfig）
 
 ## 代码规范
@@ -314,8 +319,11 @@ logs/
   - 清理相关引用：删除metrics_callback相关的日志输出和统计信息显示
   - 保持核心功能：PPO算法训练功能完全保留，仅移除额外的指标监控层
   - 简化日志输出：训练过程专注于算法本身的基础信息，减少冗余显示
-- 2025-08-07: **修改PPO算法槽位填充顺序** - 将随机槽位顺序改为按面积从小到大排序：
-  - 修改LayoutEnv.reset()方法：使用np.argsort(self.slot_areas)替代随机打乱
-  - 智能体现在先处理面积最小的槽位，最后处理面积最大的槽位
-  - 添加调试日志显示槽位填充顺序和对应面积
-  - 预期效果：简化约束满足，优化决策过程
+- 2025-08-08: **代码清理和文档重构** - 完成项目结构优化和文档重写：
+  - 删除无用文件和目录：debug/、layout_opt.prof、data/model/等
+  - 移除废弃模块：src/graph/和src/optimization/
+  - 创建简化的图管理组件：src/network/node.py和graph_manager.py
+  - 修复所有导入引用，更新为新的模块路径
+  - 重写README.md，基于实际代码结构提供准确的使用指南
+  - 保留所有有用功能模块，包括词汇检测等分析工具
+  - 验证系统功能正常，确保清理后所有命令正常工作

@@ -8,7 +8,7 @@ import logging  # Added for logging
 from typing import Dict, List, Union, Optional
 
 from src.config import NetworkConfig
-from src.graph.node import Node
+from src.network.node import Node
 
 # Get a logger for this module
 logger = logging.getLogger(__name__)

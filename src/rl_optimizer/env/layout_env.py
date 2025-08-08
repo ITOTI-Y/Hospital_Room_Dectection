@@ -410,7 +410,8 @@ class LayoutEnv(gym.Env):
     def _calculate_adjacency_reward(self, _final_layout: List[str]) -> float:
         """
         计算偏好相邻软约束的奖励。
-        (TODO: 需要一个可靠的邻接关系数据源)
+        注意：当前使用基于行程时间的简化邻接判断，如需更精确的邻接关系，
+        可以通过config.py中的PREFERRED_ADJACENCY配置或集成真实的平面图邻接分析。
         """
         # 这是一个示例实现，实际部署时需要替换为真实邻接数据
         # 假设 travel_times 矩阵中时间小于某个阈值（例如 10）即为相邻
