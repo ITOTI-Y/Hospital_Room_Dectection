@@ -104,6 +104,8 @@ class LayoutEnv(gym.Env):
         self.shuffled_slot_indices = np.arange(self.num_slots)
         # 跟踪跳过的槽位
         self.skipped_slots = set()
+        # 势函数相关状态
+        self.previous_potential = 0.0  # 上一步的势函数值
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Dict, Dict]:
         """重置环境，按面积从小到大排序槽位，并返回初始观测。"""
@@ -111,6 +113,9 @@ class LayoutEnv(gym.Env):
         self._initialize_state_variables()
         # 修改：按槽位面积从小到大排序，而不是随机打乱
         self.shuffled_slot_indices = np.argsort(self.slot_areas)
+        
+        # 初始化势函数值（空布局的势函数为0）
+        self.previous_potential = 0.0
         
         # 添加调试日志，显示槽位填充顺序
         logger.debug(f"槽位填充顺序（按面积从小到大）:")
@@ -127,6 +132,10 @@ class LayoutEnv(gym.Env):
         if not (0 <= action <= self.num_depts):  # 包括跳过动作
             logger.error(f"无效的动作索引: {action}，有效范围是 [0, {self.num_depts}]")
             return self._get_obs(), self.config.INVALID_ACTION_PENALTY, True, False, self._get_info(terminated=False)
+        
+        # 如果启用势函数奖励，计算当前状态的势函数
+        if self.config.ENABLE_POTENTIAL_REWARD:
+            current_potential = self._calculate_potential()
         
         # 检查是否为跳过动作
         if action == self.SKIP_ACTION:
@@ -164,12 +173,35 @@ class LayoutEnv(gym.Env):
         all_slots_processed = (self.current_step >= self.num_slots)
         terminated = all_departments_placed or all_slots_processed
         
-        # 计算奖励：即时奖励（成功放置）+ 最终奖励（终止时的总体评分）
-        if terminated:
-            self.cached_final_reward = self._calculate_final_reward()  # 缓存最终奖励，避免重复计算
-            reward = immediate_reward + self.cached_final_reward
+        # 计算奖励
+        if self.config.ENABLE_POTENTIAL_REWARD:
+            # 计算新状态的势函数
+            new_potential = self._calculate_potential()
+            # 势函数奖励 = γ * Φ(s') - Φ(s)
+            potential_reward = self.config.GAMMA * new_potential - current_potential
+            potential_reward *= self.config.POTENTIAL_REWARD_WEIGHT
+            
+            # 更新势函数值
+            self.previous_potential = new_potential
+            
+            if terminated:
+                # 终止时的奖励 = 即时奖励 + 势函数奖励 + 最终奖励
+                self.cached_final_reward = self._calculate_final_reward()
+                reward = immediate_reward + potential_reward + self.cached_final_reward
+                # 只在回合结束时显示势函数奖励汇总
+                logger.info(f"势函数奖励汇总: 最终势={new_potential:.4f}, 势函数总奖励={potential_reward:.4f}")
+            else:
+                # 非终止时的奖励 = 即时奖励 + 势函数奖励
+                reward = immediate_reward + potential_reward
+                # 调试级别的日志，正常训练时不显示
+                logger.debug(f"势函数奖励计算: 当前势={current_potential:.4f}, 新势={new_potential:.4f}, 势函数奖励={potential_reward:.4f}")
         else:
-            reward = immediate_reward  # 只有即时奖励
+            # 原有奖励机制：即时奖励（成功放置）+ 最终奖励（终止时的总体评分）
+            if terminated:
+                self.cached_final_reward = self._calculate_final_reward()  # 缓存最终奖励，避免重复计算
+                reward = immediate_reward + self.cached_final_reward
+            else:
+                reward = immediate_reward  # 只有即时奖励
         
         info = self._get_info(terminated)
         
@@ -418,6 +450,42 @@ class LayoutEnv(gym.Env):
         reward = 0.0
         # ... 实现软约束奖励计算 ...
         return reward
+    
+    def _calculate_potential(self) -> float:
+        """
+        计算当前布局状态的势函数值。
+        势函数 Φ(layout) = -1 * (所有已放置科室对的加权通行时间之和)
+        
+        Returns:
+            float: 当前状态的势函数值（负的时间成本）
+        """
+        # 构建完整的布局（包括空槽位）
+        layout_with_nulls = []
+        placed_depts = []
+        
+        for slot_idx in range(self.num_slots):
+            dept_id = self.layout[slot_idx]
+            if dept_id > 0:
+                dept_name = self.placeable_depts[dept_id - 1]
+                layout_with_nulls.append(dept_name)
+                placed_depts.append(dept_name)
+            else:
+                layout_with_nulls.append(None)
+        
+        # 如果没有放置科室或只有一个科室，势函数为0
+        if len(placed_depts) <= 1:
+            return 0.0
+        
+        # 计算已放置科室的总时间成本
+        # 传递完整布局（包含None），让CostCalculator正确映射科室到槽位
+        time_cost = self.cc.calculate_total_cost(layout_with_nulls)
+        
+        # 势函数为负的时间成本（缩放后）
+        potential = -time_cost / self.config.REWARD_SCALE_FACTOR
+        
+        logger.debug(f"势函数计算: 已放置{len(placed_depts)}个科室, 时间成本={time_cost:.2f}, 势函数值={potential:.6f}")
+        
+        return potential
     
     def render(self, mode="human"):
         """(可选) 渲染环境状态，用于调试。"""

@@ -157,6 +157,11 @@ class CostCalculator:
     def _get_time_vector(self, layout: List[str]) -> np.ndarray:
         """
         内部辅助函数，根据布局计算所有科室对的通行时间向量（使用LRU缓存优化）。
+        
+        Args:
+            layout: 科室名称列表。可以是：
+                   1. 完整布局（长度=槽位数，包含None）
+                   2. 仅已放置科室的列表（不包含None）
         """
         # 创建布局的元组作为缓存键
         layout_key = tuple(layout)
@@ -168,10 +173,14 @@ class CostCalculator:
         
         time_vector = np.zeros(self.num_dept_pairs, dtype=np.float32)
 
-        # 创建一个从科室到其当前所在槽位（原始节点名）的映射
-        # layout 的索引是槽位索引，值是科室名
-        # self.placeable_slots 的索引是槽位索引，值是原始节点名
-        dept_to_slot_node = {dept: self.placeable_slots[i] for i, dept in enumerate(layout) if dept is not None}
+        # 判断layout是完整布局还是仅已放置科室
+        if len(layout) == self.num_slots:
+            # 完整布局：索引对应槽位
+            dept_to_slot_node = {dept: self.placeable_slots[i] for i, dept in enumerate(layout) if dept is not None}
+        else:
+            # 仅已放置科室：需要为每个科室分配一个虚拟槽位
+            # 使用科室名本身作为节点名（简化处理）
+            dept_to_slot_node = {dept: dept for dept in layout if dept is not None}
 
         # 遍历所有需要计算时间的科室对
         for pair, col_idx in self.pair_to_col.items():

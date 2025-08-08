@@ -214,6 +214,7 @@ class RLConfig:
 
         # --- Transformer模型配置 ---
         self.EMBEDDING_DIM: int = 128  # 嵌入维度
+        self.FEATURES_DIM: int = 128  # 特征提取器输出的特征维度
         self.TRANSFORMER_HEADS: int = 4  # 多头注意力头数
         self.TRANSFORMER_LAYERS: int = 4  # Transformer层数
         self.TRANSFORMER_DROPOUT: float = 0.1  # Dropout比例
@@ -277,6 +278,10 @@ class RLConfig:
         self.REWARD_PLACEMENT_BONUS: float = 1.0  # 成功放置一个科室的即时奖励
         self.REWARD_EMPTY_SLOT_PENALTY: float = 5.0  # 每个空槽位的最终惩罚
         self.REWARD_SCALE_FACTOR: float = 10000.0  # 奖励缩放因子, 仅对加权总时间成本有效
+        
+        # --- 势函数奖励配置 ---
+        self.ENABLE_POTENTIAL_REWARD: bool = True  # 是否启用势函数奖励
+        self.POTENTIAL_REWARD_WEIGHT: float = 1.0  # 势函数奖励权重
 
         # --- 断点续训配置 ---
         self.RESUME_TRAINING: bool = False  # 是否启用断点续训
