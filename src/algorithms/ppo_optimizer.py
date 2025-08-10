@@ -13,6 +13,7 @@ from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback as EvalCa
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
+from stable_baselines3.common.evaluation import evaluate_policy
 
 from src.algorithms.base_optimizer import BaseOptimizer, OptimizationResult
 from src.algorithms.constraint_manager import ConstraintManager
@@ -27,6 +28,85 @@ from src.rl_optimizer.data.cache_manager import CacheManager
 from src.config import RLConfig
 
 logger = setup_logger(__name__)
+
+
+class PretrainedEvalCallback(EvalCallback):
+    """
+    扩展的评估回调，支持从预训练模型设置初始best_mean_reward
+    """
+    
+    def __init__(
+        self,
+        eval_env,
+        pretrained_model_path: Optional[str] = None,
+        best_model_save_path: Optional[str] = None,
+        log_path: Optional[str] = None,
+        eval_freq: int = 10000,
+        n_eval_episodes: int = 5,
+        deterministic: bool = True,
+        render: bool = False,
+        verbose: int = 1,
+        warn: bool = True
+    ):
+        super().__init__(
+            eval_env=eval_env,
+            best_model_save_path=best_model_save_path,
+            log_path=log_path,
+            eval_freq=eval_freq,
+            n_eval_episodes=n_eval_episodes,
+            deterministic=deterministic,
+            render=render,
+            verbose=verbose,
+            warn=warn
+        )
+        self.pretrained_model_path = pretrained_model_path
+        
+    def _init_callback(self) -> None:
+        """初始化回调，如果有预训练模型则评估其性能"""
+        super()._init_callback()
+        
+        if self.pretrained_model_path and Path(self.pretrained_model_path).exists():
+            logger.info(f"正在评估预训练模型性能: {self.pretrained_model_path}")
+            
+            try:
+                # 加载预训练模型
+                pretrained_model = MaskablePPO.load(
+                    self.pretrained_model_path,
+                    env=self.eval_env,
+                    device='cuda' if torch.cuda.is_available() else 'cpu'
+                )
+                
+                # 评估预训练模型
+                episode_rewards, _ = evaluate_policy(
+                    pretrained_model,
+                    self.eval_env,
+                    n_eval_episodes=self.n_eval_episodes,
+                    render=self.render,
+                    deterministic=self.deterministic,
+                    return_episode_rewards=True,
+                    warn=self.warn
+                )
+                
+                # 计算平均奖励
+                mean_reward = np.mean(episode_rewards)
+                std_reward = np.std(episode_rewards)
+                
+                # 设置为初始best_mean_reward
+                self.best_mean_reward = float(mean_reward)
+                
+                logger.info(f"预训练模型初始性能: {mean_reward:.2f} +/- {std_reward:.2f}")
+                logger.info(f"设置初始best_mean_reward = {self.best_mean_reward:.2f}")
+                
+                # 记录到日志
+                if self.logger:
+                    self.logger.record("eval/initial_pretrained_reward", float(mean_reward))
+                    self.logger.record("eval/initial_pretrained_std", float(std_reward))
+                    
+            except Exception as e:
+                logger.error(f"评估预训练模型时发生错误: {e}")
+                logger.info("将使用默认的best_mean_reward = -inf")
+                # 出错时保持默认行为
+                self.best_mean_reward = -np.inf
 
 
 def get_action_mask_from_info(infos: List[Dict]) -> np.ndarray:
@@ -280,12 +360,17 @@ class PPOOptimizer(BaseOptimizer):
         log_dir = self.config.LOG_PATH / f"ppo_layout_{timestamp}"
         result_dir = self.config.RESULT_PATH / "model" / f"ppo_layout_{timestamp}"
         
-        # 如果是恢复训练，使用原有目录
+        # 如果是恢复训练，尝试使用原有目录
         if self.resume_model_path:
             checkpoint_path = Path(self.resume_model_path)
-            if "ppo_layout_" in checkpoint_path.parent.name:
-                log_dir = checkpoint_path.parent
-                result_dir = self.config.RESULT_PATH / checkpoint_path.parent.name
+            # 尝试找到包含 ppo_layout_ 的父目录
+            current_path = checkpoint_path.parent
+            while current_path != current_path.parent:  # 直到根目录
+                if "ppo_layout_" in current_path.name:
+                    log_dir = self.config.LOG_PATH / current_path.name
+                    result_dir = self.config.RESULT_PATH / "model" / current_path.name
+                    break
+                current_path = current_path.parent
         
         # 创建目录
         log_dir.mkdir(parents=True, exist_ok=True)
@@ -313,14 +398,34 @@ class PPOOptimizer(BaseOptimizer):
         )
         eval_env = EpisodeInfoVecEnvWrapper(eval_vec_env)
         
-        eval_callback = EvalCallback(
-            eval_env,
-            best_model_save_path=str(result_dir / "best_model"),
-            log_path=str(log_dir / "eval_logs"),
-            eval_freq=self.config.EVAL_FREQUENCY,
-            deterministic=True,
-            render=False
-        )
+        # 判断是否使用预训练模型的评估回调
+        if self.pretrained_model_path or self.resume_model_path:
+            # 使用预训练模型路径（优先使用pretrained_model_path）
+            model_path_for_eval = self.pretrained_model_path or self.resume_model_path
+            
+            logger.info(f"使用PretrainedEvalCallback，基于模型: {model_path_for_eval}")
+            eval_callback = PretrainedEvalCallback(
+                eval_env,
+                pretrained_model_path=model_path_for_eval,
+                best_model_save_path=str(result_dir / "best_model"),
+                log_path=str(log_dir / "eval_logs"),
+                eval_freq=self.config.EVAL_FREQUENCY,
+                n_eval_episodes=5,
+                deterministic=True,
+                render=False,
+                verbose=1
+            )
+        else:
+            # 使用标准评估回调
+            logger.info("使用标准EvalCallback")
+            eval_callback = EvalCallback(
+                eval_env,
+                best_model_save_path=str(result_dir / "best_model"),
+                log_path=str(log_dir / "eval_logs"),
+                eval_freq=self.config.EVAL_FREQUENCY,
+                deterministic=True,
+                render=False
+            )
         callbacks.append(eval_callback)
         
         # 开始训练

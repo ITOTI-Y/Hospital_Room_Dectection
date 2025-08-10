@@ -358,3 +358,11 @@ logs/
   - 修改AlgorithmManager：正确传递预训练模型路径到PPO优化器
   - 使用示例：`uv run python main.py --mode optimize --algorithm ppo --pretrained-model-path /path/to/best_model.zip --total-timesteps 10000`
   - 验证功能：成功从已训练模型继续训练，保持原有性能水平
+- 2025-08-11: **改进继续训练的最佳模型保存机制** - 确保只有性能真正提升时才保存新的最佳模型：
+  - 创建PretrainedEvalCallback类：扩展EvalCallback，支持预评估预训练模型性能
+  - 预训练模型评估：在_init_callback中加载并评估预训练模型，获取其平均reward
+  - 设置初始基准：将预训练模型的性能作为best_mean_reward的初始值（而非-inf）
+  - 智能回调选择：PPOOptimizer根据是否有预训练模型自动选择合适的评估回调
+  - 关键优势：避免性能下降的模型被错误标记为"最佳"，确保模型质量持续提升
+  - 向后兼容：正常训练（无预训练模型）时行为完全不变
+  - 验证效果：测试确认预训练模型性能（-99.00）被正确设置为初始基准
