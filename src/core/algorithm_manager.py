@@ -106,6 +106,11 @@ class AlgorithmManager:
         
         logger.info(f"开始运行算法: {algorithm_name}")
         
+        # 生成原始布局（未经优化的基准）
+        original_layout = self.constraint_manager.generate_original_layout()
+        original_cost = self.cost_calculator.calculate_total_cost(original_layout)
+        logger.info(f"原始布局成本: {original_cost:.2f}")
+        
         # 合并参数
         params = self.algorithm_configs[algorithm_name].copy()
         if custom_params:
@@ -128,7 +133,12 @@ class AlgorithmManager:
         # 运行优化
         start_time = time.time()
         try:
-            result = optimizer.optimize(initial_layout=initial_layout, **runtime_params)
+            result = optimizer.optimize(
+                initial_layout=initial_layout,
+                original_layout=original_layout,
+                original_cost=original_cost,
+                **runtime_params
+            )
             result.execution_time = time.time() - start_time
             
             # 存储结果
@@ -165,17 +175,45 @@ class AlgorithmManager:
         logger.info(f"开始运行多个算法: {algorithm_names}")
         logger.info(f"并行执行: {parallel}")
         
+        # 生成共同的原始布局（所有算法使用相同的基准）
+        original_layout = self.constraint_manager.generate_original_layout()
+        original_cost = self.cost_calculator.calculate_total_cost(original_layout)
+        logger.info(f"原始布局成本（所有算法共用）: {original_cost:.2f}")
+        
         results = {}
         
         if parallel:
             # 并行执行（注意：PPO可能需要GPU资源，谨慎并行）
-            results = self._run_algorithms_parallel(algorithm_names, initial_layout, custom_params)
+            results = self._run_algorithms_parallel(algorithm_names, initial_layout, custom_params, 
+                                                   original_layout, original_cost)
         else:
             # 串行执行
             for algorithm_name in algorithm_names:
                 params = custom_params.get(algorithm_name, {}) if custom_params else {}
                 try:
-                    result = self.run_single_algorithm(algorithm_name, initial_layout, params)
+                    # 创建算法实例
+                    optimizer = self._create_optimizer(algorithm_name, params)
+                    
+                    # 准备运行时参数
+                    runtime_params = self.algorithm_configs[algorithm_name].copy()
+                    if params:
+                        runtime_params.update(params)
+                    
+                    # 移除构造函数参数
+                    if algorithm_name == 'simulated_annealing':
+                        for key in ['initial_temperature', 'final_temperature', 'cooling_rate', 'temperature_length']:
+                            runtime_params.pop(key, None)
+                    elif algorithm_name == 'genetic_algorithm':
+                        for key in ['population_size', 'elite_size', 'mutation_rate', 'crossover_rate', 'tournament_size', 'max_age']:
+                            runtime_params.pop(key, None)
+                    
+                    # 运行优化
+                    result = optimizer.optimize(
+                        initial_layout=initial_layout,
+                        original_layout=original_layout,
+                        original_cost=original_cost,
+                        **runtime_params
+                    )
                     results[algorithm_name] = result
                 except Exception as e:
                     logger.error(f"跳过算法 {algorithm_name}，原因: {e}")
@@ -186,13 +224,16 @@ class AlgorithmManager:
     def _run_algorithms_parallel(self, 
                                algorithm_names: List[str],
                                initial_layout: Optional[List[str]],
-                               custom_params: Optional[Dict[str, Dict[str, Any]]]) -> Dict[str, OptimizationResult]:
+                               custom_params: Optional[Dict[str, Dict[str, Any]]],
+                               original_layout: List[str],
+                               original_cost: float) -> Dict[str, OptimizationResult]:
         """
         并行运行算法（改进版：每个算法使用独立的资源实例）
         """
         results = {}
         
-        def run_algorithm_independent(alg_name: str, init_layout: Optional[List[str]], params: Dict[str, Any]):
+        def run_algorithm_independent(alg_name: str, init_layout: Optional[List[str]], 
+                                     params: Dict[str, Any], orig_layout: List[str], orig_cost: float):
             """在独立的上下文中运行算法"""
             # 创建独立的优化器实例
             optimizer = self._create_optimizer(alg_name, params, create_independent=True)
@@ -208,7 +249,12 @@ class AlgorithmManager:
             
             # 运行优化
             start_time = time.time()
-            result = optimizer.optimize(initial_layout=init_layout, **runtime_params)
+            result = optimizer.optimize(
+                initial_layout=init_layout,
+                original_layout=orig_layout,
+                original_cost=orig_cost,
+                **runtime_params
+            )
             result.execution_time = time.time() - start_time
             
             return result
@@ -218,7 +264,8 @@ class AlgorithmManager:
             future_to_algorithm = {}
             for algorithm_name in algorithm_names:
                 params = custom_params.get(algorithm_name, {}) if custom_params else {}
-                future = executor.submit(run_algorithm_independent, algorithm_name, initial_layout, params)
+                future = executor.submit(run_algorithm_independent, algorithm_name, 
+                                        initial_layout, params, original_layout, original_cost)
                 future_to_algorithm[future] = algorithm_name
             
             # 收集结果
@@ -414,9 +461,15 @@ class AlgorithmManager:
                 'execution_time': result.execution_time,
                 'iterations': result.iterations,
                 'best_layout': result.best_layout,
+                'original_layout': result.original_layout,  # 添加原始布局
+                'original_cost': result.original_cost,      # 添加原始成本
                 'convergence_history': result.convergence_history,
                 'additional_metrics': result.additional_metrics
             }
+            
+            # 计算改进率
+            if result.original_cost is not None and result.original_cost > 0:
+                result_dict['improvement'] = ((result.original_cost - result.best_cost) / result.original_cost) * 100
             
             import json
             json_path = output_path / f"{algorithm_name}_result_{timestamp}.json"

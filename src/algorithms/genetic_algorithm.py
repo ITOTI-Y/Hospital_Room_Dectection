@@ -84,6 +84,8 @@ class GeneticAlgorithmOptimizer(BaseOptimizer):
                  initial_layout: Optional[List[str]] = None,
                  max_iterations: int = 1000,
                  convergence_threshold: int = 50,
+                 original_layout: Optional[List[str]] = None,
+                 original_cost: Optional[float] = None,
                  **kwargs) -> OptimizationResult:
         """
         执行遗传算法优化
@@ -92,12 +94,18 @@ class GeneticAlgorithmOptimizer(BaseOptimizer):
             initial_layout: 初始布局（用于种群初始化的种子）
             max_iterations: 最大代数
             convergence_threshold: 收敛阈值（连续多少代无改进则停止）
+            original_layout: 原始布局（未经优化的基准）
+            original_cost: 原始布局的成本
             **kwargs: 其他参数
             
         Returns:
             OptimizationResult: 优化结果
         """
         self.start_optimization()
+        
+        # 保存原始布局信息
+        self.original_layout = original_layout
+        self.original_cost = original_cost
         
         logger.info(f"遗传算法优化开始，最大代数: {max_iterations}")
         

@@ -77,6 +77,8 @@ class PPOOptimizer(BaseOptimizer):
                  initial_layout: Optional[List[str]] = None,
                  max_iterations: int = None,
                  total_timesteps: int = None,
+                 original_layout: Optional[List[str]] = None,
+                 original_cost: Optional[float] = None,
                  **kwargs) -> OptimizationResult:
         """
         执行PPO优化
@@ -85,12 +87,18 @@ class PPOOptimizer(BaseOptimizer):
             initial_layout: 初始布局（PPO会自动探索）
             max_iterations: 最大迭代次数（使用total_timesteps代替）
             total_timesteps: 总训练步数
+            original_layout: 原始布局（未经优化的基准）
+            original_cost: 原始布局的成本
             **kwargs: 其他PPO参数
             
         Returns:
             OptimizationResult: 优化结果
         """
         self.start_optimization()
+        
+        # 保存原始布局信息
+        self.original_layout = original_layout
+        self.original_cost = original_cost
         
         # 使用配置中的参数或传入的参数
         if total_timesteps is None:

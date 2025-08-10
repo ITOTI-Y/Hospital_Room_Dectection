@@ -13,6 +13,7 @@ import seaborn as sns
 from datetime import datetime
 
 from src.algorithms.base_optimizer import OptimizationResult
+from src.rl_optimizer.data.cache_manager import CacheManager
 
 logger = logging.getLogger(__name__)
 
@@ -25,16 +26,18 @@ class ResultsComparator:
     性能指标计算和报告生成功能。
     """
     
-    def __init__(self, results: Dict[str, OptimizationResult]):
+    def __init__(self, results: Dict[str, OptimizationResult], cache_manager: Optional[CacheManager] = None):
         """
         初始化结果对比分析器
         
         Args:
             results: 算法名到结果的映射
+            cache_manager: 缓存管理器（用于获取面积信息）
         """
         self.results = results
         self.algorithm_names = list(results.keys())
         self.comparison_df = None
+        self.cache_manager = cache_manager
         
         logger.info(f"结果对比分析器初始化完成，包含 {len(results)} 个算法结果")
     
@@ -480,9 +483,112 @@ class ResultsComparator:
         logger.info(f"详细对比报告已生成: {report_path}")
         return str(report_path)
     
+    def _get_node_area(self, node_name: str) -> float:
+        """
+        获取节点（科室/槽位）的面积
+        
+        Args:
+            node_name: 节点名称
+            
+        Returns:
+            float: 节点面积
+        """
+        if self.cache_manager is None:
+            return 0.0
+        
+        # 从cache_manager获取面积信息
+        placeable_df = self.cache_manager.placeable_nodes_df
+        area_data = placeable_df[placeable_df['node_id'] == node_name]['area']
+        
+        if not area_data.empty:
+            return float(area_data.iloc[0])
+        else:
+            logger.warning(f"未找到节点 {node_name} 的面积信息")
+            return 0.0
+    
+    def _get_layout_details(self, layout: List[str]) -> List[Dict[str, Any]]:
+        """
+        获取布局的详细信息，包括每个位置的面积信息
+        
+        Args:
+            layout: 布局列表
+            
+        Returns:
+            List[Dict]: 布局详细信息列表
+        """
+        details = []
+        
+        # 获取槽位列表（在这个系统中，槽位和科室是相同的）
+        slots = self.cache_manager.placeable_slots if self.cache_manager else layout
+        
+        for i, department in enumerate(layout):
+            if i < len(slots):
+                slot = slots[i]
+                slot_area = self._get_node_area(slot)
+                dept_area = self._get_node_area(department)
+                
+                # 计算面积匹配情况
+                area_diff = abs(slot_area - dept_area)
+                if dept_area > 0:
+                    match_ratio = min(slot_area, dept_area) / max(slot_area, dept_area)
+                else:
+                    match_ratio = 0.0
+                
+                detail = {
+                    'position': i,
+                    'slot': slot,
+                    'slot_area': slot_area,
+                    'department': department,
+                    'department_area': dept_area,
+                    'area_difference': area_diff,
+                    'area_match_ratio': match_ratio
+                }
+                details.append(detail)
+        
+        return details
+    
+    def _calculate_area_statistics(self, layout_details: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        计算面积匹配的统计信息
+        
+        Args:
+            layout_details: 布局详细信息
+            
+        Returns:
+            Dict: 面积统计信息
+        """
+        if not layout_details:
+            return {}
+        
+        perfect_matches = 0  # 完全匹配（比率=1.0）
+        good_matches = 0     # 良好匹配（比率>=0.9）
+        poor_matches = 0     # 较差匹配（比率<0.9）
+        total_ratio = 0.0
+        
+        for detail in layout_details:
+            ratio = detail['area_match_ratio']
+            total_ratio += ratio
+            
+            if ratio >= 0.99:  # 考虑浮点误差
+                perfect_matches += 1
+            elif ratio >= 0.9:
+                good_matches += 1
+            else:
+                poor_matches += 1
+        
+        avg_ratio = total_ratio / len(layout_details) if layout_details else 0.0
+        
+        return {
+            'perfect_matches': perfect_matches,
+            'good_matches': good_matches,
+            'poor_matches': poor_matches,
+            'average_match_ratio': avg_ratio,
+            'total_positions': len(layout_details)
+        }
+    
     def export_layouts_comparison(self, output_dir: str = "./results/layouts"):
         """
-        导出所有算法的最优布局进行可视化对比
+        导出所有算法的最优布局进行可视化对比，包含面积信息
         
         Args:
             output_dir: 输出目录
@@ -493,11 +599,42 @@ class ResultsComparator:
         timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
         
         layouts_data = {}
+        
+        # 添加原始布局（所有算法应该有相同的原始布局）
+        first_result = next(iter(self.results.values()))
+        if first_result.original_layout is not None:
+            original_details = self._get_layout_details(first_result.original_layout)
+            original_stats = self._calculate_area_statistics(original_details)
+            
+            layouts_data['original'] = {
+                'layout': first_result.original_layout,
+                'cost': first_result.original_cost,
+                'description': '原始布局（未经优化的基准）',
+                'layout_details': original_details,
+                'area_statistics': original_stats
+            }
+        
+        # 添加各算法的最优布局
         for algorithm_name, result in self.results.items():
+            improvement = None
+            if result.original_cost is not None and result.original_cost > 0:
+                improvement = ((result.original_cost - result.best_cost) / result.original_cost) * 100
+            
+            # 获取布局详细信息
+            layout_details = self._get_layout_details(result.best_layout)
+            area_stats = self._calculate_area_statistics(layout_details)
+            
             layouts_data[algorithm_name] = {
-                'layout': result.best_layout,
-                'cost': result.best_cost,
-                'algorithm': result.algorithm_name
+                'initial_layout': result.original_layout,  # 原始布局（用于对比）
+                'best_layout': result.best_layout,
+                'initial_cost': result.original_cost,
+                'best_cost': result.best_cost,
+                'improvement': improvement,  # 相对于原始布局的改进百分比
+                'algorithm': result.algorithm_name,
+                'iterations': result.iterations,
+                'execution_time': result.execution_time,
+                'layout_details': layout_details,  # 新增：布局详细信息
+                'area_statistics': area_stats      # 新增：面积统计信息
             }
         
         # 保存为JSON文件
@@ -505,6 +642,6 @@ class ResultsComparator:
         with open(layouts_path, 'w', encoding='utf-8') as f:
             json.dump(layouts_data, f, indent=2, ensure_ascii=False)
         
-        logger.info(f"最优布局对比数据已保存到: {layouts_path}")
+        logger.info(f"最优布局对比数据（含面积信息）已保存到: {layouts_path}")
         
         return str(layouts_path)

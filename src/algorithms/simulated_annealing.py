@@ -63,6 +63,8 @@ class SimulatedAnnealingOptimizer(BaseOptimizer):
     def optimize(self, 
                  initial_layout: Optional[List[str]] = None,
                  max_iterations: int = 10000,
+                 original_layout: Optional[List[str]] = None,
+                 original_cost: Optional[float] = None,
                  **kwargs) -> OptimizationResult:
         """
         执行模拟退火优化
@@ -70,12 +72,18 @@ class SimulatedAnnealingOptimizer(BaseOptimizer):
         Args:
             initial_layout: 初始布局
             max_iterations: 最大迭代次数
+            original_layout: 原始布局（未经优化的基准）
+            original_cost: 原始布局的成本
             **kwargs: 其他参数
             
         Returns:
             OptimizationResult: 优化结果
         """
         self.start_optimization()
+        
+        # 保存原始布局信息
+        self.original_layout = original_layout
+        self.original_cost = original_cost
         
         # 初始化当前解
         if initial_layout is None:
@@ -189,13 +197,20 @@ class SimulatedAnnealingOptimizer(BaseOptimizer):
         """随机交换两个科室的位置"""
         if len(layout) < 2:
             return
+        
+        # 过滤掉None值，只对有效的位置进行交换
+        valid_positions = [i for i, dept in enumerate(layout) if dept is not None]
+        if len(valid_positions) < 2:
+            return
             
-        # 随机选择两个不同的位置
-        pos1, pos2 = random.sample(range(len(layout)), 2)
+        # 随机选择两个不同的有效位置
+        pos1, pos2 = random.sample(valid_positions, 2)
         
         # 检查是否可以交换（考虑固定位置约束）
         if self.constraint_manager.get_swap_candidates(layout, pos1, pos2):
-            layout[pos1], layout[pos2] = layout[pos2], layout[pos1]
+            # 确保两个位置都不是None（额外的安全检查）
+            if layout[pos1] is not None and layout[pos2] is not None:
+                layout[pos1], layout[pos2] = layout[pos2], layout[pos1]
     
     def _relocate_department(self, layout: List[str]):
         """
@@ -204,26 +219,38 @@ class SimulatedAnnealingOptimizer(BaseOptimizer):
         """
         if len(layout) < 2:
             return
+        
+        # 过滤掉None值，只对有效的位置进行操作
+        valid_positions = [i for i, dept in enumerate(layout) if dept is not None]
+        if len(valid_positions) < 2:
+            return
             
-        # 随机选择一个科室和新位置
-        old_pos = random.randint(0, len(layout) - 1)
-        new_pos = random.randint(0, len(layout) - 1)
+        # 随机选择两个有效位置
+        old_pos = random.choice(valid_positions)
+        new_pos = random.choice(valid_positions)
         
         if old_pos != new_pos:
             # 保存要移动的科室
             dept = layout[old_pos]
             
-            # 使用安全的移动策略：通过一系列交换来实现重定位
+            # 确保dept不是None
+            if dept is None:
+                return
+            
+            # 使用安全的移动策略：通过一系列移位来实现重定位
+            # 这种方式保证不会丢失任何科室
             if old_pos < new_pos:
-                # 向右移动：依次与右边元素交换
+                # 向右移动：将中间的元素向左移一位
+                temp = layout[old_pos]
                 for i in range(old_pos, new_pos):
                     layout[i] = layout[i + 1]
-                layout[new_pos] = dept
+                layout[new_pos] = temp
             else:
-                # 向左移动：依次与左边元素交换
+                # 向左移动：将中间的元素向右移一位
+                temp = layout[old_pos]
                 for i in range(old_pos, new_pos, -1):
                     layout[i] = layout[i - 1]
-                layout[new_pos] = dept
+                layout[new_pos] = temp
     
     def _repair_layout(self, layout: List[str]) -> Optional[List[str]]:
         """

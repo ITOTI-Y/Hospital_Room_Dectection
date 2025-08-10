@@ -23,6 +23,8 @@ class OptimizationResult:
     iterations: int
     convergence_history: List[float]
     additional_metrics: Dict[str, Any]
+    original_layout: List[str] = None  # 原始布局（未经优化）
+    original_cost: float = None  # 原始布局的成本
 
 
 class BaseOptimizer(ABC):
@@ -57,10 +59,16 @@ class BaseOptimizer(ABC):
         self.convergence_history = []
         self.start_time = None
         
+        # 原始布局信息
+        self.original_layout = None
+        self.original_cost = None
+        
     @abstractmethod
     def optimize(self, 
                  initial_layout: Optional[List[str]] = None,
                  max_iterations: int = 1000,
+                 original_layout: Optional[List[str]] = None,
+                 original_cost: Optional[float] = None,
                  **kwargs) -> OptimizationResult:
         """
         执行优化算法
@@ -68,6 +76,8 @@ class BaseOptimizer(ABC):
         Args:
             initial_layout: 初始布局，如果为None则生成随机布局
             max_iterations: 最大迭代次数
+            original_layout: 原始布局（未经优化的基准）
+            original_cost: 原始布局的成本
             **kwargs: 算法特定参数
             
         Returns:
@@ -137,11 +147,17 @@ class BaseOptimizer(ABC):
             execution_time=execution_time,
             iterations=self.current_iteration,
             convergence_history=self.convergence_history.copy(),
-            additional_metrics=self.get_additional_metrics()
+            additional_metrics=self.get_additional_metrics(),
+            original_layout=self.original_layout,
+            original_cost=self.original_cost
         )
         
         self.logger.info(f"{self.name} 优化完成:")
         self.logger.info(f"  最优成本: {self.best_cost:.2f}")
+        if self.original_cost is not None:
+            improvement = ((self.original_cost - self.best_cost) / self.original_cost) * 100
+            self.logger.info(f"  原始成本: {self.original_cost:.2f}")
+            self.logger.info(f"  改进率: {improvement:.1f}%")
         self.logger.info(f"  执行时间: {execution_time:.2f}s")
         self.logger.info(f"  迭代次数: {self.current_iteration}")
         

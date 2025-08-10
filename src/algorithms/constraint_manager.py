@@ -266,11 +266,15 @@ class ConstraintManager:
         return True
     
     def _check_uniqueness_constraints(self, layout: List[str]) -> bool:
-        """检查唯一性约束（每个科室只能出现一次）- 优化版"""
+        """检查唯一性约束（每个科室只能出现一次，不允许null）- 优化版"""
+        # 首先检查是否有None值
+        if None in layout:
+            logger.debug(f"布局中包含None值")
+            return False
+        
         seen = set()
         for dept_name in layout:
-            if dept_name is None:
-                continue
+            # 已经检查过None，这里dept_name不会是None
             if dept_name in seen:
                 return False  # 发现重复，立即返回
             seen.add(dept_name)
@@ -317,6 +321,31 @@ class ConstraintManager:
         """获取科室在departments_info中的索引（使用哈希表优化）"""
         return self.dept_name_to_index.get(dept_name)
     
+    def generate_original_layout(self) -> List[str]:
+        """
+        生成原始布局（未经优化的基准布局）
+        将科室按顺序直接映射到槽位，不进行任何随机化或优化
+        
+        Returns:
+            List[str]: 原始布局
+        """
+        # 在这个系统中，placeable_departments 和 placeable_slots 是相同的
+        # 原始布局就是简单地将科室按原始顺序排列
+        # 确保返回的是副本，避免外部修改影响原始列表
+        layout = self.placeable_departments.copy()
+        
+        # 验证布局完整性
+        if len(layout) != len(self.slots_info):
+            logger.warning(f"科室数量({len(layout)})与槽位数量({len(self.slots_info)})不匹配")
+            # 如果数量不匹配，调整布局长度
+            while len(layout) < len(self.slots_info):
+                # 这种情况不应该发生，但为了健壮性添加处理
+                logger.error(f"科室数量少于槽位数量，这不应该发生！")
+                layout.append(layout[0])  # 临时填充，避免None
+            layout = layout[:len(self.slots_info)]
+        
+        return layout
+    
     def generate_valid_layout(self) -> List[str]:
         """
         生成一个满足约束的有效布局
@@ -324,33 +353,41 @@ class ConstraintManager:
         Returns:
             List[str]: 有效布局
         """
-        layout = [None] * len(self.slots_info)
+        # 首先创建一个包含所有科室的列表
+        available_depts = list(self.placeable_departments)
+        layout = []
         
-        # 首先放置固定科室
-        available_depts = set(self.placeable_departments)
+        # 如果有固定位置约束，先处理
+        fixed_positions = {}
         for dept_name, slot_idx in self.fixed_assignments.items():
-            layout[slot_idx] = dept_name
-            available_depts.remove(dept_name)
+            if dept_name in available_depts:
+                fixed_positions[slot_idx] = dept_name
+                available_depts.remove(dept_name)
         
-        # 随机放置剩余科室
-        available_slots = [i for i, dept in enumerate(layout) if dept is None]
-        available_depts_list = list(available_depts)
+        # 随机打乱剩余科室
+        random.shuffle(available_depts)
         
-        for slot_idx in available_slots:
-            if not available_depts_list:
-                break
-                
-            # 找到与该槽位面积兼容的科室
-            compatible_depts = []
-            for dept_name in available_depts_list:
-                dept_idx = self._get_department_index(dept_name)
-                if dept_idx is not None and self.area_compatibility_matrix[slot_idx, dept_idx]:
-                    compatible_depts.append(dept_name)
-            
-            if compatible_depts:
-                chosen_dept = random.choice(compatible_depts)
-                layout[slot_idx] = chosen_dept
-                available_depts_list.remove(chosen_dept)
+        # 填充布局
+        dept_idx = 0
+        for slot_idx in range(len(self.slots_info)):
+            if slot_idx in fixed_positions:
+                # 使用固定位置的科室
+                layout.append(fixed_positions[slot_idx])
+            else:
+                # 填充剩余科室
+                if dept_idx < len(available_depts):
+                    layout.append(available_depts[dept_idx])
+                    dept_idx += 1
+                else:
+                    # 不应该发生，但为了健壮性
+                    logger.error(f"生成布局时科室不足，这不应该发生！")
+                    # 使用第一个可用科室填充
+                    layout.append(self.placeable_departments[0])
+        
+        # 验证生成的布局
+        if not self.is_valid_layout(layout):
+            logger.warning("生成的布局不满足约束，返回原始布局")
+            return self.generate_original_layout()
         
         return layout
     

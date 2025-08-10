@@ -191,7 +191,7 @@ class HospitalLayoutOptimizer:
             logger.info(f"\n{comparison_df.to_string(index=False)}")
             
             # 创建结果对比分析器
-            comparator = ResultsComparator(results)
+            comparator = ResultsComparator(results, cache_manager=self.cache_manager)
             
             # 生成详细对比表格
             detailed_df = comparator.generate_comparison_table()
@@ -266,6 +266,9 @@ class HospitalLayoutOptimizer:
                 cache_manager=cache_manager
             )
             logger.info("算法管理器初始化完成")
+            
+            # 保存cache_manager供后续使用
+            self.cache_manager = cache_manager
             
             return True
             

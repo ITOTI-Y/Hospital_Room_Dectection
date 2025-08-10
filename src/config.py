@@ -282,6 +282,10 @@ class RLConfig:
         # --- 势函数奖励配置 ---
         self.ENABLE_POTENTIAL_REWARD: bool = True  # 是否启用势函数奖励
         self.POTENTIAL_REWARD_WEIGHT: float = 1.0  # 势函数奖励权重
+        
+        # --- 面积匹配奖励配置 ---
+        self.AREA_MATCH_REWARD_WEIGHT: float = 0.2  # 面积匹配在势函数中的权重
+        self.AREA_MATCH_BONUS_BASE: float = 10.0  # 基础面积匹配奖励值
 
         # --- 断点续训配置 ---
         self.RESUME_TRAINING: bool = False  # 是否启用断点续训

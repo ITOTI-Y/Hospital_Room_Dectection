@@ -188,8 +188,10 @@ class LayoutEnv(gym.Env):
                 # 终止时的奖励 = 即时奖励 + 势函数奖励 + 最终奖励
                 self.cached_final_reward = self._calculate_final_reward()
                 reward = immediate_reward + potential_reward + self.cached_final_reward
-                # 只在回合结束时显示势函数奖励汇总
+                # 只在回合结束时显示势函数奖励汇总（包括面积匹配信息）
                 logger.info(f"势函数奖励汇总: 最终势={new_potential:.4f}, 势函数总奖励={potential_reward:.4f}")
+                # 计算并显示面积匹配统计
+                self._log_area_match_statistics()
             else:
                 # 非终止时的奖励 = 即时奖励 + 势函数奖励
                 reward = immediate_reward + potential_reward
@@ -284,6 +286,12 @@ class LayoutEnv(gym.Env):
             if logger.isEnabledFor(20):  # INFO级别
                 if num_placed_depts > 0:
                     info['episode']['per_process_costs'] = self.cc.calculate_per_process_cost(placed_depts)
+            
+            # 添加面积匹配统计信息
+            area_match_stats = self._calculate_area_match_statistics()
+            info['episode']['area_match_avg'] = area_match_stats['avg_match_score']
+            info['episode']['area_match_min'] = area_match_stats['min_match_score']
+            info['episode']['area_match_max'] = area_match_stats['max_match_score']
         
         return info
     
@@ -451,13 +459,43 @@ class LayoutEnv(gym.Env):
         # ... 实现软约束奖励计算 ...
         return reward
     
+    def _calculate_area_match_score(self, dept_idx: int, slot_idx: int) -> float:
+        """
+        计算科室与槽位的面积匹配度分数。
+        
+        Args:
+            dept_idx: 科室在placeable_depts中的索引
+            slot_idx: 槽位在placeable_slots中的索引
+            
+        Returns:
+            float: 0到1之间的匹配度分数，1表示完美匹配，0表示差异最大
+        """
+        # 获取科室和槽位的面积
+        dept_name = self.placeable_depts[dept_idx]
+        dept_area = self.dept_areas_map[dept_name]
+        slot_area = self.slot_areas[slot_idx]
+        
+        # 避免除零错误
+        if dept_area == 0 or slot_area == 0:
+            logger.warning(f"面积为0：科室 {dept_name} 面积={dept_area}, 槽位索引 {slot_idx} 面积={slot_area}")
+            return 0.0
+        
+        # 计算相对差异（使用较大值作为基准）
+        relative_diff = abs(dept_area - slot_area) / max(dept_area, slot_area)
+        
+        # 转换为0-1的匹配分数（差异越小，分数越高）
+        # 使用AREA_SCALING_FACTOR作为容差阈值
+        match_score = max(0.0, 1.0 - relative_diff / self.config.AREA_SCALING_FACTOR)
+        
+        return match_score
+    
     def _calculate_potential(self) -> float:
         """
         计算当前布局状态的势函数值。
-        势函数 Φ(layout) = -1 * (所有已放置科室对的加权通行时间之和)
+        势函数 Φ(layout) = -1 * (时间成本部分) + 面积匹配奖励部分
         
         Returns:
-            float: 当前状态的势函数值（负的时间成本）
+            float: 当前状态的势函数值
         """
         # 构建完整的布局（包括空槽位）
         layout_with_nulls = []
@@ -472,20 +510,86 @@ class LayoutEnv(gym.Env):
             else:
                 layout_with_nulls.append(None)
         
-        # 如果没有放置科室或只有一个科室，势函数为0
-        if len(placed_depts) <= 1:
-            return 0.0
+        # === 时间成本部分 ===
+        # 如果没有放置科室或只有一个科室，时间成本势函数为0
+        time_cost_potential = 0.0
+        if len(placed_depts) > 1:
+            # 计算已放置科室的总时间成本
+            # 传递完整布局（包含None），让CostCalculator正确映射科室到槽位
+            time_cost = self.cc.calculate_total_cost(layout_with_nulls)
+            # 势函数为负的时间成本（缩放后）
+            time_cost_potential = -time_cost / self.config.REWARD_SCALE_FACTOR
         
-        # 计算已放置科室的总时间成本
-        # 传递完整布局（包含None），让CostCalculator正确映射科室到槽位
-        time_cost = self.cc.calculate_total_cost(layout_with_nulls)
+        # === 面积匹配奖励部分 ===
+        area_match_reward = 0.0
+        num_matched_depts = 0
+        total_match_score = 0.0
         
-        # 势函数为负的时间成本（缩放后）
-        potential = -time_cost / self.config.REWARD_SCALE_FACTOR
+        for slot_idx in range(self.num_slots):
+            dept_id = self.layout[slot_idx]
+            if dept_id > 0:
+                dept_idx = dept_id - 1
+                match_score = self._calculate_area_match_score(dept_idx, slot_idx)
+                area_match_reward += match_score * self.config.AREA_MATCH_BONUS_BASE
+                total_match_score += match_score
+                num_matched_depts += 1
         
-        logger.debug(f"势函数计算: 已放置{len(placed_depts)}个科室, 时间成本={time_cost:.2f}, 势函数值={potential:.6f}")
+        # 计算平均匹配度（用于日志）
+        avg_match_score = total_match_score / num_matched_depts if num_matched_depts > 0 else 0.0
         
-        return potential
+        # === 组合两部分势函数 ===
+        total_potential = (time_cost_potential + 
+                          area_match_reward * self.config.AREA_MATCH_REWARD_WEIGHT)
+        
+        # 详细的调试日志
+        if logger.isEnabledFor(10):  # DEBUG级别
+            logger.debug(f"势函数计算详情: "
+                        f"已放置{len(placed_depts)}个科室, "
+                        f"时间成本势={time_cost_potential:.4f}, "
+                        f"面积匹配奖励={area_match_reward:.4f}, "
+                        f"平均匹配度={avg_match_score:.3f}, "
+                        f"总势函数={total_potential:.4f}")
+        
+        return total_potential
+    
+    def _calculate_area_match_statistics(self) -> Dict[str, float]:
+        """
+        计算当前布局的面积匹配统计信息。
+        
+        Returns:
+            Dict[str, float]: 包含平均、最小、最大匹配度的字典
+        """
+        match_scores = []
+        
+        for slot_idx in range(self.num_slots):
+            dept_id = self.layout[slot_idx]
+            if dept_id > 0:
+                dept_idx = dept_id - 1
+                match_score = self._calculate_area_match_score(dept_idx, slot_idx)
+                match_scores.append(match_score)
+        
+        if not match_scores:
+            return {
+                'avg_match_score': 0.0,
+                'min_match_score': 0.0,
+                'max_match_score': 0.0,
+                'num_matched': 0
+            }
+        
+        return {
+            'avg_match_score': sum(match_scores) / len(match_scores),
+            'min_match_score': min(match_scores),
+            'max_match_score': max(match_scores),
+            'num_matched': len(match_scores)
+        }
+    
+    def _log_area_match_statistics(self):
+        """记录面积匹配统计信息到日志。"""
+        stats = self._calculate_area_match_statistics()
+        if stats['num_matched'] > 0:
+            logger.info(f"面积匹配统计: 平均匹配度={stats['avg_match_score']:.3f}, "
+                       f"最小={stats['min_match_score']:.3f}, 最大={stats['max_match_score']:.3f}, "
+                       f"已匹配科室数={stats['num_matched']}")
     
     def render(self, mode="human"):
         """(可选) 渲染环境状态，用于调试。"""
