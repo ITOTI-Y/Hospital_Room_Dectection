@@ -301,11 +301,17 @@ class AlgorithmManager:
             constraint_manager = self.constraint_manager
         
         if algorithm_name == 'ppo':
+            # 获取预训练模型路径（如果有）
+            pretrained_model_path = None
+            if custom_params and 'pretrained_model_path' in custom_params:
+                pretrained_model_path = custom_params['pretrained_model_path']
+            
             return optimizer_class(
                 cost_calculator=cost_calculator,
                 constraint_manager=constraint_manager,
                 config=self.config,
-                cache_manager=self.cache_manager
+                cache_manager=self.cache_manager,
+                pretrained_model_path=pretrained_model_path
             )
         elif algorithm_name == 'simulated_annealing':
             # 获取SA特定的构造参数

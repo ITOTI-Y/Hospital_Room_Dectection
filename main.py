@@ -380,6 +380,12 @@ def create_argument_parser() -> argparse.ArgumentParser:
     )
     
     parser.add_argument(
+        '--pretrained-model-path',
+        type=str,
+        help="预训练模型路径（用于从已有模型继续训练）"
+    )
+    
+    parser.add_argument(
         '--verbose',
         action='store_true',
         help="详细输出"
@@ -431,6 +437,8 @@ def main():
                 algorithm_params['initial_temperature'] = args.initial_temperature
             if args.total_timesteps:
                 algorithm_params['total_timesteps'] = args.total_timesteps
+            if args.pretrained_model_path:
+                algorithm_params['pretrained_model_path'] = args.pretrained_model_path
             
             success = optimizer.run_single_algorithm(
                 algorithm_name=args.algorithm,

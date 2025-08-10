@@ -45,7 +45,8 @@ class PPOOptimizer(BaseOptimizer):
                  cost_calculator: CostCalculator,
                  constraint_manager: ConstraintManager,
                  config: RLConfig,
-                 cache_manager: CacheManager):
+                 cache_manager: CacheManager,
+                 pretrained_model_path: Optional[str] = None):
         """
         初始化PPO优化器
         
@@ -54,6 +55,7 @@ class PPOOptimizer(BaseOptimizer):
             constraint_manager: 约束管理器
             config: RL配置
             cache_manager: 缓存管理器
+            pretrained_model_path: 预训练模型路径（可选，用于从已有模型继续训练）
         """
         super().__init__(cost_calculator, constraint_manager, "PPO")
         self.config = config
@@ -73,6 +75,7 @@ class PPOOptimizer(BaseOptimizer):
         self.resume_model_path = None
         self.completed_steps = 0
         self.best_model_dir = None  # 保存最佳模型目录路径
+        self.pretrained_model_path = pretrained_model_path  # 保存预训练模型路径
     
     def optimize(self, 
                  initial_layout: Optional[List[str]] = None,
@@ -188,6 +191,11 @@ class PPOOptimizer(BaseOptimizer):
         
         # 创建或加载模型
         if self.resume_model_path:
+            self._load_pretrained_model()
+        elif self.pretrained_model_path:
+            # 如果提供了预训练模型路径，从该模型继续训练
+            self.resume_model_path = self.pretrained_model_path
+            logger.info(f"使用预训练模型继续训练: {self.pretrained_model_path}")
             self._load_pretrained_model()
         else:
             self._create_new_model()
