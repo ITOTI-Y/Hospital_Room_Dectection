@@ -144,33 +144,33 @@ class Network:
             return  # Optimization
 
         connection_nodes = [
-            node for node in self.graph_manager.get_all_nodes()
-            if node.node_type in self.config.CONNECTION_TYPES and node.pos[2] == z_level
+            node for node in self.graph_manager.get_all_nodes().values()
+            if node.node_type in self.config.CONNECTION_TYPES and node.z == z_level
             # Only connect these
-            and (node.door_type == 'in' or node.door_type == 'out')
+            and hasattr(node, 'door_type') and (node.door_type == 'in' or node.door_type == 'out')
         ]
         if not connection_nodes:
             return
 
         pedestrian_mesh_nodes = [
-            node for node in self.graph_manager.get_all_nodes()
-            if node.node_type in self.config.PEDESTRIAN_TYPES and node.pos[2] == z_level
+            node for node in self.graph_manager.get_all_nodes().values()
+            if node.node_type in self.config.PEDESTRIAN_TYPES and node.z == z_level
         ]
         outside_mesh_nodes = [
-            node for node in self.graph_manager.get_all_nodes()
-            if node.node_type in self.config.OUTSIDE_TYPES and node.pos[2] == z_level
+            node for node in self.graph_manager.get_all_nodes().values()
+            if node.node_type in self.config.OUTSIDE_TYPES and node.z == z_level
         ]
 
         ped_tree = None
         if pedestrian_mesh_nodes:
-            ped_positions = np.array([p_node.pos[:2]
+            ped_positions = np.array([(p_node.x, p_node.y)
                                      for p_node in pedestrian_mesh_nodes])
             if ped_positions.size > 0:  # Ensure not empty before creating KDTree
                 ped_tree = KDTree(ped_positions)
 
         out_tree = None
         if outside_mesh_nodes:
-            out_positions = np.array([o_node.pos[:2]
+            out_positions = np.array([(o_node.x, o_node.y)
                                      for o_node in outside_mesh_nodes])
             if out_positions.size > 0:
                 out_tree = KDTree(out_positions)
@@ -178,7 +178,7 @@ class Network:
         max_door_to_mesh_distance = self.config.GRID_SIZE * 3
 
         for conn_node in connection_nodes:
-            door_pos_2d = conn_node.pos[:2]
+            door_pos_2d = (conn_node.x, conn_node.y)
 
             if conn_node.door_type == 'in' and ped_tree:
                 dist, idx = ped_tree.query(door_pos_2d, k=1)

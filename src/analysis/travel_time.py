@@ -64,10 +64,10 @@ def calculate_room_travel_times(
 
         if node_obj.node_type in config.ROOM_TYPES:
             room_nodes.append(node_obj)
-        elif node_obj.node_type in config.CONNECTION_TYPES and node_obj.door_type == 'out':
+        elif node_obj.node_type in config.CONNECTION_TYPES and getattr(node_obj, 'door_type', None) == 'out':
             if ground_floor_z is not None:
                 # Tolerance for Z comparison
-                if abs(node_obj.pos[2] - ground_floor_z) < 0.1:
+                if abs(node_obj.z - ground_floor_z) < 0.1:
                     out_door_nodes.append(node_obj)
             # If ground_floor_z is None, no out_door_nodes are added from this path based on current logic.
             # If you want a fallback, it would be here. For "only ground floor", this is correct.
@@ -81,24 +81,27 @@ def calculate_room_travel_times(
     for node_obj in room_nodes:
         unique_name = f"{node_obj.node_type}_{node_obj.id}"
         location_names_map[node_obj] = unique_name
-        location_areas_map[unique_name] = node_obj.area
+        location_areas_map[unique_name] = getattr(node_obj, 'area', 0)
 
     for node_obj in out_door_nodes:  # These are already filtered for ground floor
         unique_name = f"门_{node_obj.id}"
         location_names_map[node_obj] = unique_name
-        location_areas_map[unique_name] = node_obj.area
+        location_areas_map[unique_name] = getattr(node_obj, 'area', 0)
 
     if not location_nodes:
         logger.warning(
             "No room instances or designated (ground floor) outward-facing door nodes found to calculate travel times.")
         return {}
 
-    def weight_function(u_node_obj, v_node_obj, edge_data):  # u,v are Node objects
+    def weight_function(u_node_id, v_node_id, edge_data):  # u,v are node IDs
+        # 从图中获取节点对象
+        v_node_data = graph.nodes[v_node_id]
+        v_node_obj = v_node_data.get('node_obj')
         if not isinstance(v_node_obj, Node):  # Should not happen if graph is consistent
             logger.error(
-                f"Target node {v_node_obj} in edge is not a valid Node object for weight func.")
+                f"Target node {v_node_id} in edge is not a valid Node object for weight func.")
             raise ValueError(
-                f"Invalid node object for weight function: {v_node_obj}")
+                f"Invalid node object for weight function: {v_node_id}")
         return v_node_obj.time
 
     travel_times_data: Dict[str, Dict[str, Union[float, str]]] = {}
@@ -112,7 +115,7 @@ def calculate_room_travel_times(
         try:
             lengths = nx.single_source_dijkstra_path_length(
                 graph,
-                source=start_node_obj,
+                source=start_node_obj.id,  # 使用节点ID而不是节点对象
                 weight=weight_function
             )
         except nx.NodeNotFound:
@@ -132,8 +135,8 @@ def calculate_room_travel_times(
                     start_node_obj.time, 2)
                 continue
 
-            if target_node_obj in lengths:
-                total_time = start_node_obj.time + lengths[target_node_obj]
+            if target_node_obj.id in lengths:
+                total_time = start_node_obj.time + lengths[target_node_obj.id]
                 travel_times_data[start_location_name][target_location_name] = round(
                     total_time, 2)
             else:

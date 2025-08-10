@@ -191,7 +191,7 @@ class PlotlyPlotter(BasePlotter):
             return
 
         all_z_coords_present = sorted(
-            list(set(n.pos[2] for n in all_node_objects)))
+            list(set(n.z for n in all_node_objects)))
         min_z = min(all_z_coords_present) if all_z_coords_present else 0
         max_z = max(all_z_coords_present) if all_z_coords_present else 0
 
@@ -206,7 +206,7 @@ class PlotlyPlotter(BasePlotter):
                     'ids': []
                 }
 
-            x, y, z = node_obj.pos
+            x, y, z = node_obj.x, node_obj.y, node_obj.z
             plot_x = (
                 graph_width - x) if self.config.IMAGE_MIRROR and graph_width is not None else x
 
@@ -231,9 +231,9 @@ class PlotlyPlotter(BasePlotter):
                 f"Type: {node_type}<br>"
                 f"Pos: ({x},{y},{z})<br>"
                 f"Time: {node_obj.time:.2f}<br>"
-                f"Area: {node_obj.area:.2f}"
+                f"Area: {getattr(node_obj, 'area', 0):.2f}"
             )
-            if node_obj.door_type:
+            if hasattr(node_obj, 'door_type') and node_obj.door_type:
                 hover_label += f"<br>Door: {node_obj.door_type}"
             nodes_data_by_type[node_type]['hover_text'].append(hover_label)
 

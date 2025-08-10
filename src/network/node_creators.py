@@ -184,7 +184,7 @@ class MeshBasedNodeCreator(BaseNodeCreator): # New base for Pedestrian and Outsi
             for vx, vy in zip(valid_x_coords, valid_y_coords):
                 pos = (int(vx), int(vy), z_level)
                 node_id = self.graph_manager.generate_node_id()
-                mesh_node = Node(node_id, region_type_name, pos, node_time, area=mesh_node_area)
+                mesh_node = Node(node_id=node_id, node_type=region_type_name, pos=pos, default_time=node_time, area=mesh_node_area)
                 self.graph_manager.add_node(mesh_node)
                 component_nodes.append(mesh_node)
                 # Optionally, mark the exact grid cell in id_map with the mesh_node.id
@@ -194,7 +194,7 @@ class MeshBasedNodeCreator(BaseNodeCreator): # New base for Pedestrian and Outsi
             if not component_nodes or len(component_nodes) < 2:
                 continue
 
-            node_positions_2d = np.array([node.pos[:2] for node in component_nodes])
+            node_positions_2d = np.array([(node.x, node.y) for node in component_nodes])
             kdtree = KDTree(node_positions_2d)
             # Max distance to connect (diagonal of a grid cell, plus a small tolerance)
             max_distance_connect = np.sqrt(2) * grid_size * 1.05
@@ -203,7 +203,7 @@ class MeshBasedNodeCreator(BaseNodeCreator): # New base for Pedestrian and Outsi
                 # Query for k-nearest, then filter by distance
                 # k=9 includes self + 8 neighbors in a square grid
                 distances, indices_k_nearest = kdtree.query(
-                    current_node.pos[:2],
+                    (current_node.x, current_node.y),
                     k=min(len(component_nodes), self.config.MESH_NODE_CONNECTIVITY_K), # Ensure k is not > num_points
                     distance_upper_bound=max_distance_connect
                 )
@@ -284,8 +284,8 @@ class ConnectionNodeCreator(BaseNodeCreator):
                 position = (int(centroid_x), int(centroid_y), z_level)
 
                 node_id = self.graph_manager.generate_node_id()
-                conn_node = Node(node_id, conn_type_name, position,
-                                 self.config.CONNECTION_TIME, area=area)
+                conn_node = Node(node_id=node_id, node_type=conn_type_name, pos=position,
+                                 default_time=self.config.CONNECTION_TIME, area=area)
                 self.graph_manager.add_node(conn_node)
 
                 component_mask_pixels = (labels == i)
