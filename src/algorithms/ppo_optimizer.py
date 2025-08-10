@@ -72,6 +72,7 @@ class PPOOptimizer(BaseOptimizer):
         self.vec_env = None
         self.resume_model_path = None
         self.completed_steps = 0
+        self.best_model_dir = None  # 保存最佳模型目录路径
     
     def optimize(self, 
                  initial_layout: Optional[List[str]] = None,
@@ -282,6 +283,9 @@ class PPOOptimizer(BaseOptimizer):
         log_dir.mkdir(parents=True, exist_ok=True)
         result_dir.mkdir(parents=True, exist_ok=True)
         
+        # 保存最佳模型目录路径
+        self.best_model_dir = result_dir
+        
         # 设置回调
         callbacks = []
         
@@ -340,13 +344,98 @@ class PPOOptimizer(BaseOptimizer):
     
     def _evaluate_best_model(self) -> tuple[List[str], float]:
         """评估最佳模型并返回最优布局和成本"""
-        # 这里简化实现，实际应该加载最佳模型进行评估
-        # 返回一个示例布局和成本
-        best_layout = self.generate_initial_layout()
-        best_cost = self.evaluate_layout(best_layout)
+        best_model_path = None
         
-        logger.info(f"最佳模型评估完成，成本: {best_cost:.2f}")
-        return best_layout, best_cost
+        # 1. 确定最佳模型路径
+        if self.best_model_dir:
+            best_model_path = self.best_model_dir / "best_model" / "best_model.zip"
+            if not best_model_path.exists():
+                logger.warning(f"最佳模型文件不存在: {best_model_path}")
+                best_model_path = None
+        
+        # 2. 如果没有最佳模型，尝试使用最终模型
+        if not best_model_path:
+            final_model_paths = [
+                self.config.LOG_PATH / f"ppo_layout_*/final_model.zip",
+                self.config.LOG_PATH / "final_model.zip"
+            ]
+            
+            for pattern in final_model_paths:
+                import glob
+                matches = glob.glob(str(pattern))
+                if matches:
+                    # 使用最新的模型
+                    best_model_path = Path(max(matches, key=lambda x: Path(x).stat().st_mtime))
+                    logger.info(f"使用最终模型作为备选: {best_model_path}")
+                    break
+        
+        # 3. 如果仍然没有找到模型，返回默认布局
+        if not best_model_path or not best_model_path.exists():
+            logger.warning("未找到可用的训练模型，返回初始布局")
+            best_layout = self.generate_initial_layout()
+            best_cost = self.evaluate_layout(best_layout)
+            return best_layout, best_cost
+        
+        try:
+            # 4. 加载最佳模型
+            logger.info(f"正在加载最佳模型: {best_model_path}")
+            best_model = MaskablePPO.load(
+                str(best_model_path),
+                device='cuda' if torch.cuda.is_available() else 'cpu'
+            )
+            
+            # 5. 创建评估环境（使用ActionMasker包装）
+            from sb3_contrib.common.wrappers import ActionMasker
+            eval_env = ActionMasker(LayoutEnv(**self.env_kwargs), LayoutEnv._action_mask_fn)
+            
+            # 6. 执行评估（可以多次运行取最佳结果）
+            best_layout = None
+            best_cost = float('inf')
+            n_eval_episodes = 5  # 评估5次取最佳
+            
+            for episode in range(n_eval_episodes):
+                obs = eval_env.reset()
+                # 处理新版Gym API返回的tuple
+                if isinstance(obs, tuple):
+                    obs = obs[0]
+                terminated = False
+                
+                while not terminated:
+                    # 获取动作掩码（从内部环境）
+                    inner_env_for_mask = eval_env.env if hasattr(eval_env, 'env') else eval_env
+                    action_mask = inner_env_for_mask.get_action_mask()
+                    
+                    # 使用掩码进行预测
+                    action, _ = best_model.predict(obs, action_masks=action_mask, deterministic=True)
+                    result = eval_env.step(int(action))
+                    # 处理不同版本API的返回值
+                    if len(result) == 5:
+                        obs, _, terminated, _, _ = result
+                    else:
+                        obs, _, terminated, _ = result[:4]
+                
+                # 获取当前episode的布局和成本
+                # ActionMasker包装了原始环境，需要访问内部环境
+                inner_env = eval_env.env if hasattr(eval_env, 'env') else eval_env
+                current_layout = inner_env._get_final_layout_str()
+                current_cost = self.cost_calculator.calculate_total_cost(current_layout)
+                
+                if current_cost < best_cost:
+                    best_cost = current_cost
+                    best_layout = current_layout
+                    logger.info(f"评估Episode {episode+1}/{n_eval_episodes}: 发现更优布局，成本: {best_cost:.2f}")
+                else:
+                    logger.info(f"评估Episode {episode+1}/{n_eval_episodes}: 成本: {current_cost:.2f}")
+            
+            logger.info(f"最佳模型评估完成，最优成本: {best_cost:.2f}")
+            return best_layout, best_cost
+            
+        except Exception as e:
+            logger.error(f"加载或评估模型时发生错误: {e}")
+            logger.info("使用默认布局作为备选方案")
+            best_layout = self.generate_initial_layout()
+            best_cost = self.evaluate_layout(best_layout)
+            return best_layout, best_cost
     
     def _save_interrupted_model(self):
         """保存被中断的模型"""

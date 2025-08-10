@@ -53,8 +53,16 @@ src/
 │   └── graph_manager.py        # 图管理器
 ├── rl_optimizer/        # 强化学习组件
 │   ├── env/                    # 环境定义
-│   ├── agent/                  # 智能体实现
+│   │   ├── layout_env.py       # 布局优化环境
+│   │   ├── cost_calculator.py  # 成本计算器
+│   │   └── vec_env_wrapper.py  # 矢量化环境包装器
+│   ├── model/                  # 模型定义
+│   │   └── policy_network.py   # Transformer策略网络
+│   ├── utils/                  # 工具函数
+│   │   ├── lr_scheduler.py     # 学习率调度器
+│   │   └── checkpoint_callback.py # 检查点回调
 │   └── data/                   # 数据管理
+│       └── cache_manager.py    # 缓存管理器
 ├── analysis/            # 分析工具
 │   ├── travel_time.py          # 行程时间计算
 │   ├── process_flow.py         # 流程分析
@@ -143,7 +151,35 @@ uv run python main.py --mode optimize --algorithm genetic_algorithm \
   --population-size 50 --max-iterations 300
 ```
 
-### 3. 多算法对比
+#### PPO训练特性
+PPO算法支持以下高级功能：
+- **自动保存最佳模型**：训练过程中通过EvalCallback自动评估并保存最佳模型
+- **断点续训**：支持从checkpoint恢复训练，避免长时间训练丢失进度
+- **学习率调度**：支持线性衰减学习率，提高训练稳定性和收敛性
+- **动作掩码**：使用MaskablePPO确保只选择有效动作，避免违反约束
+
+### 3. PPO模型推理
+使用已训练的PPO模型进行推理：
+```bash
+# 默认使用最新训练的最佳模型
+uv run python inference_ppo_model.py
+
+# 指定模型文件
+uv run python inference_ppo_model.py \
+  --model-path results/model/ppo_layout_20250810-173909/best_model/best_model.zip
+
+# 多次推理取最佳
+uv run python inference_ppo_model.py --n-episodes 10
+
+# 单次推理并显示详细过程
+uv run python inference_ppo_model.py --single --verbose
+```
+
+推理输出：
+- `results/inference/ppo_inference_*.json` - 详细推理结果
+- `results/inference/layout_ppo_inference_*.txt` - 布局方案文本格式
+
+### 4. 多算法对比
 运行多个算法进行性能对比：
 ```bash
 # 基础对比
@@ -169,9 +205,26 @@ uv run python main.py --mode compare \
 
 ### 优化算法配置
 在`src/config.py`的`RLConfig`中配置：
+
+**约束参数：**
 - `AREA_SCALING_FACTOR = 0.1` - 面积约束容差
 - `MANDATORY_ADJACENCY` - 强制相邻约束
 - `PREFERRED_ADJACENCY` - 偏好相邻约束
+- `FIXED_NODE_TYPES` - 固定位置的节点类型
+
+**PPO训练参数：**
+- `TOTAL_TIMESTEPS = 5_000_000` - 总训练步数
+- `NUM_ENVS = 8` - 并行环境数
+- `EVAL_FREQUENCY = 10000` - 评估频率
+- `CHECKPOINT_FREQUENCY = 50000` - 检查点保存频率
+- `RESUME_TRAINING = False` - 是否启用断点续训
+- `LEARNING_RATE_SCHEDULE_TYPE = "linear"` - 学习率调度类型
+
+**奖励函数参数：**
+- `ENABLE_POTENTIAL_REWARD = True` - 启用势函数奖励
+- `AREA_MATCH_REWARD_WEIGHT = 0.2` - 面积匹配奖励权重
+- `REWARD_PLACEMENT_BONUS = 1.0` - 成功放置奖励
+- `REWARD_EMPTY_SLOT_PENALTY = 5.0` - 空槽位惩罚
 
 ## 📊 输出结果
 
@@ -193,7 +246,14 @@ results/
     └── algorithm_comparison_report_*.md
 
 logs/
-└── hospital_optimizer.log     # 系统运行日志
+├── hospital_optimizer.log     # 系统运行日志
+└── ppo_layout_*/              # PPO训练日志目录
+    ├── final_model.zip        # 最终模型
+    ├── best_model/            # 最佳模型目录
+    │   └── best_model.zip     # 评估中的最佳模型
+    ├── checkpoints/           # 训练检查点
+    ├── eval_logs/             # 评估日志
+    └── training_config.json   # 训练配置
 ```
 
 ## 🎯 应用场景
@@ -212,6 +272,44 @@ logs/
 
 ### 添加新的医院区域类型
 在`src/config.py`的`COLOR_MAP`中添加新的RGB颜色映射即可。
+
+### PPO模型训练技巧
+
+#### 断点续训
+当训练意外中断时，可以从最近的检查点恢复：
+```bash
+# 自动查找最新检查点
+uv run python main.py --mode optimize --algorithm ppo --resume
+
+# 指定检查点路径
+uv run python main.py --mode optimize --algorithm ppo \
+  --resume --checkpoint-path logs/ppo_layout_*/checkpoints/rl_model_1000000_steps.zip
+```
+
+#### 调试动作掩码
+PPO使用MaskablePPO确保只选择有效动作。如遇到"选择已放置科室"错误，检查：
+1. 环境的`get_action_mask()`方法是否正确返回掩码
+2. 模型预测时是否传递了`action_masks`参数
+3. 动作空间维度是否与掩码维度一致
+
+#### 性能优化建议
+- **并行环境数**：增加`NUM_ENVS`可加速训练，但需要更多内存
+- **批量大小**：调整`BATCH_SIZE`平衡训练速度和稳定性
+- **学习率调度**：使用线性衰减提高后期收敛稳定性
+- **评估频率**：降低`EVAL_FREQUENCY`减少训练中断，但可能错过最佳模型
+
+### 常见问题解决
+
+#### Q: PPO训练不收敛
+- 检查奖励函数设计是否合理
+- 尝试调整学习率和批量大小
+- 增加训练步数
+- 启用势函数奖励引导
+
+#### Q: 推理时出现约束违反
+- 确认模型使用了正确的动作掩码
+- 检查约束管理器配置是否一致
+- 验证训练和推理环境配置相同
 
 ## 📄 许可证
 
