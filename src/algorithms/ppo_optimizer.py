@@ -13,7 +13,7 @@ from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback as EvalCa
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
-from stable_baselines3.common.evaluation import evaluate_policy
+from sb3_contrib.common.maskable.evaluation import evaluate_policy
 
 from src.algorithms.base_optimizer import BaseOptimizer, OptimizationResult
 from src.algorithms.constraint_manager import ConstraintManager
