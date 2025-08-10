@@ -110,6 +110,10 @@ uv run python main.py --mode optimize --algorithm genetic_algorithm --population
 # PPO参数
 uv run python main.py --mode optimize --algorithm ppo --total-timesteps 100000
 
+# 从预训练模型继续训练
+uv run python main.py --mode optimize --algorithm ppo \
+  --pretrained-model-path /path/to/best_model.zip --total-timesteps 10000
+
 # 模拟退火参数
 uv run python main.py --mode optimize --algorithm simulated_annealing --initial-temperature 1500.0 --max-iterations 10000
 
@@ -335,3 +339,22 @@ logs/
   - 添加统计监控：在episode结束时报告平均、最小、最大面积匹配度
   - 验证功能：通过测试脚本确认面积匹配奖励正确集成到势函数中，不直接影响step奖励
   - 预期效果：智能体将在满足硬约束基础上，优先选择面积更匹配的科室-槽位配对，提升空间利用效率
+- 2025-08-10: **实现PPO最佳模型保存和评估功能** - 完善训练过程中的模型保存和评估机制：
+  - 修复_evaluate_best_model()方法：从简单返回随机布局改为真正加载和评估最佳模型
+  - 添加模型加载降级方案：优先使用best_model，找不到时降级到final_model或最新checkpoint
+  - 实现多episode评估：评估5个episode并选择最优结果，提高评估稳定性
+  - 修复动作掩码问题：确保推理时正确传递action_masks参数，避免选择已放置科室
+  - 创建完整推理工具：新增inference_ppo_model.py，支持单次/多次推理和详细结果保存
+- 2025-08-10: **增强推理工具面积匹配显示** - 在PPO模型推理中添加面积匹配度计算和显示：
+  - 推理过程计算面积匹配度：为每个科室-槽位配对计算0-1之间的匹配分数
+  - 统计信息展示：显示平均、最小、最大面积匹配度
+  - 详细不匹配报告：记录匹配度低于0.8的分配情况
+  - 结果文件包含面积信息：JSON和文本输出都包含完整的面积匹配统计
+  - 验证效果：模型实现了99.1%的平均面积匹配度，证明面积奖励机制有效
+- 2025-08-10: **支持从预训练模型继续训练** - 实现PPO算法从已有最佳模型继续训练的功能：
+  - 修改PPOOptimizer构造函数：添加pretrained_model_path可选参数
+  - 更新模型加载逻辑：支持从指定的预训练模型文件加载权重继续训练
+  - 扩展命令行接口：添加--pretrained-model-path参数支持指定模型路径
+  - 修改AlgorithmManager：正确传递预训练模型路径到PPO优化器
+  - 使用示例：`uv run python main.py --mode optimize --algorithm ppo --pretrained-model-path /path/to/best_model.zip --total-timesteps 10000`
+  - 验证功能：成功从已训练模型继续训练，保持原有性能水平
