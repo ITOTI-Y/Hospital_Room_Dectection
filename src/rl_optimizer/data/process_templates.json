@@ -1,6 +1,6 @@
 [
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "GENERAL_PRACTICE",
         "description": "全科流程",
         "core_sequence": ["全科", "采血处", "心血管内科", "全科", "药房"],
         "start_nodes": ["门"],
@@ -8,7 +8,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "EMERGENCY_TRAUMA",
+        "process_id": "MEDICAL_CHECKUP_PROCESS",
         "description": "体检流程",
         "core_sequence": ["体检科", "采血处", "检验中心", "放射科", "心血管内科", "超声科", "体检科"],
         "start_nodes": ["门"],
@@ -16,7 +16,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "GYN_ROUTINE",
+        "process_id": "PEDIATRIC_PROCESS",
         "description": "儿科",
         "core_sequence": ["儿科", "药房"],
         "start_nodes": ["门"],
@@ -24,7 +24,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "GYN_ROUTINE",
+        "process_id": "TRADITIONAL_CHINESE_MEDICINE_PROCESS",
         "description": "中医科",
         "core_sequence": ["中医科", "药房"],
         "start_nodes": ["门"],
@@ -32,7 +32,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "RESPIRATORY_PROCESS",
         "description": "呼吸科",
         "core_sequence": ["呼吸科", "采血处", "放射科", "呼吸科", "药房"],
         "start_nodes": ["门"],
@@ -40,7 +40,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "KIDNEY_PROCESS",
         "description": "肾内科",
         "core_sequence": ["肾内科", "采血处", "检验中心", "超声科", "肾内科", "药房"],
         "start_nodes": ["门"],
@@ -48,7 +48,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "KIDNEY_DIALYSIS_PROCESS",
         "description": "肾透析",
         "core_sequence": ["肾内科", "透析中心", "药房"],
         "start_nodes": ["门"],
@@ -56,7 +56,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "ORTHOPEDIC_PROCESS",
         "description": "骨科",
         "core_sequence": ["骨科", "采血处", "放射科", "骨科", "药房"],
         "start_nodes": ["门"],
@@ -64,7 +64,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "CARDIOVASCULAR_PROCESS",
         "description": "心血管内科",
         "core_sequence": ["心血管内科", "放射科", "心血管内科", "药房"],
         "start_nodes": ["门"],
@@ -72,7 +72,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "NEUROLOGY_PROCESS",
         "description": "神经科",
         "core_sequence": ["神经科", "采血处", "放射科", "神经科", "药房"],
         "start_nodes": ["门"],
@@ -80,7 +80,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "DIGESTIVE_PROCESS",
         "description": "消化内科",
         "core_sequence": ["消化内科", "采血处", "检验中心", "消化内科", "内镜中心", "药房"],
         "start_nodes": ["门"],
@@ -88,7 +88,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "ENDOSCOPY_PROCESS",
         "description": "内镜中心",
         "core_sequence": ["内镜中心", "消化内科", "药房"],
         "start_nodes": ["门"],
@@ -96,7 +96,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "ONCOLOGY_PROCESS",
         "description": "肿瘤科",
         "core_sequence": ["肿瘤科", "采血处", "放射科", "病理科", "肿瘤科", "药房"],
         "start_nodes": ["门"],
@@ -104,7 +104,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "UROLOGY_PROCESS",
         "description": "泌尿外科",
         "core_sequence": ["泌尿外科", "采血处", "检验中心", "超声科", "泌尿外科", "药房"],
         "start_nodes": ["门"],
@@ -112,7 +112,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "BURN_SURGERY_PROCESS",
         "description": "烧伤整形科",
         "core_sequence": ["烧伤整形科", "药房"],
         "start_nodes": ["门"],
@@ -120,7 +120,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "THYROID_SURGERY_PROCESS",
         "description": "甲状腺外科",
         "core_sequence": ["甲状腺外科", "采血处", "超声科", "甲状腺外科", "药房"],
         "start_nodes": ["门"],
@@ -128,7 +128,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "LIVER_BILIARY_PANCREAS_SURGERY_PROCESS",
         "description": "肝胆胰外科",
         "core_sequence": ["肝胆胰外科", "放射科", "肝胆胰外科", "内镜中心", "药房"],
         "start_nodes": ["门"],
@@ -136,7 +136,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "LIVER_BILIARY_PANCREAS_ENDOSCOPY_PROCESS",
         "description": "肝胆内镜",
         "core_sequence": ["内镜中心", "肝胆胰外科", "药房"],
         "start_nodes": ["门"],
@@ -144,7 +144,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "REPRODUCTIVE_MEDICINE_PROCESS",
         "description": "生殖医学科",
         "core_sequence": ["生殖医学科", "检验中心", "生殖医学科", "药房"],
         "start_nodes": ["门"],
@@ -152,7 +152,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "PRENATAL_DIAGNOSIS_PROCESS",
         "description": "产前诊断门诊",
         "core_sequence": ["产前诊断门诊", "检验中心", "超声科", "产前诊断门诊", "药房"],
         "start_nodes": ["门"],
@@ -160,7 +160,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "OBSTETRICS_PROCESS",
         "description": "产科",
         "core_sequence": ["产科", "采血处", "检验中心", "超声科", "产科", "药房"],
         "start_nodes": ["门"],
@@ -168,7 +168,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "GYNECOLOGY_PROCESS",
         "description": "妇科",
         "core_sequence": ["妇科", "采血处", "检验中心", "超声科", "妇科", "药房"],
         "start_nodes": ["门"],
@@ -176,7 +176,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "DERMATOLOGY_PROCESS",
         "description": "皮肤科",
         "core_sequence": ["皮肤科", "药房"],
         "start_nodes": ["门"],
@@ -184,7 +184,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "LASER_PROCESS",
         "description": "综合激光科",
         "core_sequence": ["综合激光科", "药房"],
         "start_nodes": ["门"],
@@ -192,7 +192,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "EYE_PROCESS",
         "description": "眼科",
         "core_sequence": ["眼科", "药房"],
         "start_nodes": ["门"],
@@ -200,7 +200,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "ENT_PROCESS",
         "description": "耳鼻喉科",
         "core_sequence": ["耳鼻喉科", "放射科", "耳鼻喉科", "药房"],
         "start_nodes": ["门"],
@@ -208,7 +208,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "ORAL_PROCESS_1",
         "description": "口腔一区",
         "core_sequence": ["口腔一区", "放射科", "口腔一区", "药房"],
         "start_nodes": ["门"],
@@ -216,7 +216,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "ORAL_PROCESS_2",
         "description": "口腔科二区",
         "core_sequence": ["口腔科二区", "放射科", "口腔科二区", "药房"],
         "start_nodes": ["门"],
@@ -224,7 +224,7 @@
         "base_weight": 1.0
     },
     {
-        "process_id": "STD_CHECKUP",
+        "process_id": "EMERGENCY_PROCESS",
         "description": "急诊科",
         "core_sequence": ["急诊科", "超声科", "放射科", "急诊科", "药房"],
         "start_nodes": ["门"],
