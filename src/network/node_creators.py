@@ -106,8 +106,9 @@ class RoomNodeCreator(BaseNodeCreator):
                 centroid_x, centroid_y = centroids[i]
                 position = (int(centroid_x), int(centroid_y), z_level)
                 node_id = self.graph_manager.generate_node_id()
-                room_node = Node(node_id=node_id, node_type=room_type_name, pos=position,
-                                 default_time=node_time, area=area)
+                room_node = Node(node_id=node_id, node_type=room_type_name,
+                                x=position[0], y=position[1], z=position[2],
+                                time=node_time, area=area)
                 self.graph_manager.add_node(room_node)
                 id_map[labels == i] = room_node.id
 
@@ -133,8 +134,9 @@ class VerticalNodeCreator(BaseNodeCreator):
                 centroid_x, centroid_y = centroids[i]
                 position = (int(centroid_x), int(centroid_y), z_level)
                 node_id = self.graph_manager.generate_node_id()
-                v_node = Node(node_id=node_id, node_type=vertical_type_name, pos=position,
-                              default_time=node_time, area=area)
+                v_node = Node(node_id=node_id, node_type=vertical_type_name,
+                              x=position[0], y=position[1], z=position[2],
+                              time=node_time, area=area)
                 self.graph_manager.add_node(v_node)
                 id_map[labels == i] = v_node.id
 
@@ -184,7 +186,9 @@ class MeshBasedNodeCreator(BaseNodeCreator): # New base for Pedestrian and Outsi
             for vx, vy in zip(valid_x_coords, valid_y_coords):
                 pos = (int(vx), int(vy), z_level)
                 node_id = self.graph_manager.generate_node_id()
-                mesh_node = Node(node_id=node_id, node_type=region_type_name, pos=pos, default_time=node_time, area=mesh_node_area)
+                mesh_node = Node(node_id=node_id, node_type=region_type_name,
+                                x=pos[0], y=pos[1], z=pos[2],
+                                time=node_time, area=mesh_node_area)
                 self.graph_manager.add_node(mesh_node)
                 component_nodes.append(mesh_node)
                 # Optionally, mark the exact grid cell in id_map with the mesh_node.id
@@ -284,8 +288,9 @@ class ConnectionNodeCreator(BaseNodeCreator):
                 position = (int(centroid_x), int(centroid_y), z_level)
 
                 node_id = self.graph_manager.generate_node_id()
-                conn_node = Node(node_id=node_id, node_type=conn_type_name, pos=position,
-                                 default_time=self.config.CONNECTION_TIME, area=area)
+                conn_node = Node(node_id=node_id, node_type=conn_type_name,
+                                x=position[0], y=position[1], z=position[2],
+                                time=self.config.CONNECTION_TIME, area=area)
                 self.graph_manager.add_node(conn_node)
 
                 component_mask_pixels = (labels == i)

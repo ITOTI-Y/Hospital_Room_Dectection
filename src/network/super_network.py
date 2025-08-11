@@ -306,9 +306,8 @@ class SuperNetwork:
 
         # Combine graphs
         for floor_graph in processed_graphs_data:
-            # Nodes in floor_graph should already have all attributes from Node class
-            # and GraphManager.add_node should have added them to nx.Graph.
-            # Make sure node objects themselves are added, not just IDs.
+            # 每个楼层的图使用节点ID作为图节点，数据中包含node_obj
+            # 直接合并节点和边，保持一致的存储格式
             self.super_graph.add_nodes_from(floor_graph.nodes(data=True))
             self.super_graph.add_edges_from(floor_graph.edges(data=True))
 
@@ -328,15 +327,19 @@ class SuperNetwork:
         Automatically calculates a tolerance for connecting vertical nodes
         based on their typical proximity (if not specified).
         """
-        vertical_nodes = [
-            node for node in self.super_graph.nodes()  # Get node objects
-            if isinstance(node, Node) and node.node_type in self.config.VERTICAL_TYPES
-        ]
+        # 获取所有垂直节点
+        vertical_nodes = []
+        for node_id in self.super_graph.nodes():
+            node_data = self.super_graph.nodes[node_id]
+            node_obj = node_data.get('node_obj')
+            if isinstance(node_obj, Node) and node_obj.node_type in self.config.VERTICAL_TYPES:
+                vertical_nodes.append(node_obj)
+        
         if not vertical_nodes or len(vertical_nodes) < 2:
             return self.config.DEFAULT_VERTICAL_CONNECTION_TOLERANCE  # Fallback
 
         # Consider only XY positions for tolerance calculation
-        positions_xy = np.array([node.pos[:2] for node in vertical_nodes])
+        positions_xy = np.array([(node.x, node.y) for node in vertical_nodes])
         if len(positions_xy) < 2:
             return self.config.DEFAULT_VERTICAL_CONNECTION_TOLERANCE
 
@@ -371,10 +374,13 @@ class SuperNetwork:
         Connects vertical transport nodes (e.g., stairs, elevators) between
         different floors if they are of the same type and spatially close in XY.
         """
-        all_vertical_nodes_in_graph = [
-            node for node in self.super_graph.nodes()  # Iterating actual Node objects
-            if isinstance(node, Node) and node.node_type in self.config.VERTICAL_TYPES
-        ]
+        # 获取所有垂直节点
+        all_vertical_nodes_in_graph = []
+        for node_id in self.super_graph.nodes():
+            node_data = self.super_graph.nodes[node_id]
+            node_obj = node_data.get('node_obj')
+            if isinstance(node_obj, Node) and node_obj.node_type in self.config.VERTICAL_TYPES:
+                all_vertical_nodes_in_graph.append(node_obj)
 
         if not all_vertical_nodes_in_graph:
             logger.info("No vertical nodes found to connect between floors.")
@@ -396,10 +402,10 @@ class SuperNetwork:
             # Sort nodes by Z-level, then by Y, then by X for potentially more stable pairing
             # Though KDTree approach doesn't strictly need pre-sorting.
             nodes_of_this_type.sort(
-                key=lambda n: (n.pos[2], n.pos[1], n.pos[0]))
+                key=lambda n: (n.z, n.y, n.x))
 
             # Build KDTree for XY positions of nodes of this specific type
-            positions_xy = np.array([node.pos[:2]
+            positions_xy = np.array([(node.x, node.y)
                                     for node in nodes_of_this_type])
             if positions_xy.shape[0] < 2:
                 continue  # Need at least 2 points for KDTree sensible query
@@ -420,7 +426,7 @@ class SuperNetwork:
                 # Query for other nodes of the SAME TYPE within the XY tolerance
                 # query_ball_point returns indices into the `positions_xy` array
                 indices_in_ball = kdtree.query_ball_point(
-                    current_node.pos[:2], r=self.vertical_connection_tolerance)
+                    (current_node.x, current_node.y), r=self.vertical_connection_tolerance)
 
                 for neighbor_idx in indices_in_ball:
                     if neighbor_idx == i:  # Don't connect to self
@@ -430,13 +436,13 @@ class SuperNetwork:
 
                     # Crucial check: Ensure they are on different floors (Z-levels differ significantly)
                     # Z-levels are too close (same floor)
-                    if abs(current_node.pos[2] - neighbor_node.pos[2]) < 1.0:
+                    if abs(current_node.z - neighbor_node.z) < 1.0:
                         continue
 
-                    # Connect if not already connected
-                    if not self.super_graph.has_edge(current_node, neighbor_node):
+                    # Connect if not already connected (使用节点ID)
+                    if not self.super_graph.has_edge(current_node.id, neighbor_node.id):
                         self.super_graph.add_edge(
-                            current_node, neighbor_node, type='vertical_connection')
+                            current_node.id, neighbor_node.id, type='vertical_connection')
                         connected_pairs_count += 1
                         # Mark both as processed for this type of pairing to avoid re-pairing B with A if A-B done
                         # This might be too aggressive if a node can connect to multiple above/below.

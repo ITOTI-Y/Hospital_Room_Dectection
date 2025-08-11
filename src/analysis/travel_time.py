@@ -57,9 +57,13 @@ def calculate_room_travel_times(
             "unless this behavior is changed in the filtering logic below."
         )
 
-    for G_node_id, G_node_data in graph.nodes(data=True):
-        node_obj = G_node_data.get('node_obj', G_node_id)
+    for G_node_id in graph.nodes():
+        # 获取节点数据
+        G_node_data = graph.nodes[G_node_id]
+        node_obj = G_node_data.get('node_obj')
+        
         if not isinstance(node_obj, Node):
+            logger.warning(f"Node {G_node_id} does not have a valid node_obj attribute")
             continue
 
         if node_obj.node_type in config.ROOM_TYPES:
@@ -95,13 +99,18 @@ def calculate_room_travel_times(
 
     def weight_function(u_node_id, v_node_id, edge_data):  # u,v are node IDs
         # 从图中获取节点对象
+        if v_node_id not in graph.nodes:
+            logger.error(f"Node {v_node_id} not found in graph")
+            return float('inf')
+        
         v_node_data = graph.nodes[v_node_id]
         v_node_obj = v_node_data.get('node_obj')
-        if not isinstance(v_node_obj, Node):  # Should not happen if graph is consistent
+        
+        if not isinstance(v_node_obj, Node):
             logger.error(
                 f"Target node {v_node_id} in edge is not a valid Node object for weight func.")
-            raise ValueError(
-                f"Invalid node object for weight function: {v_node_id}")
+            return float('inf')  # 返回无穷大而不是抛出异常
+        
         return v_node_obj.time
 
     travel_times_data: Dict[str, Dict[str, Union[float, str]]] = {}

@@ -111,6 +111,8 @@ class NetworkConfig:
 
         self.HORIZONTAL_EDGE_COLOR: str = "#1f77b4"
         self.VERTICAL_EDGE_COLOR: str = "#ff7f0e"
+        self.DOOR_EDGE_COLOR: str = "#2ca02c"
+        self.SPECIAL_EDGE_COLOR: str = "#d62728"
         self.EDGE_WIDTH: float = 0.5
 
         # SuperNetwork多层网络专用配置

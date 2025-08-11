@@ -63,16 +63,16 @@ class GraphManager:
             node: 要添加的节点对象
         """
         self._nodes[node.id] = node
-        # 添加节点到NetworkX图中，包含节点属性和完整的Node对象
+        # 添加节点到NetworkX图中，使用节点ID作为图节点
+        # 将完整的Node对象作为属性存储
         self._graph.add_node(
             node.id,
-            x=node.x,
-            y=node.y,
-            z=node.z,
+            node_obj=node,  # 存储完整的Node对象
+            # 冗余存储一些常用属性便于快速访问
+            pos=(node.x, node.y, node.z),
             type=node.node_type,
             name=node.name,
-            time=node.time,
-            node_obj=node  # 添加完整的Node对象引用
+            time=node.time
         )
         
         logger.debug(f"添加节点: {node}")
