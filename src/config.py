@@ -262,11 +262,22 @@ class RLConfig:
         self.SA_DEFAULT_COOLING_RATE: float = 0.95
         
         # --- 遗传算法默认参数 ---
-        self.GA_DEFAULT_POPULATION_SIZE: int = 50
-        self.GA_DEFAULT_ELITE_SIZE: int = 5
-        self.GA_DEFAULT_MUTATION_RATE: float = 0.1
-        self.GA_DEFAULT_CROSSOVER_RATE: float = 0.8
-        self.GA_DEFAULT_TOURNAMENT_SIZE: int = 3
+        self.GA_DEFAULT_POPULATION_SIZE: int = 100
+        self.GA_DEFAULT_ELITE_SIZE: int = 20
+        self.GA_DEFAULT_MUTATION_RATE: float = 0.15  # 提高初始变异率
+        self.GA_DEFAULT_CROSSOVER_RATE: float = 0.85  # 提高初始交叉率
+        self.GA_DEFAULT_TOURNAMENT_SIZE: int = 5
+        self.GA_DEFAULT_MAX_AGE: int = 50
+        
+        # --- 约束感知遗传算法增强参数 ---
+        self.GA_CONSTRAINT_REPAIR_STRATEGY: str = 'greedy_area_matching'  # 默认约束修复策略
+        self.GA_ADAPTIVE_PARAMETERS: bool = True  # 启用自适应参数调整
+        self.GA_MAX_REPAIR_ATTEMPTS: int = 5  # 约束修复最大尝试次数
+        self.GA_DIVERSITY_THRESHOLD_LOW: float = 0.05  # 多样性极低阈值
+        self.GA_DIVERSITY_THRESHOLD_MEDIUM: float = 0.15  # 多样性较低阈值
+        self.GA_STAGNATION_THRESHOLD: int = 20  # 停滞代数阈值
+        self.GA_PARAMETER_ADJUST_FACTOR: float = 1.1  # 参数调整因子
+        self.GA_AREA_MATCH_IMPROVEMENT_THRESHOLD: float = 0.1  # 面积匹配改善阈值
         
         # --- 并发控制 ---
         self.MAX_PARALLEL_ALGORITHMS: int = 3

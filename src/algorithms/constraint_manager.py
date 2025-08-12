@@ -312,10 +312,6 @@ class ConstraintManager:
         
         return True
     
-    def _check_uniqueness_constraints(self, layout: List[str]) -> bool:
-        """检查唯一性约束"""
-        non_none_depts = [dept for dept in layout if dept is not None]
-        return len(non_none_depts) == len(set(non_none_depts))
     
     def _get_department_index(self, dept_name: str) -> Optional[int]:
         """获取科室在departments_info中的索引（使用哈希表优化）"""
@@ -454,3 +450,364 @@ class ConstraintManager:
                 penalty += 500.0  # 中等惩罚
         
         return penalty
+
+
+class SmartConstraintRepairer:
+    """
+    智能约束修复器
+    
+    提供多种约束修复策略，用于修复违反约束的布局。
+    支持贪心面积匹配、交换优化、随机修复等多种修复方法。
+    """
+    
+    def __init__(self, constraint_manager: ConstraintManager):
+        """
+        初始化智能约束修复器
+        
+        Args:
+            constraint_manager: 约束管理器实例
+        """
+        self.constraint_manager = constraint_manager
+        self.logger = logging.getLogger(__name__)
+        
+        # 修复统计信息
+        self.repair_attempts = 0
+        self.successful_repairs = 0
+        
+    def repair_layout(self, 
+                     layout: List[str], 
+                     strategy: str = 'greedy_area_matching', 
+                     max_attempts: int = 10) -> List[str]:
+        """
+        修复布局约束违反
+        
+        Args:
+            layout: 待修复的布局
+            strategy: 修复策略 ('greedy_area_matching', 'swap_optimization', 'random_repair')
+            max_attempts: 最大修复尝试次数
+            
+        Returns:
+            List[str]: 修复后的布局
+        """
+        self.repair_attempts += 1
+        
+        if self.constraint_manager.is_valid_layout(layout):
+            return layout.copy()
+        
+        # 根据策略选择修复方法
+        if strategy == 'greedy_area_matching':
+            repaired = self._greedy_area_matching_repair(layout, max_attempts)
+        elif strategy == 'swap_optimization':
+            repaired = self._swap_optimization_repair(layout, max_attempts)
+        elif strategy == 'random_repair':
+            repaired = self._random_repair(layout, max_attempts)
+        else:
+            self.logger.warning(f"未知修复策略: {strategy}, 使用默认策略")
+            repaired = self._greedy_area_matching_repair(layout, max_attempts)
+        
+        if self.constraint_manager.is_valid_layout(repaired):
+            self.successful_repairs += 1
+            self.logger.debug(f"布局修复成功，策略: {strategy}")
+        else:
+            self.logger.warning(f"布局修复失败，策略: {strategy}, 生成新的有效布局")
+            repaired = self.constraint_manager.generate_valid_layout()
+        
+        return repaired
+    
+    def _greedy_area_matching_repair(self, layout: List[str], max_attempts: int) -> List[str]:
+        """
+        贪心面积匹配修复策略
+        
+        基于面积兼容性重新分配科室到槽位，优先考虑面积匹配度最高的组合。
+        
+        Args:
+            layout: 待修复的布局
+            max_attempts: 最大尝试次数
+            
+        Returns:
+            List[str]: 修复后的布局
+        """
+        # 获取所有可放置的科室和槽位
+        all_departments = list(self.constraint_manager.placeable_departments)
+        all_slots = list(range(len(self.constraint_manager.slots_info)))
+        
+        # 创建面积匹配度矩阵
+        import numpy as np
+        
+        compatibility_scores = np.zeros((len(all_slots), len(all_departments)))
+        
+        for slot_idx in all_slots:
+            for dept_idx, dept_name in enumerate(all_departments):
+                slot_info = self.constraint_manager.slots_info[slot_idx]
+                dept_info = self.constraint_manager.departments_info[dept_idx]
+                
+                # 计算面积匹配度（越接近1表示匹配度越高）
+                area_diff = abs(slot_info.area - dept_info.area_requirement)
+                max_area = max(slot_info.area, dept_info.area_requirement)
+                compatibility_scores[slot_idx, dept_idx] = 1.0 - (area_diff / max_area) if max_area > 0 else 0.0
+        
+        # 使用匈牙利算法或贪心算法进行最优匹配
+        repaired_layout = self._hungarian_assignment(all_slots, all_departments, compatibility_scores)
+        
+        # 如果匈牙利算法失败，使用贪心备选方案
+        if repaired_layout is None:
+            repaired_layout = self._greedy_assignment(all_slots, all_departments, compatibility_scores)
+        
+        return repaired_layout
+    
+    def _hungarian_assignment(self, 
+                             slots: List[int], 
+                             departments: List[str], 
+                             scores: 'np.ndarray') -> Optional[List[str]]:
+        """
+        使用匈牙利算法进行最优分配
+        
+        Args:
+            slots: 槽位索引列表
+            departments: 科室名称列表
+            scores: 兼容性得分矩阵
+            
+        Returns:
+            Optional[List[str]]: 分配结果布局，失败时返回None
+        """
+        try:
+            from scipy.optimize import linear_sum_assignment
+            
+            # 将最大化问题转换为最小化问题
+            cost_matrix = 1.0 - scores
+            
+            # 解决分配问题
+            slot_indices, dept_indices = linear_sum_assignment(cost_matrix)
+            
+            # 构建布局
+            layout = [''] * len(slots)
+            for slot_idx, dept_idx in zip(slot_indices, dept_indices):
+                layout[slot_idx] = departments[dept_idx]
+            
+            # 验证分配是否满足约束
+            if self.constraint_manager.is_valid_layout(layout):
+                return layout
+            else:
+                return None
+                
+        except ImportError:
+            self.logger.warning("scipy未安装，无法使用匈牙利算法，回退到贪心算法")
+            return None
+        except Exception as e:
+            self.logger.warning(f"匈牙利算法执行失败: {e}")
+            return None
+    
+    def _greedy_assignment(self, 
+                          slots: List[int], 
+                          departments: List[str], 
+                          scores: 'np.ndarray') -> List[str]:
+        """
+        贪心分配算法
+        
+        按照兼容性得分从高到低进行分配。
+        
+        Args:
+            slots: 槽位索引列表
+            departments: 科室名称列表
+            scores: 兼容性得分矩阵
+            
+        Returns:
+            List[str]: 分配结果布局
+        """
+        import numpy as np
+        
+        layout = [''] * len(slots)
+        used_departments = set()
+        used_slots = set()
+        
+        # 处理固定位置约束
+        for dept_name, fixed_slot_idx in self.constraint_manager.fixed_assignments.items():
+            if dept_name in departments and fixed_slot_idx in slots:
+                layout[fixed_slot_idx] = dept_name
+                used_departments.add(dept_name)
+                used_slots.add(fixed_slot_idx)
+        
+        # 获取所有未分配的(槽位,科室)对及其得分
+        candidates = []
+        for slot_idx in slots:
+            if slot_idx not in used_slots:
+                for dept_idx, dept_name in enumerate(departments):
+                    if dept_name not in used_departments:
+                        score = scores[slot_idx, dept_idx]
+                        candidates.append((score, slot_idx, dept_name))
+        
+        # 按得分降序排序
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        
+        # 贪心分配
+        for score, slot_idx, dept_name in candidates:
+            if slot_idx not in used_slots and dept_name not in used_departments:
+                # 检查面积约束
+                dept_idx = self.constraint_manager.dept_name_to_index.get(dept_name)
+                if (dept_idx is not None and 
+                    self.constraint_manager.area_compatibility_matrix[slot_idx, dept_idx]):
+                    layout[slot_idx] = dept_name
+                    used_departments.add(dept_name)
+                    used_slots.add(slot_idx)
+        
+        # 填充剩余未分配的位置（如果有）
+        remaining_depts = [d for d in departments if d not in used_departments]
+        remaining_slots = [s for s in slots if s not in used_slots]
+        
+        for slot_idx, dept_name in zip(remaining_slots, remaining_depts):
+            layout[slot_idx] = dept_name
+        
+        return layout
+    
+    def _swap_optimization_repair(self, layout: List[str], max_attempts: int) -> List[str]:
+        """
+        交换优化修复策略
+        
+        通过局部交换操作改善布局的约束满足度。
+        
+        Args:
+            layout: 待修复的布局
+            max_attempts: 最大尝试次数
+            
+        Returns:
+            List[str]: 修复后的布局
+        """
+        current_layout = layout.copy()
+        
+        for attempt in range(max_attempts):
+            if self.constraint_manager.is_valid_layout(current_layout):
+                break
+            
+            # 寻找违反约束的位置
+            violation_positions = self._find_constraint_violations(current_layout)
+            
+            if not violation_positions:
+                break
+            
+            # 随机选择一个违反位置进行修复
+            violation_pos = random.choice(violation_positions)
+            
+            # 寻找可以交换的位置
+            for swap_pos in range(len(current_layout)):
+                if swap_pos != violation_pos:
+                    if self.constraint_manager.get_swap_candidates(current_layout, violation_pos, swap_pos):
+                        # 执行交换
+                        current_layout[violation_pos], current_layout[swap_pos] = \
+                            current_layout[swap_pos], current_layout[violation_pos]
+                        break
+            
+            # 如果交换后仍有问题，尝试随机重分配违反位置
+            if violation_pos in self._find_constraint_violations(current_layout):
+                compatible_depts = self.constraint_manager.get_compatible_departments(violation_pos)
+                if compatible_depts:
+                    # 随机选择一个兼容的科室
+                    new_dept = random.choice(compatible_depts)
+                    # 找到这个科室当前的位置并交换
+                    if new_dept in current_layout:
+                        current_pos = current_layout.index(new_dept)
+                        current_layout[violation_pos], current_layout[current_pos] = \
+                            current_layout[current_pos], current_layout[violation_pos]
+        
+        return current_layout
+    
+    def _random_repair(self, layout: List[str], max_attempts: int) -> List[str]:
+        """
+        随机修复策略
+        
+        通过随机重新排列违反约束的科室来修复布局。
+        
+        Args:
+            layout: 待修复的布局
+            max_attempts: 最大尝试次数
+            
+        Returns:
+            List[str]: 修复后的布局
+        """
+        current_layout = layout.copy()
+        
+        for attempt in range(max_attempts):
+            if self.constraint_manager.is_valid_layout(current_layout):
+                break
+            
+            # 处理唯一性约束违反
+            seen = set()
+            duplicates = []
+            for i, dept in enumerate(current_layout):
+                if dept in seen:
+                    duplicates.append(i)
+                else:
+                    seen.add(dept)
+            
+            # 处理重复科室
+            if duplicates:
+                all_depts = set(self.constraint_manager.placeable_departments)
+                missing_depts = list(all_depts - seen)
+                random.shuffle(missing_depts)
+                
+                for i, dup_idx in enumerate(duplicates):
+                    if i < len(missing_depts):
+                        current_layout[dup_idx] = missing_depts[i]
+            
+            # 处理面积约束违反
+            violation_positions = self._find_constraint_violations(current_layout)
+            for pos in violation_positions:
+                compatible_depts = self.constraint_manager.get_compatible_departments(pos)
+                if compatible_depts:
+                    # 随机选择兼容科室
+                    new_dept = random.choice(compatible_depts)
+                    # 如果该科室已在布局中，找到其位置并交换
+                    if new_dept in current_layout:
+                        other_pos = current_layout.index(new_dept)
+                        current_layout[pos], current_layout[other_pos] = \
+                            current_layout[other_pos], current_layout[pos]
+        
+        return current_layout
+    
+    def _find_constraint_violations(self, layout: List[str]) -> List[int]:
+        """
+        查找违反约束的位置
+        
+        Args:
+            layout: 布局
+            
+        Returns:
+            List[int]: 违反约束的槽位索引列表
+        """
+        violations = []
+        
+        # 检查面积约束违反
+        for slot_idx, dept_name in enumerate(layout):
+            if dept_name is None:
+                continue
+            
+            dept_idx = self.constraint_manager._get_department_index(dept_name)
+            if dept_idx is not None and not self.constraint_manager.area_compatibility_matrix[slot_idx, dept_idx]:
+                violations.append(slot_idx)
+        
+        # 检查固定位置约束违反
+        for dept_name, fixed_slot_idx in self.constraint_manager.fixed_assignments.items():
+            if layout[fixed_slot_idx] != dept_name:
+                violations.append(fixed_slot_idx)
+        
+        return list(set(violations))  # 去重
+    
+    def get_repair_statistics(self) -> Dict[str, Any]:
+        """
+        获取修复统计信息
+        
+        Returns:
+            Dict[str, Any]: 统计信息
+        """
+        success_rate = (self.successful_repairs / self.repair_attempts 
+                       if self.repair_attempts > 0 else 0.0)
+        
+        return {
+            'total_repair_attempts': self.repair_attempts,
+            'successful_repairs': self.successful_repairs,
+            'repair_success_rate': success_rate
+        }
+    
+    def reset_statistics(self):
+        """重置修复统计信息"""
+        self.repair_attempts = 0
+        self.successful_repairs = 0
