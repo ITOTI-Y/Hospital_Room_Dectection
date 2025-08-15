@@ -206,7 +206,7 @@ class RLConfig:
         self.ALLOW_PARTIAL_LAYOUT: bool = True  # 是否允许部分布局（跳过槽位）
         self.MANDATORY_ADJACENCY: List[List[str]] = []  # 例如: [['手术室_30007', '中心供应室_10003']]
         self.PREFERRED_ADJACENCY: Dict[str, List[List[str]]] = {
-            'positive': [], # 例如: [['检验中心_10007', '采血处_20007']]
+            'positive': [["静配中心", "ICU"],["中心供应室", "内镜中心"],["采血处", "检验中心"]], # 例如: [['检验中心_10007', '采血处_20007']]
             'negative': []  # 例如: [['儿科_10006', '急诊科_1']]
         }
         self.FIXED_NODE_TYPES: List[str] = [
@@ -299,6 +299,65 @@ class RLConfig:
         # --- 面积匹配奖励配置 ---
         self.AREA_MATCH_REWARD_WEIGHT: float = 0.2  # 面积匹配在势函数中的权重
         self.AREA_MATCH_BONUS_BASE: float = 10.0  # 基础面积匹配奖励值
+        
+        # --- 相邻性奖励配置 ---
+        # 相邻性奖励总开关
+        self.ENABLE_ADJACENCY_REWARD: bool = True
+        
+        # 相邻性奖励权重(在势函数中的权重)
+        self.ADJACENCY_REWARD_WEIGHT: float = 0.15
+        
+        # 多维度相邻性权重分配
+        self.SPATIAL_ADJACENCY_WEIGHT: float = 0.4      # 空间相邻性权重
+        self.FUNCTIONAL_ADJACENCY_WEIGHT: float = 0.5   # 功能相邻性权重  
+        self.CONNECTIVITY_ADJACENCY_WEIGHT: float = 0.1 # 连通性相邻性权重
+        
+        # 相邻性判定参数
+        self.ADJACENCY_PERCENTILE_THRESHOLD: float = 0.2  # 相邻性分位数阈值
+        self.ADJACENCY_K_NEAREST: int = None              # 最近邻数量(None=自动)
+        self.ADJACENCY_CLUSTER_EPS_PERCENTILE: float = 0.1 # 聚类邻域分位数
+        self.ADJACENCY_MIN_CLUSTER_SIZE: int = 2          # 最小聚类大小
+        
+        # 连通性相邻性参数
+        self.CONNECTIVITY_DISTANCE_PERCENTILE: float = 0.3  # 连通距离分位数阈值
+        self.CONNECTIVITY_MAX_PATH_LENGTH: int = 3          # 最大路径长度
+        self.CONNECTIVITY_WEIGHT_DECAY: float = 0.8         # 路径长度权重衰减因子
+        
+        # 奖励缩放参数
+        self.ADJACENCY_REWARD_BASE: float = 5.0           # 基础奖励值
+        self.ADJACENCY_PENALTY_MULTIPLIER: float = 1.5    # 负向惩罚倍数
+        
+        # 缓存和性能参数
+        self.ADJACENCY_CACHE_SIZE: int = 500              # 相邻性缓存大小
+        self.ADJACENCY_PRECOMPUTE: bool = True            # 是否预计算相邻性矩阵
+        
+        # 医疗功能相邻性数据
+        self.MEDICAL_ADJACENCY_PREFERENCES: Dict[str, Dict[str, float]] = {
+            # 正向偏好 (值为正数)
+            "急诊科": {
+                "放射科": 0.8,      # 急诊需要快速影像诊断
+                "检验中心": 0.7,    # 急诊需要快速化验
+                "手术室": 0.6,      # 急诊可能需要紧急手术
+            },
+            "妇科": {
+                "产科": 0.9,        # 妇产科密切相关
+                "超声科": 0.6,      # 妇科常需超声检查
+            },
+            "儿科": {
+                "挂号收费": 0.5,    # 儿科就诊流程便利性
+                "检验中心": 0.6,    # 儿科常需化验
+            },
+            
+            # 负向约束 (值为负数)
+            "手术室": {
+                "挂号收费": -0.8,   # 手术室应远离嘈杂区域
+                "急诊科": -0.3,     # 避免交叉感染(但急诊手术除外)
+            },
+            "透析中心": {
+                "急诊科": -0.5,     # 透析需要安静环境
+                "挂号收费": -0.6,   # 避免嘈杂
+            }
+        }
 
         # --- 断点续训配置 ---
         self.RESUME_TRAINING: bool = False  # 是否启用断点续训
@@ -309,3 +368,86 @@ class RLConfig:
         # 确保关键路径存在
         self.CACHE_PATH.mkdir(parents=True, exist_ok=True)
         self.LOG_PATH.mkdir(parents=True, exist_ok=True)
+        
+        # 验证相邻性奖励配置参数
+        if self.ENABLE_ADJACENCY_REWARD:
+            self._validate_adjacency_parameters()
+    
+    def _validate_adjacency_parameters(self):
+        """
+        验证相邻性奖励相关配置参数的有效性。
+        在配置错误时抛出异常或自动修正参数值。
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # 验证权重参数
+        weight_params = [
+            ('ADJACENCY_REWARD_WEIGHT', self.ADJACENCY_REWARD_WEIGHT),
+            ('SPATIAL_ADJACENCY_WEIGHT', self.SPATIAL_ADJACENCY_WEIGHT), 
+            ('FUNCTIONAL_ADJACENCY_WEIGHT', self.FUNCTIONAL_ADJACENCY_WEIGHT),
+            ('CONNECTIVITY_ADJACENCY_WEIGHT', self.CONNECTIVITY_ADJACENCY_WEIGHT)
+        ]
+        
+        for param_name, param_value in weight_params:
+            if not isinstance(param_value, (int, float)) or param_value < 0:
+                raise ValueError(f"相邻性权重参数 {param_name} 必须为非负数值，当前值：{param_value}")
+                
+        # 验证分位数阈值参数
+        if not (0 < self.ADJACENCY_PERCENTILE_THRESHOLD < 1):
+            raise ValueError(f"相邻性分位数阈值必须在(0,1)范围内，当前值：{self.ADJACENCY_PERCENTILE_THRESHOLD}")
+        
+        # 验证连通性参数
+        if self.CONNECTIVITY_ADJACENCY_WEIGHT > 0:
+            if not isinstance(self.CONNECTIVITY_MAX_PATH_LENGTH, int) or not (2 <= self.CONNECTIVITY_MAX_PATH_LENGTH <= 5):
+                logger.warning(f"连通性最大路径长度应在2-5之间，当前值：{self.CONNECTIVITY_MAX_PATH_LENGTH}，自动修正为3")
+                self.CONNECTIVITY_MAX_PATH_LENGTH = 3
+                
+            if not (0 < self.CONNECTIVITY_WEIGHT_DECAY < 1):
+                logger.warning(f"连通性权重衰减因子应在(0,1)范围内，当前值：{self.CONNECTIVITY_WEIGHT_DECAY}，自动修正为0.8")
+                self.CONNECTIVITY_WEIGHT_DECAY = 0.8
+                
+            if not (0 < self.CONNECTIVITY_DISTANCE_PERCENTILE < 1):
+                logger.warning(f"连通性距离分位数应在(0,1)范围内，当前值：{self.CONNECTIVITY_DISTANCE_PERCENTILE}，自动修正为0.3")
+                self.CONNECTIVITY_DISTANCE_PERCENTILE = 0.3
+        
+        # 验证奖励缩放参数
+        if not isinstance(self.ADJACENCY_REWARD_BASE, (int, float)) or self.ADJACENCY_REWARD_BASE <= 0:
+            raise ValueError(f"相邻性奖励基础值必须为正数，当前值：{self.ADJACENCY_REWARD_BASE}")
+            
+        if not isinstance(self.ADJACENCY_PENALTY_MULTIPLIER, (int, float)) or self.ADJACENCY_PENALTY_MULTIPLIER <= 0:
+            raise ValueError(f"相邻性惩罚倍数必须为正数，当前值：{self.ADJACENCY_PENALTY_MULTIPLIER}")
+        
+        # 验证缓存参数
+        if not isinstance(self.ADJACENCY_CACHE_SIZE, int) or self.ADJACENCY_CACHE_SIZE <= 0:
+            logger.warning(f"相邻性缓存大小应为正整数，当前值：{self.ADJACENCY_CACHE_SIZE}，自动修正为500")
+            self.ADJACENCY_CACHE_SIZE = 500
+        
+        # 验证医疗功能相邻性偏好数据
+        if not isinstance(self.MEDICAL_ADJACENCY_PREFERENCES, dict):
+            raise ValueError("医疗相邻性偏好配置必须为字典类型")
+            
+        # 检查偏好数据的格式正确性
+        for dept, preferences in self.MEDICAL_ADJACENCY_PREFERENCES.items():
+            if not isinstance(dept, str) or not isinstance(preferences, dict):
+                raise ValueError(f"医疗相邻性偏好格式错误：{dept} -> {preferences}")
+                
+            for target_dept, score in preferences.items():
+                if not isinstance(target_dept, str) or not isinstance(score, (int, float)):
+                    raise ValueError(f"医疗相邻性偏好分数格式错误：{dept} -> {target_dept}: {score}")
+                
+                if not (-2.0 <= score <= 2.0):
+                    logger.warning(f"医疗相邻性偏好分数建议在[-2.0, 2.0]范围内：{dept} -> {target_dept}: {score}")
+        
+        # 权重组合合理性检查
+        total_adjacency_weight = (self.SPATIAL_ADJACENCY_WEIGHT + 
+                                 self.FUNCTIONAL_ADJACENCY_WEIGHT + 
+                                 self.CONNECTIVITY_ADJACENCY_WEIGHT)
+        
+        if total_adjacency_weight <= 0:
+            raise ValueError("至少需要启用一种相邻性权重（空间、功能、连通性）")
+            
+        if total_adjacency_weight > 3.0:
+            logger.warning(f"相邻性权重总和过高可能影响训练稳定性：{total_adjacency_weight:.2f}")
+        
+        logger.info("相邻性奖励配置参数验证通过")

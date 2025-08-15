@@ -4,6 +4,8 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 from typing import List, Dict, Any, Tuple, Optional
+from functools import lru_cache
+from sklearn.cluster import DBSCAN
 
 from src.config import RLConfig
 from src.rl_optimizer.data.cache_manager import CacheManager
@@ -51,6 +53,10 @@ class LayoutEnv(gym.Env):
         self._initialize_nodes_and_slots()
         self._define_spaces()
         self._initialize_state_variables()
+        
+        # 初始化相邻性奖励相关组件
+        if self.config.ENABLE_ADJACENCY_REWARD:
+            self._initialize_adjacency_components()
 
         logger.info(f"环境初始化完成：{self.num_slots}个可用槽位，{self.num_depts}个待放置科室。")
 
@@ -68,6 +74,165 @@ class LayoutEnv(gym.Env):
             raise ValueError(f"槽位数 ({self.num_slots}) 与待布局科室数 ({self.num_depts}) 不匹配!")
         
         self.dept_to_idx = {dept: i for i, dept in enumerate(self.placeable_depts)}
+        
+    def _initialize_adjacency_components(self):
+        """
+        初始化相邻性奖励计算所需的组件和预计算矩阵。
+        """
+        logger.info("初始化相邻性奖励组件...")
+        
+        # 获取行程时间矩阵（已过滤掉面积行）
+        self.travel_times_matrix = self.cm.travel_times_matrix.copy()
+        
+        # 预计算空间相邻性矩阵
+        if self.config.ADJACENCY_PRECOMPUTE:
+            self._precompute_spatial_adjacency()
+            
+        # 初始化功能相邻性映射
+        self._initialize_functional_adjacency()
+        
+        # 初始化连通性相邻性（如果需要）
+        if self.config.CONNECTIVITY_ADJACENCY_WEIGHT > 0:
+            self._precompute_connectivity_adjacency()
+            
+        logger.info("相邻性奖励组件初始化完成")
+
+    def _precompute_spatial_adjacency(self):
+        """
+        预计算基于分位数的空间相邻性矩阵。
+        使用分位数阈值避免硬编码距离值。
+        """
+        logger.debug("预计算空间相邻性矩阵...")
+        
+        # 获取所有有效的节点名称（排除None值）
+        valid_nodes = [node for node in self.placeable_depts if node in self.travel_times_matrix.columns]
+        n_nodes = len(valid_nodes)
+        
+        if n_nodes < 2:
+            logger.warning("可放置节点数量过少，跳过空间相邻性预计算")
+            self.spatial_adjacency_matrix = np.zeros((n_nodes, n_nodes))
+            return
+        
+        # 构建距离矩阵
+        distance_matrix = np.zeros((n_nodes, n_nodes))
+        for i, node1 in enumerate(valid_nodes):
+            for j, node2 in enumerate(valid_nodes):
+                if i != j and node1 in self.travel_times_matrix.index and node2 in self.travel_times_matrix.columns:
+                    distance_matrix[i, j] = self.travel_times_matrix.loc[node1, node2]
+        
+        # 计算距离的分位数阈值
+        upper_triangle_distances = distance_matrix[np.triu_indices_from(distance_matrix, k=1)]
+        valid_distances = upper_triangle_distances[upper_triangle_distances > 0]
+        
+        if len(valid_distances) == 0:
+            logger.warning("无有效距离数据，使用默认空间相邻性矩阵")
+            self.spatial_adjacency_matrix = np.eye(n_nodes)
+            return
+        
+        threshold = np.percentile(valid_distances, self.config.ADJACENCY_PERCENTILE_THRESHOLD * 100)
+        logger.debug(f"空间相邻性距离阈值（{self.config.ADJACENCY_PERCENTILE_THRESHOLD*100}分位数）: {threshold:.2f}")
+        
+        # 生成空间相邻性矩阵
+        self.spatial_adjacency_matrix = (distance_matrix <= threshold).astype(float)
+        np.fill_diagonal(self.spatial_adjacency_matrix, 0)  # 自身不相邻
+        
+        # 确保矩阵对称
+        self.spatial_adjacency_matrix = (self.spatial_adjacency_matrix + self.spatial_adjacency_matrix.T) / 2
+        
+        adjacency_ratio = np.sum(self.spatial_adjacency_matrix) / (n_nodes * (n_nodes - 1))
+        logger.debug(f"空间相邻性矩阵生成完成，相邻比例: {adjacency_ratio:.3f}")
+
+    def _initialize_functional_adjacency(self):
+        """
+        初始化基于医疗功能的相邻性偏好映射。
+        """
+        logger.debug("初始化功能相邻性映射...")
+        
+        # 创建通用名称到节点的映射
+        self.generic_to_nodes = {}
+        for dept in self.placeable_depts:
+            generic_name = dept.split('_')[0]
+            if generic_name not in self.generic_to_nodes:
+                self.generic_to_nodes[generic_name] = []
+            self.generic_to_nodes[generic_name].append(dept)
+        
+        # 创建功能相邻性偏好矩阵
+        n_nodes = len(self.placeable_depts)
+        self.functional_adjacency_matrix = np.zeros((n_nodes, n_nodes))
+        
+        for i, dept1 in enumerate(self.placeable_depts):
+            generic1 = dept1.split('_')[0]
+            for j, dept2 in enumerate(self.placeable_depts):
+                generic2 = dept2.split('_')[0]
+                
+                if i != j:
+                    # 查找医疗功能相邻性偏好
+                    preference_score = self._get_functional_preference(generic1, generic2)
+                    self.functional_adjacency_matrix[i, j] = preference_score
+        
+        logger.debug(f"功能相邻性矩阵生成完成，形状: {self.functional_adjacency_matrix.shape}")
+
+    def _get_functional_preference(self, generic1: str, generic2: str) -> float:
+        """
+        获取两个通用科室之间的功能相邻性偏好分数。
+        
+        Args:
+            generic1: 第一个科室的通用名称
+            generic2: 第二个科室的通用名称
+            
+        Returns:
+            float: 偏好分数，正数表示偏好相邻，负数表示偏好分离
+        """
+        preferences = self.config.MEDICAL_ADJACENCY_PREFERENCES
+        
+        # 正向偏好
+        if generic1 in preferences and generic2 in preferences[generic1]:
+            return preferences[generic1][generic2]
+        
+        # 反向偏好
+        if generic2 in preferences and generic1 in preferences[generic2]:
+            return preferences[generic2][generic1]
+        
+        # 默认无偏好
+        return 0.0
+
+    def _precompute_connectivity_adjacency(self):
+        """
+        预计算基于图连通性的相邻性矩阵。
+        考虑多跳路径的连通性。
+        """
+        logger.debug("预计算连通性相邻性矩阵...")
+        
+        n_nodes = len(self.placeable_depts)
+        self.connectivity_adjacency_matrix = np.zeros((n_nodes, n_nodes))
+        
+        # 获取距离矩阵
+        if not hasattr(self, 'spatial_adjacency_matrix'):
+            logger.warning("空间相邻性矩阵未初始化，跳过连通性相邻性计算")
+            return
+        
+        # 计算多跳路径的连通性
+        distance_matrix = np.zeros((n_nodes, n_nodes))
+        for i, node1 in enumerate(self.placeable_depts):
+            for j, node2 in enumerate(self.placeable_depts):
+                if i != j and node1 in self.travel_times_matrix.index and node2 in self.travel_times_matrix.columns:
+                    distance_matrix[i, j] = self.travel_times_matrix.loc[node1, node2]
+        
+        # 基于距离的多跳连通性
+        valid_distances = distance_matrix[distance_matrix > 0]
+        if len(valid_distances) > 0:
+            connectivity_threshold = np.percentile(valid_distances, self.config.CONNECTIVITY_DISTANCE_PERCENTILE * 100)
+            
+            # 计算连通性权重（距离越近权重越高）
+            for i in range(n_nodes):
+                for j in range(n_nodes):
+                    if i != j and distance_matrix[i, j] > 0:
+                        if distance_matrix[i, j] <= connectivity_threshold:
+                            # 使用指数衰减函数计算连通性权重
+                            weight = np.exp(-distance_matrix[i, j] / connectivity_threshold)
+                            self.connectivity_adjacency_matrix[i, j] = weight
+        
+        logger.debug(f"连通性相邻性矩阵生成完成，非零元素数: {np.count_nonzero(self.connectivity_adjacency_matrix)}")
 
     def _define_spaces(self):
         """定义观测空间和动作空间。"""
@@ -292,6 +457,14 @@ class LayoutEnv(gym.Env):
             info['episode']['area_match_avg'] = area_match_stats['avg_match_score']
             info['episode']['area_match_min'] = area_match_stats['min_match_score']
             info['episode']['area_match_max'] = area_match_stats['max_match_score']
+            
+            # 添加相邻性奖励统计信息
+            if self.config.ENABLE_ADJACENCY_REWARD and num_placed_depts >= 2:
+                adjacency_stats = self._calculate_adjacency_statistics(placed_depts)
+                info['episode']['adjacency_spatial'] = adjacency_stats['spatial_reward']
+                info['episode']['adjacency_functional'] = adjacency_stats['functional_reward'] 
+                info['episode']['adjacency_connectivity'] = adjacency_stats['connectivity_reward']
+                info['episode']['adjacency_total'] = adjacency_stats['total_reward']
         
         return info
     
@@ -431,7 +604,11 @@ class LayoutEnv(gym.Env):
             time_reward = 0.0
         
         # 2. 邻接约束奖励（只基于已放置的科室）
-        adjacency_reward = self._calculate_adjacency_reward(placed_depts)
+        if self.config.ENABLE_ADJACENCY_REWARD:
+            layout_tuple = tuple(final_layout_depts)  # 转换为元组以便缓存
+            adjacency_reward = self._calculate_adjacency_reward(layout_tuple)
+        else:
+            adjacency_reward = 0.0
         
         # 3. 空槽位惩罚
         empty_penalty = num_empty_slots * self.config.EMPTY_SLOT_PENALTY_FACTOR / 1e4  # 缩放保持一致
@@ -447,17 +624,529 @@ class LayoutEnv(gym.Env):
         
         return total_reward
     
-    def _calculate_adjacency_reward(self, _final_layout: List[str]) -> float:
+    @lru_cache(maxsize=500)
+    def _calculate_adjacency_reward(self, layout_tuple: Tuple[str, ...]) -> float:
         """
-        计算偏好相邻软约束的奖励。
-        注意：当前使用基于行程时间的简化邻接判断，如需更精确的邻接关系，
-        可以通过config.py中的PREFERRED_ADJACENCY配置或集成真实的平面图邻接分析。
+        计算当前布局的多维度相邻性奖励。
+        
+        相邻性奖励包含三个维度：
+        1. 空间相邻性：基于距离分位数的空间邻近关系
+        2. 功能相邻性：基于医疗流程的功能协作关系  
+        3. 连通性相邻性：基于图连通性的可达性关系
+        
+        Args:
+            layout_tuple: 当前布局的元组形式（用于LRU缓存）
+            
+        Returns:
+            float: 综合相邻性奖励分数
         """
-        # 这是一个示例实现，实际部署时需要替换为真实邻接数据
-        # 假设 travel_times 矩阵中时间小于某个阈值（例如 10）即为相邻
+        if not self.config.ENABLE_ADJACENCY_REWARD:
+            return 0.0
+        
+        # 转换元组为列表，过滤掉None值
+        placed_depts = [dept for dept in layout_tuple if dept is not None]
+        
+        if len(placed_depts) < 2:
+            return 0.0  # 少于两个科室无法计算相邻性
+        
+        # 计算各维度相邻性奖励
+        spatial_reward = self._calculate_spatial_adjacency_reward(placed_depts)
+        functional_reward = self._calculate_functional_adjacency_reward(placed_depts)
+        connectivity_reward = 0.0
+        
+        if self.config.CONNECTIVITY_ADJACENCY_WEIGHT > 0:
+            connectivity_reward = self._calculate_connectivity_adjacency_reward(placed_depts)
+        
+        # 加权组合各维度奖励
+        total_reward = (
+            self.config.SPATIAL_ADJACENCY_WEIGHT * spatial_reward +
+            self.config.FUNCTIONAL_ADJACENCY_WEIGHT * functional_reward +
+            self.config.CONNECTIVITY_ADJACENCY_WEIGHT * connectivity_reward
+        ) * self.config.ADJACENCY_REWARD_BASE
+        
+        # 调试日志
+        if logger.isEnabledFor(10):  # DEBUG级别
+            logger.debug(f"相邻性奖励详情: 空间={spatial_reward:.3f}, "
+                        f"功能={functional_reward:.3f}, 连通性={connectivity_reward:.3f}, "
+                        f"总计={total_reward:.3f}")
+        
+        return total_reward
+
+    def _calculate_spatial_adjacency_reward(self, placed_depts: List[str]) -> float:
+        """
+        计算空间相邻性奖励。
+        基于预计算的空间相邻性矩阵。
+        
+        Args:
+            placed_depts: 已放置的科室列表
+            
+        Returns:
+            float: 空间相邻性奖励分数
+        """
+        # 安全性检查：矩阵是否存在
+        if not hasattr(self, 'spatial_adjacency_matrix') or self.spatial_adjacency_matrix is None:
+            logger.debug("空间相邻性矩阵不存在，返回0奖励")
+            return 0.0
+        
+        # 安全性检查：输入验证
+        if not placed_depts or len(placed_depts) < 2:
+            logger.debug(f"科室数量不足以计算空间相邻性：{len(placed_depts) if placed_depts else 0}")
+            return 0.0
+        
+        # 安全性检查：矩阵维度验证
+        matrix_shape = self.spatial_adjacency_matrix.shape
+        if len(matrix_shape) != 2 or matrix_shape[0] == 0 or matrix_shape[1] == 0:
+            logger.error(f"空间相邻性矩阵维度异常：{matrix_shape}")
+            return 0.0
+        
         reward = 0.0
-        # ... 实现软约束奖励计算 ...
-        return reward
+        count = 0
+        failed_lookups = 0
+        
+        try:
+            for i, dept1 in enumerate(placed_depts):
+                # 安全的字典查找
+                if dept1 is None or dept1 not in self.dept_to_idx:
+                    failed_lookups += 1
+                    logger.debug(f"科室 '{dept1}' 不在索引映射中")
+                    continue
+                    
+                idx1 = self.dept_to_idx[dept1]
+                
+                # 完整的边界检查
+                if not (0 <= idx1 < matrix_shape[0]):
+                    failed_lookups += 1
+                    logger.warning(f"科室 '{dept1}' 索引 {idx1} 超出矩阵行范围 [0, {matrix_shape[0]})")
+                    continue
+                
+                for j, dept2 in enumerate(placed_depts[i+1:], i+1):
+                    # 安全的字典查找
+                    if dept2 is None or dept2 not in self.dept_to_idx:
+                        failed_lookups += 1
+                        logger.debug(f"科室 '{dept2}' 不在索引映射中")
+                        continue
+                        
+                    idx2 = self.dept_to_idx[dept2]
+                    
+                    # 完整的边界检查
+                    if not (0 <= idx2 < matrix_shape[1]):
+                        failed_lookups += 1
+                        logger.warning(f"科室 '{dept2}' 索引 {idx2} 超出矩阵列范围 [0, {matrix_shape[1]})")
+                        continue
+                    
+                    # 安全的矩阵访问
+                    try:
+                        adjacency_score = self.spatial_adjacency_matrix[idx1, idx2]
+                        
+                        # 验证矩阵值的有效性
+                        if np.isnan(adjacency_score) or np.isinf(adjacency_score):
+                            logger.warning(f"空间相邻性矩阵包含无效值：[{idx1}, {idx2}] = {adjacency_score}")
+                            continue
+                        
+                        reward += adjacency_score
+                        count += 1
+                        
+                    except (IndexError, TypeError) as e:
+                        failed_lookups += 1
+                        logger.error(f"空间相邻性矩阵访问错误 [{idx1}, {idx2}]：{e}")
+                        continue
+        
+        except Exception as e:
+            logger.error(f"空间相邻性奖励计算过程中发生未预期错误：{e}")
+            return 0.0
+        
+        # 记录统计信息
+        if failed_lookups > 0:
+            logger.debug(f"空间相邻性计算中有 {failed_lookups} 次查找失败")
+        
+        # 返回平均相邻性分数
+        if count > 0:
+            avg_reward = reward / count
+            logger.debug(f"空间相邻性奖励：{reward:.4f} / {count} = {avg_reward:.4f}")
+            return avg_reward
+        else:
+            logger.debug("空间相邻性计算：无有效科室对")
+            return 0.0
+
+    def _calculate_functional_adjacency_reward(self, placed_depts: List[str]) -> float:
+        """
+        计算功能相邻性奖励。
+        基于医疗流程驱动的功能协作关系。
+        
+        Args:
+            placed_depts: 已放置的科室列表
+            
+        Returns:
+            float: 功能相邻性奖励分数
+        """
+        # 安全性检查：矩阵是否存在
+        if not hasattr(self, 'functional_adjacency_matrix') or self.functional_adjacency_matrix is None:
+            logger.debug("功能相邻性矩阵不存在，返回0奖励")
+            return 0.0
+        
+        # 安全性检查：输入验证
+        if not placed_depts or len(placed_depts) < 2:
+            logger.debug(f"科室数量不足以计算功能相邻性：{len(placed_depts) if placed_depts else 0}")
+            return 0.0
+        
+        # 安全性检查：矩阵维度验证
+        matrix_shape = self.functional_adjacency_matrix.shape
+        if len(matrix_shape) != 2 or matrix_shape[0] == 0 or matrix_shape[1] == 0:
+            logger.error(f"功能相邻性矩阵维度异常：{matrix_shape}")
+            return 0.0
+        
+        reward = 0.0
+        count = 0
+        failed_lookups = 0
+        
+        try:
+            for i, dept1 in enumerate(placed_depts):
+                # 安全的字典查找
+                if dept1 is None or dept1 not in self.dept_to_idx:
+                    failed_lookups += 1
+                    logger.debug(f"科室 '{dept1}' 不在索引映射中")
+                    continue
+                    
+                idx1 = self.dept_to_idx[dept1]
+                
+                # 完整的边界检查
+                if not (0 <= idx1 < matrix_shape[0]):
+                    failed_lookups += 1
+                    logger.warning(f"科室 '{dept1}' 索引 {idx1} 超出矩阵行范围 [0, {matrix_shape[0]})")
+                    continue
+                
+                for j, dept2 in enumerate(placed_depts[i+1:], i+1):
+                    # 安全的字典查找
+                    if dept2 is None or dept2 not in self.dept_to_idx:
+                        failed_lookups += 1
+                        logger.debug(f"科室 '{dept2}' 不在索引映射中")
+                        continue
+                        
+                    idx2 = self.dept_to_idx[dept2]
+                    
+                    # 完整的边界检查
+                    if not (0 <= idx2 < matrix_shape[1]):
+                        failed_lookups += 1
+                        logger.warning(f"科室 '{dept2}' 索引 {idx2} 超出矩阵列范围 [0, {matrix_shape[1]})")
+                        continue
+                    
+                    # 安全的矩阵访问
+                    try:
+                        preference_score = self.functional_adjacency_matrix[idx1, idx2]
+                        
+                        # 验证矩阵值的有效性
+                        if np.isnan(preference_score) or np.isinf(preference_score):
+                            logger.warning(f"功能相邻性矩阵包含无效值：[{idx1}, {idx2}] = {preference_score}")
+                            continue
+                        
+                        # 正向偏好给予奖励，负向偏好给予惩罚
+                        if preference_score > 0:
+                            reward += preference_score
+                        elif preference_score < 0:
+                            # 安全地获取惩罚倍数
+                            penalty_multiplier = getattr(self.config, 'ADJACENCY_PENALTY_MULTIPLIER', 1.0)
+                            reward += preference_score * penalty_multiplier
+                        # preference_score == 0 时不计入奖励
+                        
+                        count += 1
+                        
+                    except (IndexError, TypeError) as e:
+                        failed_lookups += 1
+                        logger.error(f"功能相邻性矩阵访问错误 [{idx1}, {idx2}]：{e}")
+                        continue
+        
+        except Exception as e:
+            logger.error(f"功能相邻性奖励计算过程中发生未预期错误：{e}")
+            return 0.0
+        
+        # 记录统计信息
+        if failed_lookups > 0:
+            logger.debug(f"功能相邻性计算中有 {failed_lookups} 次查找失败")
+        
+        # 返回平均功能相邻性分数
+        if count > 0:
+            avg_reward = reward / count
+            logger.debug(f"功能相邻性奖励：{reward:.4f} / {count} = {avg_reward:.4f}")
+            return avg_reward
+        else:
+            logger.debug("功能相邻性计算：无有效科室对")
+            return 0.0
+
+    def _calculate_connectivity_adjacency_reward(self, placed_depts: List[str]) -> float:
+        """
+        计算连通性相邻性奖励。
+        基于图连通性的可达性关系，实现真正的多跳路径分析。
+        
+        Args:
+            placed_depts: 已放置的科室列表
+            
+        Returns:
+            float: 连通性相邻性奖励分数
+        """
+        # 安全性检查：矩阵是否存在
+        if not hasattr(self, 'connectivity_adjacency_matrix') or self.connectivity_adjacency_matrix is None:
+            logger.debug("连通性相邻性矩阵不存在，返回0奖励")
+            return 0.0
+        
+        # 安全性检查：输入验证
+        if not placed_depts or len(placed_depts) < 2:
+            logger.debug(f"科室数量不足以计算连通性相邻性：{len(placed_depts) if placed_depts else 0}")
+            return 0.0
+        
+        # 安全性检查：矩阵维度验证
+        matrix_shape = self.connectivity_adjacency_matrix.shape
+        if len(matrix_shape) != 2 or matrix_shape[0] == 0 or matrix_shape[1] == 0:
+            logger.error(f"连通性相邻性矩阵维度异常：{matrix_shape}")
+            return 0.0
+        
+        reward = 0.0
+        count = 0
+        failed_lookups = 0
+        
+        try:
+            for i, dept1 in enumerate(placed_depts):
+                # 安全的字典查找
+                if dept1 is None or dept1 not in self.dept_to_idx:
+                    failed_lookups += 1
+                    logger.debug(f"科室 '{dept1}' 不在索引映射中")
+                    continue
+                    
+                idx1 = self.dept_to_idx[dept1]
+                
+                # 完整的边界检查
+                if not (0 <= idx1 < matrix_shape[0]):
+                    failed_lookups += 1
+                    logger.warning(f"科室 '{dept1}' 索引 {idx1} 超出矩阵行范围 [0, {matrix_shape[0]})")
+                    continue
+                
+                for j, dept2 in enumerate(placed_depts[i+1:], i+1):
+                    # 安全的字典查找
+                    if dept2 is None or dept2 not in self.dept_to_idx:
+                        failed_lookups += 1
+                        logger.debug(f"科室 '{dept2}' 不在索引映射中")
+                        continue
+                        
+                    idx2 = self.dept_to_idx[dept2]
+                    
+                    # 完整的边界检查
+                    if not (0 <= idx2 < matrix_shape[1]):
+                        failed_lookups += 1
+                        logger.warning(f"科室 '{dept2}' 索引 {idx2} 超出矩阵列范围 [0, {matrix_shape[1]})")
+                        continue
+                    
+                    # 安全的矩阵访问和多跳路径分析
+                    try:
+                        # 直接连通性权重
+                        direct_connectivity = self.connectivity_adjacency_matrix[idx1, idx2]
+                        
+                        # 验证矩阵值的有效性
+                        if np.isnan(direct_connectivity) or np.isinf(direct_connectivity):
+                            logger.warning(f"连通性相邻性矩阵包含无效值：[{idx1}, {idx2}] = {direct_connectivity}")
+                            continue
+                        
+                        # 实现多跳路径分析
+                        multi_hop_connectivity = self._calculate_multi_hop_connectivity(idx1, idx2, dept1, dept2)
+                        
+                        # 组合直接连通性和多跳连通性
+                        total_connectivity = direct_connectivity + 0.5 * multi_hop_connectivity
+                        
+                        reward += total_connectivity
+                        count += 1
+                        
+                    except (IndexError, TypeError) as e:
+                        failed_lookups += 1
+                        logger.error(f"连通性矩阵访问错误 [{idx1}, {idx2}]：{e}")
+                        continue
+        
+        except Exception as e:
+            logger.error(f"连通性相邻性奖励计算过程中发生未预期错误：{e}")
+            return 0.0
+        
+        # 记录统计信息
+        if failed_lookups > 0:
+            logger.debug(f"连通性相邻性计算中有 {failed_lookups} 次查找失败")
+        
+        # 返回平均连通性相邻性分数
+        if count > 0:
+            avg_reward = reward / count
+            logger.debug(f"连通性相邻性奖励：{reward:.4f} / {count} = {avg_reward:.4f}")
+            return avg_reward
+        else:
+            logger.debug("连通性相邻性计算：无有效科室对")
+            return 0.0
+
+    def _calculate_multi_hop_connectivity(self, idx1: int, idx2: int, dept1: str, dept2: str) -> float:
+        """
+        计算两个科室之间的多跳连通性权重。
+        基于真正的图连通性分析，考虑2-3跳的间接路径。
+        
+        Args:
+            idx1: 第一个科室的索引
+            idx2: 第二个科室的索引
+            dept1: 第一个科室的名称（用于日志）
+            dept2: 第二个科室的名称（用于日志）
+            
+        Returns:
+            float: 多跳连通性权重（0-1之间）
+        """
+        try:
+            # 获取配置参数并进行验证
+            max_path_length = getattr(self.config, 'CONNECTIVITY_MAX_PATH_LENGTH', 3)
+            weight_decay = getattr(self.config, 'CONNECTIVITY_WEIGHT_DECAY', 0.8)
+            
+            # 参数验证
+            if max_path_length < 2 or max_path_length > 5:
+                logger.warning(f"多跳路径长度配置异常：{max_path_length}，使用默认值3")
+                max_path_length = 3
+                
+            if weight_decay <= 0 or weight_decay >= 1:
+                logger.warning(f"权重衰减因子配置异常：{weight_decay}，使用默认值0.8")
+                weight_decay = 0.8
+            
+            # 获取行程时间矩阵进行多跳分析
+            if not hasattr(self, 'travel_times_matrix') or self.travel_times_matrix is None:
+                logger.debug("行程时间矩阵不存在，无法计算多跳连通性")
+                return 0.0
+            
+            # 安全获取节点名称并验证存在性
+            try:
+                if dept1 not in self.travel_times_matrix.index or dept2 not in self.travel_times_matrix.columns:
+                    logger.debug(f"科室 '{dept1}' 或 '{dept2}' 不在行程时间矩阵中")
+                    return 0.0
+            except Exception as e:
+                logger.debug(f"检查科室是否在行程时间矩阵中时发生错误：{e}")
+                return 0.0
+
+            multi_hop_weight = 0.0
+            
+            # 计算2跳和3跳路径的连通性
+            for path_length in range(2, min(max_path_length + 1, 4)):  # 限制最大路径长度为3
+                try:
+                    path_weight = self._calculate_path_connectivity(dept1, dept2, path_length, weight_decay)
+                    if path_weight > 0:
+                        # 路径长度越长，权重衰减越多
+                        discounted_weight = path_weight * (weight_decay ** (path_length - 1))
+                        multi_hop_weight += discounted_weight
+                        
+                        logger.debug(f"{path_length}跳路径连通性：{dept1} -> {dept2}，权重={discounted_weight:.4f}")
+                        
+                except Exception as e:
+                    logger.debug(f"计算{path_length}跳路径时发生错误：{e}")
+                    continue
+            
+            # 限制多跳权重在合理范围内
+            multi_hop_weight = min(multi_hop_weight, 1.0)
+            
+            if multi_hop_weight > 0:
+                logger.debug(f"多跳连通性总权重：{dept1} <-> {dept2} = {multi_hop_weight:.4f}")
+                
+            return multi_hop_weight
+            
+        except Exception as e:
+            logger.error(f"多跳连通性计算过程中发生未预期错误：{e}")
+            return 0.0
+    
+    def _calculate_path_connectivity(self, start_dept: str, end_dept: str, path_length: int, weight_decay: float) -> float:
+        """
+        计算指定路径长度的连通性权重。
+        使用动态规划方法计算最短路径权重。
+        
+        Args:
+            start_dept: 起始科室名称
+            end_dept: 目标科室名称
+            path_length: 路径长度（跳数）
+            weight_decay: 权重衰减因子
+            
+        Returns:
+            float: 路径连通性权重
+        """
+        try:
+            # 安全性检查：行程时间矩阵验证
+            if not hasattr(self, 'travel_times_matrix') or self.travel_times_matrix is None:
+                logger.debug("行程时间矩阵不存在，无法计算多跳路径连通性")
+                return 0.0
+            
+            # 安全性检查：起始和结束科室存在性
+            if (start_dept not in self.travel_times_matrix.index or 
+                end_dept not in self.travel_times_matrix.columns):
+                logger.debug(f"科室 '{start_dept}' 或 '{end_dept}' 不在行程时间矩阵中")
+                return 0.0
+                
+            # 获取所有可能的中介节点（增加安全检查）
+            try:
+                available_nodes = []
+                for node in self.placeable_depts:
+                    if (node and node != start_dept and node != end_dept and 
+                        node in self.travel_times_matrix.index and 
+                        node in self.travel_times_matrix.columns):
+                        available_nodes.append(node)
+            except Exception as e:
+                logger.error(f"获取可用中介节点时发生错误：{e}")
+                return 0.0
+            
+            if len(available_nodes) == 0:
+                logger.debug(f"没有可用的中介节点用于计算{path_length}跳路径：{start_dept} -> {end_dept}")
+                return 0.0
+                
+            best_path_weight = 0.0
+            
+            if path_length == 2:
+                # 2跳路径：start -> intermediate -> end
+                for intermediate in available_nodes:
+                    try:
+                        # 安全的矩阵访问
+                        time1 = self.travel_times_matrix.loc[start_dept, intermediate]
+                        time2 = self.travel_times_matrix.loc[intermediate, end_dept]
+                        
+                        # 数值有效性检查
+                        if (time1 > 0 and time2 > 0 and 
+                            not (np.isnan(time1) or np.isnan(time2) or np.isinf(time1) or np.isinf(time2))):
+                            # 使用调和平均数计算路径权重（安全除法）
+                            try:
+                                path_weight = 2.0 / (1.0/time1 + 1.0/time2)
+                                # 转换为连通性权重（时间越短，连通性越强）
+                                connectivity_weight = 1.0 / (1.0 + path_weight / 100.0)  # 标准化到0-1
+                                best_path_weight = max(best_path_weight, connectivity_weight)
+                            except ZeroDivisionError:
+                                logger.debug(f"2跳路径计算中出现除零错误：{start_dept}->{intermediate}->{end_dept}")
+                                continue
+                            
+                    except (KeyError, TypeError, ValueError) as e:
+                        logger.debug(f"计算2跳路径权重时出错：{start_dept}->{intermediate}->{end_dept}，错误：{e}")
+                        continue
+                        
+            elif path_length == 3:
+                # 3跳路径：start -> int1 -> int2 -> end
+                for int1 in available_nodes:
+                    for int2 in available_nodes:
+                        if int1 != int2:  # 避免循环
+                            try:
+                                # 安全的矩阵访问
+                                time1 = self.travel_times_matrix.loc[start_dept, int1]
+                                time2 = self.travel_times_matrix.loc[int1, int2]
+                                time3 = self.travel_times_matrix.loc[int2, end_dept]
+                                
+                                # 数值有效性检查
+                                if (time1 > 0 and time2 > 0 and time3 > 0 and 
+                                    not any(np.isnan([time1, time2, time3]) or np.isinf([time1, time2, time3]))):
+                                    # 使用调和平均数计算路径权重（安全除法）
+                                    try:
+                                        path_weight = 3.0 / (1.0/time1 + 1.0/time2 + 1.0/time3)
+                                        connectivity_weight = 1.0 / (1.0 + path_weight / 100.0)
+                                        best_path_weight = max(best_path_weight, connectivity_weight)
+                                    except ZeroDivisionError:
+                                        logger.debug(f"3跳路径计算中出现除零错误：{start_dept}->{int1}->{int2}->{end_dept}")
+                                        continue
+                                    
+                            except (KeyError, TypeError, ValueError) as e:
+                                logger.debug(f"计算3跳路径权重时出错：{start_dept}->{int1}->{int2}->{end_dept}，错误：{e}")
+                                continue
+            
+            return best_path_weight
+            
+        except Exception as e:
+            logger.error(f"路径连通性计算过程中发生未预期错误：{e}")
+            return 0.0
     
     def _calculate_area_match_score(self, dept_idx: int, slot_idx: int) -> float:
         """
@@ -492,7 +1181,7 @@ class LayoutEnv(gym.Env):
     def _calculate_potential(self) -> float:
         """
         计算当前布局状态的势函数值。
-        势函数 Φ(layout) = -1 * (时间成本部分) + 面积匹配奖励部分
+        势函数 Φ(layout) = -1 * (时间成本部分) + 面积匹配奖励部分 + 相邻性奖励部分
         
         Returns:
             float: 当前状态的势函数值
@@ -537,9 +1226,19 @@ class LayoutEnv(gym.Env):
         # 计算平均匹配度（用于日志）
         avg_match_score = total_match_score / num_matched_depts if num_matched_depts > 0 else 0.0
         
-        # === 组合两部分势函数 ===
-        total_potential = (time_cost_potential + 
-                          area_match_reward * self.config.AREA_MATCH_REWARD_WEIGHT)
+        # === 相邻性奖励部分 ===
+        adjacency_reward = 0.0
+        if self.config.ENABLE_ADJACENCY_REWARD and len(placed_depts) >= 2:
+            # 使用元组以便LRU缓存
+            layout_tuple = tuple(layout_with_nulls)
+            adjacency_reward = self._calculate_adjacency_reward(layout_tuple)
+        
+        # === 组合所有部分势函数 ===
+        total_potential = (
+            time_cost_potential + 
+            area_match_reward * self.config.AREA_MATCH_REWARD_WEIGHT +
+            adjacency_reward * self.config.ADJACENCY_REWARD_WEIGHT
+        )
         
         # 详细的调试日志
         if logger.isEnabledFor(10):  # DEBUG级别
@@ -547,6 +1246,7 @@ class LayoutEnv(gym.Env):
                         f"已放置{len(placed_depts)}个科室, "
                         f"时间成本势={time_cost_potential:.4f}, "
                         f"面积匹配奖励={area_match_reward:.4f}, "
+                        f"相邻性奖励={adjacency_reward:.4f}, "
                         f"平均匹配度={avg_match_score:.3f}, "
                         f"总势函数={total_potential:.4f}")
         
@@ -583,13 +1283,70 @@ class LayoutEnv(gym.Env):
             'num_matched': len(match_scores)
         }
     
+    def _calculate_adjacency_statistics(self, placed_depts: List[str]) -> Dict[str, float]:
+        """
+        计算当前布局的相邻性统计信息。
+        
+        Args:
+            placed_depts: 已放置的科室列表
+            
+        Returns:
+            Dict[str, float]: 包含各维度相邻性奖励的字典
+        """
+        if not self.config.ENABLE_ADJACENCY_REWARD or len(placed_depts) < 2:
+            return {
+                'spatial_reward': 0.0,
+                'functional_reward': 0.0,
+                'connectivity_reward': 0.0,
+                'total_reward': 0.0
+            }
+        
+        # 计算各维度相邻性奖励
+        spatial_reward = self._calculate_spatial_adjacency_reward(placed_depts)
+        functional_reward = self._calculate_functional_adjacency_reward(placed_depts)
+        connectivity_reward = 0.0
+        
+        if self.config.CONNECTIVITY_ADJACENCY_WEIGHT > 0:
+            connectivity_reward = self._calculate_connectivity_adjacency_reward(placed_depts)
+        
+        # 计算总奖励
+        total_reward = (
+            self.config.SPATIAL_ADJACENCY_WEIGHT * spatial_reward +
+            self.config.FUNCTIONAL_ADJACENCY_WEIGHT * functional_reward +
+            self.config.CONNECTIVITY_ADJACENCY_WEIGHT * connectivity_reward
+        ) * self.config.ADJACENCY_REWARD_BASE
+        
+        return {
+            'spatial_reward': spatial_reward,
+            'functional_reward': functional_reward,
+            'connectivity_reward': connectivity_reward,
+            'total_reward': total_reward
+        }
+
     def _log_area_match_statistics(self):
         """记录面积匹配统计信息到日志。"""
         stats = self._calculate_area_match_statistics()
         if stats['num_matched'] > 0:
+            adjacency_info = ""
+            if self.config.ENABLE_ADJACENCY_REWARD:
+                # 获取当前已放置的科室
+                placed_depts = []
+                for slot_idx in range(self.num_slots):
+                    dept_id = self.layout[slot_idx]
+                    if dept_id > 0:
+                        placed_depts.append(self.placeable_depts[dept_id - 1])
+                
+                if len(placed_depts) >= 2:
+                    adj_stats = self._calculate_adjacency_statistics(placed_depts)
+                    adjacency_info = (f", 相邻性奖励: 空间={adj_stats['spatial_reward']:.3f}, "
+                                    f"功能={adj_stats['functional_reward']:.3f}, "
+                                    f"连通性={adj_stats['connectivity_reward']:.3f}, "
+                                    f"总计={adj_stats['total_reward']:.3f}")
+            
             logger.info(f"面积匹配统计: 平均匹配度={stats['avg_match_score']:.3f}, "
                        f"最小={stats['min_match_score']:.3f}, 最大={stats['max_match_score']:.3f}, "
-                       f"已匹配科室数={stats['num_matched']}")
+                       f"已匹配科室数={stats['num_matched']}{adjacency_info}")
+    
     
     def render(self, mode="human"):
         """(可选) 渲染环境状态，用于调试。"""
