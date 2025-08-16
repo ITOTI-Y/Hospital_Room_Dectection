@@ -230,7 +230,7 @@ class RLConfig:
         # --- 学习率调度器配置 ---
         self.LEARNING_RATE_SCHEDULE_TYPE: str = "linear"  # "linear", "constant"
         self.LEARNING_RATE_INITIAL: float = 3e-4  # 初始学习率
-        self.LEARNING_RATE_FINAL: float = 1e-5   # 最终学习率（线性衰减的目标值）
+        self.LEARNING_RATE_FINAL: float = 1e-6   # 最终学习率（线性衰减的目标值）
         self.LEARNING_RATE: float = 3e-4  # 保持向后兼容性
 
         # --- PPO 训练超参数 ---
@@ -256,28 +256,29 @@ class RLConfig:
         self.INVALID_ACTION_PENALTY: float = -100.0  # 无效动作惩罚
         
         # --- 模拟退火默认参数 ---
-        self.SA_MAX_REPAIR_ATTEMPTS: int = 10
-        self.SA_DEFAULT_INITIAL_TEMP: float = 1000.0
-        self.SA_DEFAULT_FINAL_TEMP: float = 1.0
-        self.SA_DEFAULT_COOLING_RATE: float = 0.95
-        
+        self.SA_DEFAULT_INITIAL_TEMP: float = 1000.0 # 初始温度
+        self.SA_DEFAULT_FINAL_TEMP: float = 0.1 # 最终温度
+        self.SA_DEFAULT_COOLING_RATE: float = 0.95 # 冷却速率
+        self.SA_DEFAULT_TEMPERATURE_LENGTH: int = 100 # 温度长度
+        self.SA_DEFAULT_MAX_ITERATIONS: int = 10000 # 最大迭代次数
+        self.SA_MAX_REPAIR_ATTEMPTS: int = 10 # 约束修复最大尝试次数
+
         # --- 遗传算法默认参数 ---
-        self.GA_DEFAULT_POPULATION_SIZE: int = 100
-        self.GA_DEFAULT_ELITE_SIZE: int = 20
-        self.GA_DEFAULT_MUTATION_RATE: float = 0.15  # 提高初始变异率
-        self.GA_DEFAULT_CROSSOVER_RATE: float = 0.85  # 提高初始交叉率
-        self.GA_DEFAULT_TOURNAMENT_SIZE: int = 5
-        self.GA_DEFAULT_MAX_AGE: int = 50
-        
+        self.GA_DEFAULT_POPULATION_SIZE: int = 300 # 种群大小
+        self.GA_DEFAULT_ELITE_SIZE: int = 20 # 精英大小
+        self.GA_DEFAULT_MUTATION_RATE: float = 0.15  # 初始变异率
+        self.GA_DEFAULT_CROSSOVER_RATE: float = 0.85  # 初始交叉率
+        self.GA_DEFAULT_TOURNAMENT_SIZE: int = 5 # 锦标赛大小
+        self.GA_DEFAULT_MAX_AGE: int = 100 # 最大代数
+        self.GA_DEFAULT_CONVERGENCE_THRESHOLD: int = 300 # 停滞代数阈值
+        self.GA_DEFAULT_MAX_ITERATIONS: int = 10000 # 最大迭代次数
+
         # --- 约束感知遗传算法增强参数 ---
         self.GA_CONSTRAINT_REPAIR_STRATEGY: str = 'greedy_area_matching'  # 默认约束修复策略
         self.GA_ADAPTIVE_PARAMETERS: bool = True  # 启用自适应参数调整
         self.GA_MAX_REPAIR_ATTEMPTS: int = 5  # 约束修复最大尝试次数
-        self.GA_DIVERSITY_THRESHOLD_LOW: float = 0.05  # 多样性极低阈值
-        self.GA_DIVERSITY_THRESHOLD_MEDIUM: float = 0.15  # 多样性较低阈值
-        self.GA_STAGNATION_THRESHOLD: int = 20  # 停滞代数阈值
-        self.GA_PARAMETER_ADJUST_FACTOR: float = 1.1  # 参数调整因子
-        self.GA_AREA_MATCH_IMPROVEMENT_THRESHOLD: float = 0.1  # 面积匹配改善阈值
+        self.GA_DIVERSITY_THRESHOLD_LOW: float = 0.05  # TODO:多样性极低阈值
+        self.GA_DIVERSITY_THRESHOLD_MEDIUM: float = 0.15  # TODO:多样性较低阈值
         
         # --- 并发控制 ---
         self.MAX_PARALLEL_ALGORITHMS: int = 3
@@ -303,6 +304,9 @@ class RLConfig:
         # --- 相邻性奖励配置 ---
         # 相邻性奖励总开关
         self.ENABLE_ADJACENCY_REWARD: bool = True
+        
+        # 相邻性奖励优化开关
+        self.ENABLE_ADJACENCY_OPTIMIZATION: bool = True  # 启用优化相邻性计算器
         
         # 相邻性奖励权重(在势函数中的权重)
         self.ADJACENCY_REWARD_WEIGHT: float = 0.15
@@ -331,31 +335,27 @@ class RLConfig:
         self.ADJACENCY_CACHE_SIZE: int = 500              # 相邻性缓存大小
         self.ADJACENCY_PRECOMPUTE: bool = True            # 是否预计算相邻性矩阵
         
+        # 优化相邻性计算器配置
+        self.ADJACENCY_OPTIMIZATION_SPARSE_THRESHOLD: float = 0.1  # 稀疏矩阵阈值
+        self.ADJACENCY_OPTIMIZATION_VECTORIZE_BATCH_SIZE: int = 1000  # 向量化批处理大小
+        self.ADJACENCY_OPTIMIZATION_MEMORY_EFFICIENT: bool = True  # 启用内存优化
+        
         # 医疗功能相邻性数据
         self.MEDICAL_ADJACENCY_PREFERENCES: Dict[str, Dict[str, float]] = {
             # 正向偏好 (值为正数)
-            "急诊科": {
-                "放射科": 0.8,      # 急诊需要快速影像诊断
-                "检验中心": 0.7,    # 急诊需要快速化验
-                "手术室": 0.6,      # 急诊可能需要紧急手术
+            "静配中心": {
+                "ICU": 0.8,      # 静配中心与ICU物流相关
             },
-            "妇科": {
-                "产科": 0.9,        # 妇产科密切相关
-                "超声科": 0.6,      # 妇科常需超声检查
+            "中心供应室": {
+                "内镜中心": 0.9,        # 中心供应室与内镜中心物流相关
             },
-            "儿科": {
-                "挂号收费": 0.5,    # 儿科就诊流程便利性
-                "检验中心": 0.6,    # 儿科常需化验
+            "采血处": {
+                "检验中心": 0.5,    # 采血处与检验中心物流相关
             },
             
             # 负向约束 (值为负数)
             "手术室": {
                 "挂号收费": -0.8,   # 手术室应远离嘈杂区域
-                "急诊科": -0.3,     # 避免交叉感染(但急诊手术除外)
-            },
-            "透析中心": {
-                "急诊科": -0.5,     # 透析需要安静环境
-                "挂号收费": -0.6,   # 避免嘈杂
             }
         }
 
@@ -417,6 +417,19 @@ class RLConfig:
             
         if not isinstance(self.ADJACENCY_PENALTY_MULTIPLIER, (int, float)) or self.ADJACENCY_PENALTY_MULTIPLIER <= 0:
             raise ValueError(f"相邻性惩罚倍数必须为正数，当前值：{self.ADJACENCY_PENALTY_MULTIPLIER}")
+        
+        # 验证优化配置参数
+        if not isinstance(self.ENABLE_ADJACENCY_OPTIMIZATION, bool):
+            logger.warning(f"相邻性优化开关应为布尔值，当前值：{self.ENABLE_ADJACENCY_OPTIMIZATION}，自动修正为True")
+            self.ENABLE_ADJACENCY_OPTIMIZATION = True
+            
+        if not (0 < self.ADJACENCY_OPTIMIZATION_SPARSE_THRESHOLD <= 1):
+            logger.warning(f"稀疏矩阵阈值应在(0,1]范围内，当前值：{self.ADJACENCY_OPTIMIZATION_SPARSE_THRESHOLD}，自动修正为0.1")
+            self.ADJACENCY_OPTIMIZATION_SPARSE_THRESHOLD = 0.1
+            
+        if not isinstance(self.ADJACENCY_OPTIMIZATION_VECTORIZE_BATCH_SIZE, int) or self.ADJACENCY_OPTIMIZATION_VECTORIZE_BATCH_SIZE <= 0:
+            logger.warning(f"向量化批处理大小应为正整数，当前值：{self.ADJACENCY_OPTIMIZATION_VECTORIZE_BATCH_SIZE}，自动修正为1000")
+            self.ADJACENCY_OPTIMIZATION_VECTORIZE_BATCH_SIZE = 1000
         
         # 验证缓存参数
         if not isinstance(self.ADJACENCY_CACHE_SIZE, int) or self.ADJACENCY_CACHE_SIZE <= 0:

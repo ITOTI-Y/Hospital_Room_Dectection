@@ -4,6 +4,7 @@
 
 import logging
 import random
+import numpy as np
 from typing import List, Dict, Set, Tuple, Optional, Any
 from dataclasses import dataclass
 import pandas as pd
@@ -354,7 +355,7 @@ class ConstraintManager:
         layout = []
         
         # 如果有固定位置约束，先处理
-        fixed_positions = {}
+        fixed_positions = {} #TODO: 固定位置约束
         for dept_name, slot_idx in self.fixed_assignments.items():
             if dept_name in available_depts:
                 fixed_positions[slot_idx] = dept_name

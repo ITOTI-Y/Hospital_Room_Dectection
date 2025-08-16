@@ -62,21 +62,23 @@ class AlgorithmManager:
                 'total_timesteps': config.TOTAL_TIMESTEPS,
             },
             'simulated_annealing': {
-                'initial_temperature': 1000.0,
-                'final_temperature': 0.1,
-                'cooling_rate': 0.95,
-                'temperature_length': 100,
-                'max_iterations': 10000
+                'initial_temperature': config.SA_DEFAULT_INITIAL_TEMP,
+                'final_temperature': config.SA_DEFAULT_FINAL_TEMP,
+                'cooling_rate': config.SA_DEFAULT_COOLING_RATE,
+                'temperature_length': config.SA_DEFAULT_TEMPERATURE_LENGTH,
+                'max_iterations': config.SA_DEFAULT_MAX_ITERATIONS
             },
             'genetic_algorithm': {
-                'population_size': 100,
-                'elite_size': 20,
-                'mutation_rate': 0.1,
-                'crossover_rate': 0.8,
-                'tournament_size': 5,
-                'max_age': 50,
-                'max_iterations': 1000,
-                'convergence_threshold': 50
+                'population_size': config.GA_DEFAULT_POPULATION_SIZE,
+                'elite_size': config.GA_DEFAULT_ELITE_SIZE,
+                'mutation_rate': config.GA_DEFAULT_MUTATION_RATE,
+                'crossover_rate': config.GA_DEFAULT_CROSSOVER_RATE,
+                'tournament_size': config.GA_DEFAULT_TOURNAMENT_SIZE,
+                'max_age': config.GA_DEFAULT_MAX_AGE,
+                'max_iterations': config.GA_DEFAULT_MAX_ITERATIONS,
+                'convergence_threshold': config.GA_DEFAULT_CONVERGENCE_THRESHOLD,
+                'constraint_repair_strategy': config.GA_CONSTRAINT_REPAIR_STRATEGY,
+                'adaptive_parameters': config.GA_ADAPTIVE_PARAMETERS
             }
         }
         
@@ -117,7 +119,7 @@ class AlgorithmManager:
             params.update(custom_params)
         
         # 创建算法实例（传递自定义参数用于构造函数）
-        optimizer = self._create_optimizer(algorithm_name, custom_params)
+        optimizer = self._create_optimizer(algorithm_name, params)
         
         # 准备运行时参数（移除构造函数参数）
         runtime_params = params.copy()
@@ -189,16 +191,16 @@ class AlgorithmManager:
         else:
             # 串行执行
             for algorithm_name in algorithm_names:
-                params = custom_params.get(algorithm_name, {}) if custom_params else {}
+                params = self.algorithm_configs[algorithm_name].copy()
+                if custom_params:
+                    params.update(custom_params)
                 try:
                     # 创建算法实例
                     optimizer = self._create_optimizer(algorithm_name, params)
                     
                     # 准备运行时参数
-                    runtime_params = self.algorithm_configs[algorithm_name].copy()
-                    if params:
-                        runtime_params.update(params)
-                    
+                    runtime_params = params.copy()
+
                     # 移除构造函数参数
                     if algorithm_name == 'simulated_annealing':
                         for key in ['initial_temperature', 'final_temperature', 'cooling_rate', 'temperature_length']:
@@ -433,7 +435,7 @@ class AlgorithmManager:
         if not result.convergence_history or len(result.convergence_history) < 2:
             return 0.0
         
-        initial_cost = result.convergence_history[0]
+        initial_cost = result.original_cost
         final_cost = result.best_cost
         
         if initial_cost > 0:

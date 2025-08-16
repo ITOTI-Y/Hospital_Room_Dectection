@@ -4,6 +4,7 @@
 
 import random
 import copy
+import numpy as np
 import logging
 from typing import List, Optional, Dict, Any, Tuple, Set
 from dataclasses import dataclass
@@ -378,7 +379,8 @@ class GeneticAlgorithmOptimizer(BaseOptimizer):
         
         # 如果仍有约束违反，使用约束修复器
         if not self.constraint_manager.is_valid_layout(layout):
-            layout = self.constraint_repairer.repair_layout(layout, 'random_repair', max_attempts=5)
+            repair_strategy = np.random.choice(['greedy_area_matching', 'swap_optimization', 'random_repair'])
+            layout = self.constraint_repairer.repair_layout(layout, repair_strategy, max_attempts=5)
         
         return layout
     

@@ -12,6 +12,7 @@ from src.rl_optimizer.data.cache_manager import CacheManager
 from src.rl_optimizer.env.cost_calculator import CostCalculator
 from src.rl_optimizer.utils.setup import setup_logger
 from src.algorithms.constraint_manager import ConstraintManager
+from src.rl_optimizer.env.adjacency_reward_calculator import create_adjacency_calculator
 
 logger = setup_logger(__name__)  # 使用默认INFO级别
 
@@ -84,16 +85,34 @@ class LayoutEnv(gym.Env):
         # 获取行程时间矩阵（已过滤掉面积行）
         self.travel_times_matrix = self.cm.travel_times_matrix.copy()
         
-        # 预计算空间相邻性矩阵
-        if self.config.ADJACENCY_PRECOMPUTE:
-            self._precompute_spatial_adjacency()
-            
-        # 初始化功能相邻性映射
-        self._initialize_functional_adjacency()
+        # 选择使用优化的相邻性计算器还是传统方法
+        use_optimized_calculator = getattr(self.config, 'ENABLE_ADJACENCY_OPTIMIZATION', True)
         
-        # 初始化连通性相邻性（如果需要）
-        if self.config.CONNECTIVITY_ADJACENCY_WEIGHT > 0:
-            self._precompute_connectivity_adjacency()
+        if use_optimized_calculator:
+            # 使用优化的相邻性奖励计算器
+            logger.info("启用优化相邻性奖励计算器")
+            self.adjacency_calculator = create_adjacency_calculator(
+                config=self.config,
+                placeable_depts=self.placeable_depts,
+                travel_times_matrix=self.travel_times_matrix,
+                constraint_manager=self.constraint_manager
+            )
+            self.use_optimized_adjacency = True
+        else:
+            # 使用传统的相邻性计算方法（向后兼容）
+            logger.info("使用传统相邻性奖励计算方法")
+            self.use_optimized_adjacency = False
+            
+            # 预计算空间相邻性矩阵
+            if self.config.ADJACENCY_PRECOMPUTE:
+                self._precompute_spatial_adjacency()
+                
+            # 初始化功能相邻性映射
+            self._initialize_functional_adjacency()
+            
+            # 初始化连通性相邻性（如果需要）
+            if self.config.CONNECTIVITY_ADJACENCY_WEIGHT > 0:
+                self._precompute_connectivity_adjacency()
             
         logger.info("相邻性奖励组件初始化完成")
 
@@ -643,12 +662,48 @@ class LayoutEnv(gym.Env):
         if not self.config.ENABLE_ADJACENCY_REWARD:
             return 0.0
         
-        # 转换元组为列表，过滤掉None值
+        # 过滤掉None值
         placed_depts = [dept for dept in layout_tuple if dept is not None]
         
         if len(placed_depts) < 2:
             return 0.0  # 少于两个科室无法计算相邻性
         
+        # 选择使用优化计算器还是传统方法
+        if hasattr(self, 'use_optimized_adjacency') and self.use_optimized_adjacency:
+            # 使用优化的相邻性奖励计算器
+            try:
+                rewards_dict = self.adjacency_calculator.calculate_adjacency_reward_optimized(
+                    tuple(placed_depts)
+                )
+                total_reward = rewards_dict.get('total_reward', 0.0)
+                
+                # 调试日志
+                if logger.isEnabledFor(10):  # DEBUG级别
+                    logger.debug(f"优化相邻性奖励详情: 空间={rewards_dict.get('spatial_reward', 0.0):.3f}, "
+                                f"功能={rewards_dict.get('functional_reward', 0.0):.3f}, "
+                                f"连通性={rewards_dict.get('connectivity_reward', 0.0):.3f}, "
+                                f"总计={total_reward:.3f}")
+                
+                return total_reward
+                
+            except Exception as e:
+                logger.error(f"优化相邻性计算器执行失败，降级到传统方法：{e}")
+                # 降级到传统方法
+                return self._calculate_legacy_adjacency_reward(placed_depts)
+        else:
+            # 使用传统的相邻性计算方法
+            return self._calculate_legacy_adjacency_reward(placed_depts)
+    
+    def _calculate_legacy_adjacency_reward(self, placed_depts: List[str]) -> float:
+        """
+        传统的相邻性奖励计算方法（向后兼容）。
+        
+        Args:
+            placed_depts: 已放置的科室列表
+            
+        Returns:
+            float: 综合相邻性奖励分数
+        """
         # 计算各维度相邻性奖励
         spatial_reward = self._calculate_spatial_adjacency_reward(placed_depts)
         functional_reward = self._calculate_functional_adjacency_reward(placed_depts)
@@ -666,7 +721,7 @@ class LayoutEnv(gym.Env):
         
         # 调试日志
         if logger.isEnabledFor(10):  # DEBUG级别
-            logger.debug(f"相邻性奖励详情: 空间={spatial_reward:.3f}, "
+            logger.debug(f"传统相邻性奖励详情: 空间={spatial_reward:.3f}, "
                         f"功能={functional_reward:.3f}, 连通性={connectivity_reward:.3f}, "
                         f"总计={total_reward:.3f}")
         
@@ -1301,7 +1356,24 @@ class LayoutEnv(gym.Env):
                 'total_reward': 0.0
             }
         
-        # 计算各维度相邻性奖励
+        # 选择使用优化计算器还是传统方法
+        if hasattr(self, 'use_optimized_adjacency') and self.use_optimized_adjacency:
+            # 使用优化的相邻性奖励计算器
+            try:
+                rewards_dict = self.adjacency_calculator.calculate_adjacency_reward_optimized(
+                    tuple(placed_depts)
+                )
+                return {
+                    'spatial_reward': rewards_dict.get('spatial_reward', 0.0),
+                    'functional_reward': rewards_dict.get('functional_reward', 0.0),
+                    'connectivity_reward': rewards_dict.get('connectivity_reward', 0.0),
+                    'total_reward': rewards_dict.get('total_reward', 0.0)
+                }
+            except Exception as e:
+                logger.error(f"优化相邻性统计计算失败，降级到传统方法：{e}")
+                # 降级到传统方法
+        
+        # 使用传统方法计算各维度相邻性奖励
         spatial_reward = self._calculate_spatial_adjacency_reward(placed_depts)
         functional_reward = self._calculate_functional_adjacency_reward(placed_depts)
         connectivity_reward = 0.0

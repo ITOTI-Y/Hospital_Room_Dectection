@@ -108,7 +108,7 @@ class ResultsComparator:
         if not result.convergence_history or len(result.convergence_history) < 2:
             return 0.0
         
-        initial_cost = result.convergence_history[0]
+        initial_cost = result.original_cost
         final_cost = result.best_cost
         
         if initial_cost > 0:
