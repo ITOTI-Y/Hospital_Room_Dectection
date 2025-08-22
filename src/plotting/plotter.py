@@ -315,6 +315,8 @@ class PlotlyPlotter(BasePlotter):
 
         for node_obj in all_node_objects:
             node_type = node_obj.node_type
+            e_name = node_obj.e_name
+            code = node_obj.code
             if node_type not in nodes_data_by_type:
                 nodes_data_by_type[node_type] = {
                     'x': [], 'y': [], 'z': [],
@@ -341,7 +343,7 @@ class PlotlyPlotter(BasePlotter):
             can_show_permanent_label = not is_ped_type or self.config.SHOW_PEDESTRIAN_LABELS
 
             nodes_data_by_type[node_type]['visible_text'].append(
-                node_type if can_show_permanent_label else "")
+                code if can_show_permanent_label else "")
 
             # 2. Hover text (always detailed)
             hover_label = (
@@ -565,7 +567,7 @@ class PlotlyPlotter(BasePlotter):
         layout = go.Layout(
             title=title,
             showlegend=True,
-            hovermode='closest',  # Important for hover behavior
+            hovermode='closest',
             margin=dict(b=20, l=5, r=5, t=40),
             scene=dict(
                 xaxis=dict(
@@ -574,8 +576,13 @@ class PlotlyPlotter(BasePlotter):
                     title='Y',
                     autorange='reversed', # 反转Y轴
                 ),
-                zaxis=dict(title='Z (楼层)', range=[min_z - 1, max_z + 1]),
-                aspectmode='data',  # 'data' is often good for spatial data
+                zaxis=dict(title='Z (Floor)'),
+                aspectmode="manual",
+                aspectratio=dict(
+                    x=self.config.X_AXIS_RATIO,
+                    y=self.config.Y_AXIS_RATIO,
+                    z=self.config.Z_AXIS_RATIO
+                ),
                 camera=dict(eye=dict(x=1.25, y=1.25, z=1.25))
             ),
             legend=dict(

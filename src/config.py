@@ -100,23 +100,27 @@ class NetworkConfig:
         self.IMAGE_MIRROR: bool = True  # 是否在绘图中水平镜像图像
         self.NODE_COLOR_FROM_MAP: bool = True  # 在绘图中是否使用COLOR_MAP的颜色显示节点
 
-        self.NODE_SIZE_DEFAULT: int = 10
-        self.NODE_SIZE_PEDESTRIAN: int = 5
-        self.NODE_SIZE_CONNECTION: int = 8
-        self.NODE_SIZE_VERTICAL: int = 10
-        self.NODE_SIZE_ROOM: int = 7
-        self.NODE_SIZE_OUTSIDE: int = 4
+        self.NODE_SIZE_DEFAULT: int = 2
+        self.NODE_SIZE_PEDESTRIAN: int = 2
+        self.NODE_SIZE_CONNECTION: int = 2
+        self.NODE_SIZE_VERTICAL: int = 2
+        self.NODE_SIZE_ROOM: int = 5
+        self.NODE_SIZE_OUTSIDE: int = 2
         self.NODE_OPACITY: float = 0.8
         self.SHOW_PEDESTRIAN_LABELS: bool = False
 
         self.HORIZONTAL_EDGE_COLOR: str = "#1f77b4"
-        self.VERTICAL_EDGE_COLOR: str = "#ff7f0e"
+        self.VERTICAL_EDGE_COLOR: str = "#ff7e0e"  #"#ff7e0e75"
         self.DOOR_EDGE_COLOR: str = "#2ca02c"
         self.SPECIAL_EDGE_COLOR: str = "#d62728"
-        self.EDGE_WIDTH: float = 0.5
+        self.EDGE_WIDTH: float = 1.5
+
+        self.X_AXIS_RATIO: float = 1
+        self.Y_AXIS_RATIO: float = 1
+        self.Z_AXIS_RATIO: float = 2
 
         # SuperNetwork多层网络专用配置
-        self.DEFAULT_FLOOR_HEIGHT: float = 10.0
+        self.DEFAULT_FLOOR_HEIGHT: float = 10
         self.DEFAULT_VERTICAL_CONNECTION_TOLERANCE: int = 0  # 跨楼层连接垂直节点的默认像素距离容差
         # Estimated max nodes per floor. Used for pre-allocating ID ranges in multi-processing.
         # Should be an overestimate to avoid ID collisions.

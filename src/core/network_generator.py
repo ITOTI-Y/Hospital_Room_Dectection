@@ -40,7 +40,7 @@ class NetworkGenerator:
     
     def generate_network(self, 
                         image_dir: str = "./data/label/",
-                        base_floor: int = -1,
+                        base_floor: int = 0,
                         num_processes: Optional[int] = None) -> bool:
         """
         生成多层医院网络

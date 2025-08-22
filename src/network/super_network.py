@@ -149,7 +149,6 @@ class SuperNetwork:
         self.path_to_floor_map, floor_to_path_map = self.floor_manager.auto_assign_floors(image_paths_as_pathlib)
         
         if z_levels_override and len(z_levels_override) == len(image_paths_as_pathlib):
-            # ... (z_levels_override 逻辑保持不变) ...
             sorted_paths_by_floor = sorted(self.path_to_floor_map.keys(), key=lambda p: self.path_to_floor_map[p])
             temp_path_to_z = {path: z for path, z in zip(sorted_paths_by_floor, z_levels_override)} # Make sure this aligns correctly
             self.floor_z_map = {self.path_to_floor_map[p]: temp_path_to_z.get(p) for p in self.path_to_floor_map.keys() if temp_path_to_z.get(p) is not None}
@@ -166,17 +165,6 @@ class SuperNetwork:
 
         if not all_floor_nums:
             return []
-
-        # Determine the ground floor number for processing outside nodes.
-        # Strategy: Lowest non-negative floor number. If all are negative, no ground floor with outside.
-        # If you have a specific config for ground floor, use that.
-        # Example: self.config.GROUND_FLOOR_NUMBER (e.g., 1 or 0)
-        
-        # Let's find the designated ground floor number.
-        # Assuming '1' is the typical first/ground floor if positive floors exist.
-        # If '0' exists and is the lowest non-negative, it's the ground floor.
-        # Otherwise, if only positive floors, the smallest positive is ground.
-        # If only negative floors, then no outside nodes unless specifically handled.
         
         designated_ground_floor_num: Optional[int] = self.config.GROUND_FLOOR_NUMBER_FOR_OUTSIDE
         
