@@ -22,6 +22,8 @@ class Node:
                  name: Optional[str] = None,
                  time: float = 1.0,
                  color: Optional[Tuple[int, int, int]] = None,
+                 e_name: Optional[str] = None,
+                 code: Optional[str] = None,
                  **kwargs):
         """
         初始化节点
@@ -43,7 +45,9 @@ class Node:
         self.name = name if name is not None else f"{node_type}_{node_id}"
         self.time = float(time)
         self.color = color
-        
+        self.e_name = e_name
+        self.code = code
+
         # 存储其他属性
         for key, value in kwargs.items():
             setattr(self, key, value)
@@ -71,5 +75,7 @@ class Node:
             'type': self.node_type,
             'name': self.name,
             'time': self.time,
-            'color': self.color
+            'color': self.color,
+            'e_name': self.e_name,
+            'code': self.code
         }

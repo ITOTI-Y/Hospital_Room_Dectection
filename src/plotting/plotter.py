@@ -70,25 +70,25 @@ class BasePlotter(abc.ABC):
             'horizontal': {
                 'color': self.config.HORIZONTAL_EDGE_COLOR,
                 'width': self.config.EDGE_WIDTH,
-                'name': '水平连接',
+                'name': 'Horizontal Connection',
                 'dash': None
             },
             'vertical': {
                 'color': self.config.VERTICAL_EDGE_COLOR, 
                 'width': self.config.EDGE_WIDTH * 1.5,
-                'name': '垂直连接',
+                'name': 'Vertical Connection',
                 'dash': None
             },
             'door': {
                 'color': self.config.DOOR_EDGE_COLOR,
                 'width': self.config.EDGE_WIDTH * 1.2,
-                'name': '门连接',
+                'name': 'Door Connection',
                 'dash': None
             },
             'special': {
                 'color': self.config.SPECIAL_EDGE_COLOR,
                 'width': self.config.EDGE_WIDTH * 1.3,
-                'name': '特殊连接',
+                'name': 'Special Connection',
                 'dash': None
             }
         }
@@ -138,9 +138,9 @@ class BasePlotter(abc.ABC):
         # 使用配置中的类型定义进行精确匹配
         start_type = str(start_node.node_type).strip()
         end_type = str(end_node.node_type).strip()
-        
-        # 检查是否涉及门连接（使用配置中的CONNECTION_TYPES）
-        connection_types = set(getattr(self.config, 'CONNECTION_TYPES', ['门']))
+
+        # 检查是否涉及Door连接（使用配置中的CONNECTION_TYPES）
+        connection_types = set(getattr(self.config, 'CONNECTION_TYPES', ['Door']))
         if start_type in connection_types or end_type in connection_types:
             return 'door'
         
@@ -267,7 +267,7 @@ class PlotlyPlotter(BasePlotter):
 
         # Add a step to show all floors
         slider_steps.append(dict(
-            label="所有楼层",
+            label="All Floors",
             method="relayout",
             args=[{"scene.zaxis.range": [min_z - self.config.DEFAULT_FLOOR_HEIGHT * 0.5,
                                          max_z + self.config.DEFAULT_FLOOR_HEIGHT * 0.5]}]  # View all
@@ -275,10 +275,10 @@ class PlotlyPlotter(BasePlotter):
 
         sliders = [dict(
             active=len(all_z_levels),  # Default to "All Floors"
-            currentvalue={"prefix": "当前显示: "},
+            currentvalue={"prefix": "Current Display: "},
             pad={"t": 50},
             steps=slider_steps,
-            name="楼层选择"
+            name="Floor Selection"
         )]
         return {"sliders": sliders}
 

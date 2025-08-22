@@ -265,7 +265,7 @@ class OutsideNodeCreator(MeshBasedNodeCreator):
 class ConnectionNodeCreator(BaseNodeCreator):
     """Creates nodes for connections (e.g., doors) and links them to adjacent areas."""
     def create_nodes(self, processed_image_data: np.ndarray, id_map: np.ndarray, z_level: int):
-        target_connection_types = self.config.CONNECTION_TYPES # Typically '门'
+        target_connection_types = self.config.CONNECTION_TYPES
         if not target_connection_types: return
 
         pass_through_ids_in_id_map = [self.config.BACKGROUND_ID_MAP_VALUE]

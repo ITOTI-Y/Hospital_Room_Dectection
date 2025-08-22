@@ -6,7 +6,7 @@ import numpy as np
 import networkx as nx
 import logging
 from typing import Dict, Tuple, Any, List, Optional
-from scipy.spatial import KDTree  # 用于连接门节点到mesh节点
+from scipy.spatial import KDTree
 
 from src.config import NetworkConfig
 from .graph_manager import GraphManager
@@ -94,7 +94,7 @@ class Network:
         self._id_map = np.full((self._image_height, self._image_width),
                                self.config.BACKGROUND_ID_MAP_VALUE, dtype=np.int32)  # 使用int32类型存储ID
 
-        # 这确保即使OutsideNodeCreator不运行，'out'类型的门也能被正确识别
+        # This ensures that doors of type 'out' are recognized correctly even if the OutsideNodeCreator is not run
         # to create detailed outside mesh nodes.
         if self.config.OUTSIDE_TYPES:  # 检查是否定义了室外类型
             for outside_type_name in self.config.OUTSIDE_TYPES:
