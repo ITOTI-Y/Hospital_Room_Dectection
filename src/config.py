@@ -156,7 +156,6 @@ class RLConfig:
         COST_MATRIX_CACHE (pathlib.Path): 预计算成本矩阵的缓存文件路径。
         AREA_SCALING_FACTOR (float): 科室面积允许的缩放容差。
         MANDATORY_ADJACENCY (List[List[str]]): 强制相邻的科室对列表。
-        PREFERRED_ADJACENCY (Dict[str, List[List[str]]]): 偏好相邻（软约束）的科室对字典。
         FIXED_NODE_TYPES (List[str]): 在布局中位置固定、不参与优化的节点类型列表。
         EMBEDDING_DIM (int): 节点嵌入向量的维度。
         TRANSFORMER_HEADS (int): Transformer编码器中的多头注意力头数。
@@ -209,13 +208,9 @@ class RLConfig:
         self.EMPTY_SLOT_PENALTY_FACTOR: float = 10000.0  # 每个空槽位的惩罚系数
         self.ALLOW_PARTIAL_LAYOUT: bool = True  # 是否允许部分布局（跳过槽位）
         self.MANDATORY_ADJACENCY: List[List[str]] = []  # 例如: [['手术室_30007', '中心供应室_10003']]
-        self.PREFERRED_ADJACENCY: Dict[str, List[List[str]]] = {
-            'positive': [["静配中心", "ICU"],["中心供应室", "内镜中心"],["采血处", "检验中心"]], # 例如: [['检验中心_10007', '采血处_20007']]
-            'negative': []  # 例如: [['儿科_10006', '急诊科_1']]
-        }
         self.FIXED_NODE_TYPES: List[str] = [
             '门', '楼梯', '电梯', '扶梯', '走廊', '墙', '栏杆', 
-            '室外', '绿化', '中庭', '空房间'
+            '室外', '绿化', '中庭', '空房间', '急诊科','挂号收费'
         ]
 
         # --- Transformer模型配置 ---
@@ -295,7 +290,7 @@ class RLConfig:
         self.REWARD_ADJACENCY_WEIGHT: float = 0.1
         self.REWARD_PLACEMENT_BONUS: float = 1.0  # 成功放置一个科室的即时奖励
         self.REWARD_EMPTY_SLOT_PENALTY: float = 5.0  # 每个空槽位的最终惩罚
-        self.REWARD_SCALE_FACTOR: float = 10000.0  # 奖励缩放因子, 仅对加权总时间成本有效
+        self.REWARD_SCALE_FACTOR: float = 20000.0  # 奖励缩放因子, 仅对加权总时间成本有效
         
         # --- 势函数奖励配置 ---
         self.ENABLE_POTENTIAL_REWARD: bool = True  # 是否启用势函数奖励
@@ -356,10 +351,18 @@ class RLConfig:
             "采血处": {
                 "检验中心": 0.5,    # 采血处与检验中心物流相关
             },
-            
-            # 负向约束 (值为负数)
             "手术室": {
-                "挂号收费": -0.8,   # 手术室应远离嘈杂区域
+                "ICU": 1.0,          # 手术室与ICU强相关
+                "门诊手术室": 1.0
+            },
+            "ICU": {
+                "NICU": 1.0          # ICU与NICU强相关
+            },
+            "产房": {
+                "NICU": 1.0          # 产房与NICU强相关
+            },
+            "检验中心": {
+                "病理科": 0.5,    # 检验中心与病理科物流相关
             }
         }
 

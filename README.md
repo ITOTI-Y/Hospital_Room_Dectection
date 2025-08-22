@@ -140,7 +140,7 @@ uv run python main.py --mode network --image-dir ./custom/label/
 运行特定优化算法：
 ```bash
 # PPO强化学习
-uv run python main.py --mode optimize --algorithm ppo --total-timesteps 100000
+uv run python main.py --mode optimize --algorithm ppo --total-timesteps 1000000
 
 # 模拟退火
 uv run python main.py --mode optimize --algorithm simulated_annealing \
