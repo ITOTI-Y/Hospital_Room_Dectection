@@ -348,10 +348,10 @@ def main():
     
     parser = argparse.ArgumentParser(description='PPO模型推理工具')
     parser.add_argument('--model-path', type=str, 
-                       default='/home/pan/code/Hospital_Room_Dectection/results/model/ppo_layout_20250810-173909/best_model/best_model.zip',
+                       default='/home/pan/code/Hospital_Room_Dectection/results/model/ppo_layout_20250822-215147/best_model/best_model.zip',
                        help='模型文件路径')
-    parser.add_argument('--n-episodes', type=int, default=5,
-                       help='推理次数（默认5次）')
+    parser.add_argument('--n-episodes', type=int, default=1,
+                       help='推理次数（默认1次）')
     parser.add_argument('--single', action='store_true',
                        help='仅执行单次推理')
     parser.add_argument('--output', type=str, default=None,

@@ -583,7 +583,10 @@ class PlotlyPlotter(BasePlotter):
                     y=self.config.Y_AXIS_RATIO,
                     z=self.config.Z_AXIS_RATIO
                 ),
-                camera=dict(eye=dict(x=1.25, y=1.25, z=1.25))
+                camera=dict(
+                    # projection=dict(type='orthographic'),
+                    eye=dict(x=1.25, y=1.25, z=1.25)
+                    )
             ),
             legend=dict(
                 orientation="v",    # 垂直排列
@@ -592,8 +595,8 @@ class PlotlyPlotter(BasePlotter):
                 xanchor="left",     # X 锚点
                 yanchor="top",      # Y 锚点
                 bgcolor="rgba(255, 255, 255, 0.7)", # 可选：浅色背景提高可读性
-                bordercolor="rgba(120, 120, 120, 0.7)", # 可选：边框颜色
-                borderwidth=1         # 可选：边框宽度
+                # bordercolor="rgba(120, 120, 120, 0.7)", # 可选：边框颜色
+                # borderwidth=1         # 可选：边框宽度
             )
         )
 
@@ -606,7 +609,7 @@ class PlotlyPlotter(BasePlotter):
 
         if output_path:
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            fig.write_html(str(output_path))
+            fig.write_html(str(output_path), config=self.config.PLOTLY_CONFIG)
             # Ensure logger
             logger.info(f"Plotly graph saved to {output_path}")
         else:

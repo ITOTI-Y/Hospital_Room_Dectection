@@ -104,13 +104,13 @@ class NetworkConfig:
         self.NODE_SIZE_PEDESTRIAN: int = 2
         self.NODE_SIZE_CONNECTION: int = 2
         self.NODE_SIZE_VERTICAL: int = 2
-        self.NODE_SIZE_ROOM: int = 5
+        self.NODE_SIZE_ROOM: int = 7
         self.NODE_SIZE_OUTSIDE: int = 2
         self.NODE_OPACITY: float = 0.8
         self.SHOW_PEDESTRIAN_LABELS: bool = False
 
         self.HORIZONTAL_EDGE_COLOR: str = "#1f77b4"
-        self.VERTICAL_EDGE_COLOR: str = "#ff7e0e"  #"#ff7e0e75"
+        self.VERTICAL_EDGE_COLOR: str = "rgba(151,152,155,0.7)"  #"#ff7e0e75"
         self.DOOR_EDGE_COLOR: str = "#2ca02c"
         self.SPECIAL_EDGE_COLOR: str = "#d62728"
         self.EDGE_WIDTH: float = 1.5
@@ -118,6 +118,15 @@ class NetworkConfig:
         self.X_AXIS_RATIO: float = 1
         self.Y_AXIS_RATIO: float = 1
         self.Z_AXIS_RATIO: float = 2
+
+        #Plotly Configuration
+        self.PLOTLY_CONFIG = {
+            'toImageButtonOptions': {
+                'format': 'png',
+                'filename': 'Network',
+                'scale': 3
+            }
+        }
 
         # SuperNetwork多层网络专用配置
         self.DEFAULT_FLOOR_HEIGHT: float = 10
@@ -195,7 +204,7 @@ class RLConfig:
 
         # --- 输入文件 ---
         self.TRAVEL_TIMES_CSV: pathlib.Path = self.RESULT_PATH / 'network' / 'hospital_travel_times.csv'
-        self.PROCESS_TEMPLATES_JSON: pathlib.Path = self.DATA_PATH / 'process_templates.json'
+        self.PROCESS_TEMPLATES_JSON: pathlib.Path = self.DATA_PATH / 'process_templates_traditional.json'
 
         # --- 自动生成/缓存的中间文件 ---
         self.NODE_VARIANTS_JSON: pathlib.Path = self.CACHE_PATH / 'node_variants.json'
@@ -317,7 +326,7 @@ class RLConfig:
         
         # 相邻性判定参数
         self.ADJACENCY_PERCENTILE_THRESHOLD: float = 0.2  # 相邻性分位数阈值
-        self.ADJACENCY_K_NEAREST: int = None              # 最近邻数量(None=自动)
+        self.ADJACENCY_K_NEAREST: int | None = None              # 最近邻数量(None=自动)
         self.ADJACENCY_CLUSTER_EPS_PERCENTILE: float = 0.1 # 聚类邻域分位数
         self.ADJACENCY_MIN_CLUSTER_SIZE: int = 2          # 最小聚类大小
         
