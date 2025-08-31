@@ -14,8 +14,8 @@ from scipy.spatial import KDTree
 from typing import Dict, Tuple, List, Any, Optional
 
 from src.config import NetworkConfig
-from src.graph.node import Node
-from src.graph.graph_manager import GraphManager
+from .node import Node
+from .graph_manager import GraphManager
 from src.image_processing.processor import ImageProcessor
 
 logger = logging.getLogger(__name__)
@@ -46,6 +46,12 @@ class BaseNodeCreator(abc.ABC):
 
     def _get_time_by_name(self, type_name: str) -> float:
         return self.types_map_name_to_time.get(type_name, self.config.PEDESTRIAN_TIME)
+
+    def _get_ename_by_name(self, type_name: str) -> Optional[str]:
+        return self.color_map_data.get(self._get_color_rgb_by_name(type_name), {}).get('e_name')
+
+    def _get_code_by_name(self, type_name: str) -> Optional[Dict[str, Any]]:
+        return self.color_map_data.get(self._get_color_rgb_by_name(type_name), {}).get('code')
 
     def _create_mask_for_type(self,
                               image_data: np.ndarray,
@@ -98,6 +104,8 @@ class RoomNodeCreator(BaseNodeCreator):
             if retval <= 1: continue
 
             node_time = self._get_time_by_name(room_type_name)
+            e_name = self._get_ename_by_name(room_type_name)
+            code = self._get_code_by_name(room_type_name)
 
             for i in range(1, retval):
                 area = float(stats[i, cv2.CC_STAT_AREA])
@@ -106,8 +114,9 @@ class RoomNodeCreator(BaseNodeCreator):
                 centroid_x, centroid_y = centroids[i]
                 position = (int(centroid_x), int(centroid_y), z_level)
                 node_id = self.graph_manager.generate_node_id()
-                room_node = Node(node_id=node_id, node_type=room_type_name, pos=position,
-                                 default_time=node_time, area=area)
+                room_node = Node(node_id=node_id, node_type=room_type_name,
+                                x=position[0], y=position[1], z=position[2],
+                                time=node_time, area=area, e_name=e_name, code=code)
                 self.graph_manager.add_node(room_node)
                 id_map[labels == i] = room_node.id
 
@@ -125,6 +134,8 @@ class VerticalNodeCreator(BaseNodeCreator):
             if retval <= 1: continue
 
             node_time = self._get_time_by_name(vertical_type_name)
+            e_name = self._get_ename_by_name(vertical_type_name)
+            code = self._get_code_by_name(vertical_type_name)
 
             for i in range(1, retval):
                 area = float(stats[i, cv2.CC_STAT_AREA])
@@ -133,8 +144,9 @@ class VerticalNodeCreator(BaseNodeCreator):
                 centroid_x, centroid_y = centroids[i]
                 position = (int(centroid_x), int(centroid_y), z_level)
                 node_id = self.graph_manager.generate_node_id()
-                v_node = Node(node_id=node_id, node_type=vertical_type_name, pos=position,
-                              default_time=node_time, area=area)
+                v_node = Node(node_id=node_id, node_type=vertical_type_name,
+                              x=position[0], y=position[1], z=position[2],
+                              time=node_time, area=area, e_name=e_name, code=code)
                 self.graph_manager.add_node(v_node)
                 id_map[labels == i] = v_node.id
 
@@ -148,6 +160,8 @@ class MeshBasedNodeCreator(BaseNodeCreator): # New base for Pedestrian and Outsi
                                     id_map_value_for_area: int, # Value to mark the area in id_map
                                     z_level: int,
                                     node_time: float,
+                                    e_name: Optional[str],
+                                    code: Optional[str],
                                     grid_size_multiplier: int):
         """Helper to create mesh nodes within a given mask and connect them."""
         # First, mark the entire area in id_map with the special area identifier
@@ -184,7 +198,10 @@ class MeshBasedNodeCreator(BaseNodeCreator): # New base for Pedestrian and Outsi
             for vx, vy in zip(valid_x_coords, valid_y_coords):
                 pos = (int(vx), int(vy), z_level)
                 node_id = self.graph_manager.generate_node_id()
-                mesh_node = Node(node_id, region_type_name, pos, node_time, area=mesh_node_area)
+                mesh_node = Node(node_id=node_id, node_type=region_type_name,
+                                x=pos[0], y=pos[1], z=pos[2],
+                                time=node_time, area=mesh_node_area,
+                                e_name=e_name, code=code)
                 self.graph_manager.add_node(mesh_node)
                 component_nodes.append(mesh_node)
                 # Optionally, mark the exact grid cell in id_map with the mesh_node.id
@@ -194,7 +211,7 @@ class MeshBasedNodeCreator(BaseNodeCreator): # New base for Pedestrian and Outsi
             if not component_nodes or len(component_nodes) < 2:
                 continue
 
-            node_positions_2d = np.array([node.pos[:2] for node in component_nodes])
+            node_positions_2d = np.array([(node.x, node.y) for node in component_nodes])
             kdtree = KDTree(node_positions_2d)
             # Max distance to connect (diagonal of a grid cell, plus a small tolerance)
             max_distance_connect = np.sqrt(2) * grid_size * 1.05
@@ -203,7 +220,7 @@ class MeshBasedNodeCreator(BaseNodeCreator): # New base for Pedestrian and Outsi
                 # Query for k-nearest, then filter by distance
                 # k=9 includes self + 8 neighbors in a square grid
                 distances, indices_k_nearest = kdtree.query(
-                    current_node.pos[:2],
+                    (current_node.x, current_node.y),
                     k=min(len(component_nodes), self.config.MESH_NODE_CONNECTIVITY_K), # Ensure k is not > num_points
                     distance_upper_bound=max_distance_connect
                 )
@@ -225,6 +242,8 @@ class PedestrianNodeCreator(MeshBasedNodeCreator):
         if not target_pedestrian_types: return
 
         for ped_type_name in target_pedestrian_types:
+            e_name = self._get_ename_by_name(ped_type_name)
+            code = self._get_code_by_name(ped_type_name)
             mask = self._create_mask_for_type(processed_image_data, ped_type_name)
             if mask is None: continue
             
@@ -235,7 +254,9 @@ class PedestrianNodeCreator(MeshBasedNodeCreator):
                 id_map_value_for_area=self.config.PEDESTRIAN_ID_MAP_VALUE,
                 z_level=z_level,
                 node_time=self.config.PEDESTRIAN_TIME,
-                grid_size_multiplier=1
+                grid_size_multiplier=1,
+                e_name=e_name,
+                code=code
             )
 
 class OutsideNodeCreator(MeshBasedNodeCreator):
@@ -261,7 +282,7 @@ class OutsideNodeCreator(MeshBasedNodeCreator):
 class ConnectionNodeCreator(BaseNodeCreator):
     """Creates nodes for connections (e.g., doors) and links them to adjacent areas."""
     def create_nodes(self, processed_image_data: np.ndarray, id_map: np.ndarray, z_level: int):
-        target_connection_types = self.config.CONNECTION_TYPES # Typically '门'
+        target_connection_types = self.config.CONNECTION_TYPES
         if not target_connection_types: return
 
         pass_through_ids_in_id_map = [self.config.BACKGROUND_ID_MAP_VALUE]
@@ -269,6 +290,8 @@ class ConnectionNodeCreator(BaseNodeCreator):
 
         for conn_type_name in target_connection_types:
             mask = self._create_mask_for_type(processed_image_data, conn_type_name)
+            e_name = self._get_ename_by_name(conn_type_name)
+            code = self._get_code_by_name(conn_type_name)
             if mask is None: continue
 
             retval, labels, stats, centroids = self._find_connected_components(mask)
@@ -284,8 +307,10 @@ class ConnectionNodeCreator(BaseNodeCreator):
                 position = (int(centroid_x), int(centroid_y), z_level)
 
                 node_id = self.graph_manager.generate_node_id()
-                conn_node = Node(node_id, conn_type_name, position,
-                                 self.config.CONNECTION_TIME, area=area)
+                conn_node = Node(node_id=node_id, node_type=conn_type_name,
+                                x=position[0], y=position[1], z=position[2],
+                                time=self.config.CONNECTION_TIME, area=area,
+                                e_name=e_name, code=code)
                 self.graph_manager.add_node(conn_node)
 
                 component_mask_pixels = (labels == i)
@@ -326,7 +351,3 @@ class ConnectionNodeCreator(BaseNodeCreator):
                         target_node = self.graph_manager.get_node_by_id(neighbor_id_val)
                         if target_node and target_node.id != conn_node.id:
                             self.graph_manager.connect_nodes_by_ids(conn_node.id, target_node.id)
-                
-                # Special handling: if a door is 'out' and also touches a pedestrian area,
-                # it might still need a direct link to that pedestrian area's mesh nodes later.
-                # Similarly for 'in' doors. This will be handled in a later connection phase.

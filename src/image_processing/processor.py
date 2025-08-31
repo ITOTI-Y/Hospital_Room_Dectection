@@ -63,7 +63,7 @@ class ImageProcessor:
                 f"Failed to convert image to numpy array: {image_path}")
 
         self._image_height, self._image_width = self._current_image_data.shape[:2]
-        return self._current_image_data.copy()  # Return a copy
+        return self._current_image_data.copy()  # 返回副本避免意外修改
 
     def get_image_dimensions(self) -> Tuple[int, int]:
         """
@@ -92,7 +92,7 @@ class ImageProcessor:
             A NumPy array of the same shape with colors replaced.
         """
         if not self.color_map_data:
-            # If color map is empty, return original image to avoid errors
+            # 如果颜色映射为空，返回原始图像以避免错误
             logger.warning(
                 "Warning: Color map is empty. Returning original image from quantize_colors.")
             return image_data.copy()
@@ -100,7 +100,7 @@ class ImageProcessor:
         pixels = image_data.reshape(-1, 3)
         map_colors_rgb = list(self.color_map_data.keys())
 
-        if not map_colors_rgb:  # Should not happen if self.color_map_data is not empty
+        if not map_colors_rgb:  # 如果self.color_map_data不为空，这种情况不应该发生
             logger.warning(
                 "Warning: No colors in color_map_data keys. Returning original image.")
             return image_data.copy()
@@ -178,7 +178,7 @@ class DebugImage:
             suffix: Suffix for the saved filename.
             debug_path_base: Base directory for saving debug images.
         """
-        self.image_to_debug = image_data.copy() # Work with a copy
+        self.image_to_debug = image_data.copy()  # 使用副本工作
         self.debug_path = config.DEBUG_PATH
         self.debug_path.mkdir(parents=True, exist_ok=True)
 
@@ -192,11 +192,11 @@ class DebugImage:
         filename = f'debug_{DebugImage.count}_{suffix}.png'
         save_path = self.debug_path / filename
         try:
-            # Convert to BGR if it's RGB for Pillow saving, or handle grayscale
+            # 如果是RGB格式，转换为BGR以供Pillow保存，或处理灰度图
             if self.image_to_debug.ndim == 3 and self.image_to_debug.shape[2] == 3:
                 # Assume RGB from PIL, convert to BGR for OpenCV-style saving or save as is with PIL
                 img_to_save_pil = Image.fromarray(self.image_to_debug)
-            elif self.image_to_debug.ndim == 2: # Grayscale
+            elif self.image_to_debug.ndim == 2:  # 灰度图像
                  img_to_save_pil = Image.fromarray(self.image_to_debug, mode='L')
             else:
                 logger.warning(f"Warning: Unsupported image format for saving: {self.image_to_debug.shape}")

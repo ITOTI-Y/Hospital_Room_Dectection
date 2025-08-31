@@ -26,7 +26,7 @@ class WordDetect:
         max_score_index = torch.argmax(cosine_scores)
         return word_list[max_score_index]
 
-    def detect_nearest_word(self, query_word: str | list[str], word_list: list[str] = None):
+    def detect_nearest_word(self, query_word: str | list[str], word_list: list[str] | None = None):
         if isinstance(query_word, str):
             return self._detect_nearest_word(query_word, word_list)
         elif isinstance(query_word, list):

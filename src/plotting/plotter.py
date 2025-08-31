@@ -10,7 +10,7 @@ import plotly.graph_objects as go
 from typing import Dict, Tuple, Any, List, Optional
 
 from src.config import NetworkConfig  # 依赖配置类
-from src.graph.node import Node     # 依赖节点类
+from src.network.node import Node     # 依赖节点类
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +33,124 @@ class BasePlotter(abc.ABC):
         self.config = config
         self.color_map_data = color_map_data
         self.type_to_plot_color_cache: Dict[str, str] = {}  # 缓存节点类型到绘图颜色的映射
+
+    def _validate_node_coordinates(self, node: Node, node_id: str = None) -> bool:
+        """
+        验证节点坐标的有效性。
+        
+        Args:
+            node: 要验证的节点对象
+            node_id: 节点ID（用于错误报告）
+            
+        Returns:
+            bool: 坐标是否有效
+        """
+        try:
+            if not hasattr(node, 'x') or not hasattr(node, 'y') or not hasattr(node, 'z'):
+                return False
+            
+            coords = [node.x, node.y, node.z]
+            return all(
+                isinstance(c, (int, float)) and 
+                not np.isnan(c) and 
+                np.isfinite(c) 
+                for c in coords
+            )
+        except (TypeError, AttributeError):
+            return False
+
+    def _get_edge_type_config(self) -> Dict[str, Dict[str, Any]]:
+        """
+        获取边类型的样式配置。
+        
+        Returns:
+            Dict: 边类型配置字典
+        """
+        return {
+            'horizontal': {
+                'color': self.config.HORIZONTAL_EDGE_COLOR,
+                'width': self.config.EDGE_WIDTH,
+                'name': 'Horizontal Connection',
+                'dash': None
+            },
+            'vertical': {
+                'color': self.config.VERTICAL_EDGE_COLOR, 
+                'width': self.config.EDGE_WIDTH * 1.5,
+                'name': 'Vertical Connection',
+                'dash': None
+            },
+            'door': {
+                'color': self.config.DOOR_EDGE_COLOR,
+                'width': self.config.EDGE_WIDTH * 1.2,
+                'name': 'Door Connection',
+                'dash': None
+            },
+            'special': {
+                'color': self.config.SPECIAL_EDGE_COLOR,
+                'width': self.config.EDGE_WIDTH * 1.3,
+                'name': 'Special Connection',
+                'dash': None
+            }
+        }
+
+    def _classify_edge_type(self, start_node: Node, end_node: Node, edge_attr: dict, z0: float, z1: float) -> str:
+        """
+        智能分类边的类型，用于不同的可视化样式。
+        
+        使用精确匹配而非包含匹配，避免误分类问题。
+        
+        Args:
+            start_node: 起始节点对象
+            end_node: 终止节点对象
+            edge_attr: 边的属性字典
+            z0: 起始节点Z坐标
+            z1: 终止节点Z坐标
+            
+        Returns:
+            边类型字符串：'horizontal', 'vertical', 'door', 'special'
+            
+        Raises:
+            ValueError: 当节点对象无效时抛出异常
+        """
+        # 输入验证
+        if not isinstance(start_node, Node) or not isinstance(end_node, Node):
+            raise ValueError(f"Invalid node objects: start_node={type(start_node)}, end_node={type(end_node)}")
+        
+        if not hasattr(start_node, 'node_type') or not hasattr(end_node, 'node_type'):
+            raise ValueError("Node objects must have 'node_type' attribute")
+        
+        if start_node.node_type is None or end_node.node_type is None:
+            raise ValueError("Node types cannot be None")
+        
+        # 检查Z坐标有效性
+        if not isinstance(z0, (int, float)) or not isinstance(z1, (int, float)):
+            raise ValueError(f"Invalid Z coordinates: z0={type(z0)}, z1={type(z1)}")
+        
+        # 检查Z坐标数值有效性（NaN和无穷大）
+        if not (np.isfinite(z0) and np.isfinite(z1)):
+            raise ValueError(f"Z coordinates must be finite: z0={z0}, z1={z1}")
+        
+        # 检查是否为垂直连接（跨楼层）
+        z_diff_threshold = getattr(self.config, 'VERTICAL_CONNECTION_Z_THRESHOLD', 0.1)
+        if abs(z0 - z1) > z_diff_threshold:
+            return 'vertical'
+        
+        # 使用配置中的类型定义进行精确匹配
+        start_type = str(start_node.node_type).strip()
+        end_type = str(end_node.node_type).strip()
+
+        # 检查是否涉及Door连接（使用配置中的CONNECTION_TYPES）
+        connection_types = set(getattr(self.config, 'CONNECTION_TYPES', ['Door']))
+        if start_type in connection_types or end_type in connection_types:
+            return 'door'
+        
+        # 检查是否为特殊类型连接（使用配置中的VERTICAL_TYPES）
+        vertical_types = set(getattr(self.config, 'VERTICAL_TYPES', ['电梯', '扶梯', '楼梯']))
+        if start_type in vertical_types or end_type in vertical_types:
+            return 'special'
+        
+        # 默认为水平连接
+        return 'horizontal'
 
     def _get_node_color(self, node_type: str) -> str:
         """
@@ -149,7 +267,7 @@ class PlotlyPlotter(BasePlotter):
 
         # Add a step to show all floors
         slider_steps.append(dict(
-            label="所有楼层",
+            label="All Floors",
             method="relayout",
             args=[{"scene.zaxis.range": [min_z - self.config.DEFAULT_FLOOR_HEIGHT * 0.5,
                                          max_z + self.config.DEFAULT_FLOOR_HEIGHT * 0.5]}]  # View all
@@ -157,10 +275,10 @@ class PlotlyPlotter(BasePlotter):
 
         sliders = [dict(
             active=len(all_z_levels),  # Default to "All Floors"
-            currentvalue={"prefix": "当前显示: "},
+            currentvalue={"prefix": "Current Display: "},
             pad={"t": 50},
             steps=slider_steps,
-            name="楼层选择"
+            name="Floor Selection"
         )]
         return {"sliders": sliders}
 
@@ -191,12 +309,14 @@ class PlotlyPlotter(BasePlotter):
             return
 
         all_z_coords_present = sorted(
-            list(set(n.pos[2] for n in all_node_objects)))
+            list(set(n.z for n in all_node_objects)))
         min_z = min(all_z_coords_present) if all_z_coords_present else 0
         max_z = max(all_z_coords_present) if all_z_coords_present else 0
 
         for node_obj in all_node_objects:
             node_type = node_obj.node_type
+            e_name = node_obj.e_name
+            code = node_obj.code
             if node_type not in nodes_data_by_type:
                 nodes_data_by_type[node_type] = {
                     'x': [], 'y': [], 'z': [],
@@ -206,7 +326,7 @@ class PlotlyPlotter(BasePlotter):
                     'ids': []
                 }
 
-            x, y, z = node_obj.pos
+            x, y, z = node_obj.x, node_obj.y, node_obj.z
             plot_x = (
                 graph_width - x) if self.config.IMAGE_MIRROR and graph_width is not None else x
 
@@ -223,7 +343,7 @@ class PlotlyPlotter(BasePlotter):
             can_show_permanent_label = not is_ped_type or self.config.SHOW_PEDESTRIAN_LABELS
 
             nodes_data_by_type[node_type]['visible_text'].append(
-                node_type if can_show_permanent_label else "")
+                code if can_show_permanent_label else "")
 
             # 2. Hover text (always detailed)
             hover_label = (
@@ -231,9 +351,9 @@ class PlotlyPlotter(BasePlotter):
                 f"Type: {node_type}<br>"
                 f"Pos: ({x},{y},{z})<br>"
                 f"Time: {node_obj.time:.2f}<br>"
-                f"Area: {node_obj.area:.2f}"
+                f"Area: {getattr(node_obj, 'area', 0):.2f}"
             )
-            if node_obj.door_type:
+            if hasattr(node_obj, 'door_type') and node_obj.door_type:
                 hover_label += f"<br>Door: {node_obj.door_type}"
             nodes_data_by_type[node_type]['hover_text'].append(hover_label)
 
@@ -293,52 +413,161 @@ class PlotlyPlotter(BasePlotter):
             )
             node_traces.append(node_trace)
 
-        # --- Prepare Edge Data (remains largely the same) ---
-        edge_x_horiz, edge_y_horiz, edge_z_horiz = [], [], []
-        edge_x_vert, edge_y_vert, edge_z_vert = [], [], []
+        # --- Prepare Edge Data with Enhanced Classification ---
+        # 存储不同类型边的坐标数据
+        edge_data = {
+            'horizontal': {'x': [], 'y': [], 'z': []},
+            'vertical': {'x': [], 'y': [], 'z': []},
+            'door': {'x': [], 'y': [], 'z': []},
+            'special': {'x': [], 'y': [], 'z': []}
+        }
+        
+        # 性能和错误统计
+        edges_processed = 0
+        edges_skipped = 0
+        classification_errors = 0
+        coordinate_errors = 0
+        
+        # 输入验证
+        if not graph or len(graph.edges) == 0:
+            logger.warning("PlotlyPlotter: 图中没有边需要处理")
+            edge_traces = []
+        else:
+            # 创建节点ID到Node对象的映射以提高查找性能
+            node_id_to_obj = {}
+            invalid_node_count = 0
+            
+            for node_id, node_data in graph.nodes(data=True):
+                node_obj = node_data.get('node_obj')
+                if isinstance(node_obj, Node):
+                    node_id_to_obj[node_id] = node_obj
+                else:
+                    invalid_node_count += 1
+            
+            if invalid_node_count > 0:
+                logger.warning(f"发现 {invalid_node_count} 个无效节点对象")
+            
+            logger.debug(f"创建节点映射表完成，包含 {len(node_id_to_obj)} 个有效节点")
 
-        for edge_start_node, edge_end_node in graph.edges():
-            if not (isinstance(edge_start_node, Node) and isinstance(edge_end_node, Node)):
+            # 遍历所有边并正确获取节点对象
+            for edge_start_id, edge_end_id, edge_attr in graph.edges(data=True):
+                edges_processed += 1
+                
+                try:
+                    # 边界条件检查：边属性
+                    if edge_attr is None:
+                        edge_attr = {}
+                    
+                    # 通过节点ID获取Node对象
+                    start_node = node_id_to_obj.get(edge_start_id)
+                    end_node = node_id_to_obj.get(edge_end_id)
+                    
+                    # 验证节点对象存在性和有效性
+                    if not isinstance(start_node, Node) or not isinstance(end_node, Node):
+                        edges_skipped += 1
+                        if edges_processed <= 10:  # 只记录前10个错误避免日志泛滥
+                            logger.warning(f"边 ({edge_start_id}, {edge_end_id}) 的节点对象无效: "
+                                         f"start_node={type(start_node)}, end_node={type(end_node)}")
+                        continue
+                    
+                    # 验证节点坐标有效性
+                    if not self._validate_node_coordinates(start_node, str(edge_start_id)) or \
+                       not self._validate_node_coordinates(end_node, str(edge_end_id)):
+                        coordinate_errors += 1
+                        edges_skipped += 1
+                        if coordinate_errors <= 5:
+                            logger.warning(f"边 ({edge_start_id}, {edge_end_id}) 的节点坐标无效")
+                        continue
+                    
+                    # 获取节点位置信息
+                    x0, y0, z0 = start_node.x, start_node.y, start_node.z
+                    x1, y1, z1 = end_node.x, end_node.y, end_node.z
+                    
+                    # 应用镜像变换（如果启用）
+                    if self.config.IMAGE_MIRROR and graph_width is not None and isinstance(graph_width, (int, float)):
+                        plot_x0 = graph_width - x0
+                        plot_x1 = graph_width - x1
+                    else:
+                        plot_x0, plot_x1 = x0, x1
+                    
+                    # 智能边类型分类（带异常处理）
+                    try:
+                        edge_type = self._classify_edge_type(start_node, end_node, edge_attr, z0, z1)
+                        
+                        # 验证分类结果
+                        if edge_type not in edge_data:
+                            classification_errors += 1
+                            if classification_errors <= 5:
+                                logger.warning(f"未知的边类型 '{edge_type}'，使用默认类型 'horizontal'")
+                            edge_type = 'horizontal'
+                        
+                    except Exception as class_e:
+                        classification_errors += 1
+                        edges_skipped += 1
+                        if classification_errors <= 5:
+                            logger.warning(f"分类边 ({edge_start_id}, {edge_end_id}) 时出错: {class_e}，跳过该边")
+                        continue
+                    
+                    # 将边数据添加到相应类别
+                    edge_data[edge_type]['x'].extend([plot_x0, plot_x1, None])
+                    edge_data[edge_type]['y'].extend([y0, y1, None])
+                    edge_data[edge_type]['z'].extend([z0, z1, None])
+                    
+                except Exception as e:
+                    edges_skipped += 1
+                    logger.warning(f"处理边 ({edge_start_id}, {edge_end_id}) 时发生未知错误: {type(e).__name__}: {str(e)}")
+                    continue
+            
+            # 详细统计报告
+            successful_edges = edges_processed - edges_skipped
+            logger.info(f"边处理统计: 总计 {edges_processed} 条边，成功处理 {successful_edges} 条，跳过 {edges_skipped} 条")
+            if coordinate_errors > 0:
+                logger.info(f"坐标错误: {coordinate_errors} 条边")
+            if classification_errors > 0:
+                logger.info(f"分类错误: {classification_errors} 条边")
+            
+            # 按类型统计边数
+            type_counts = {edge_type: len(data['x']) // 3 for edge_type, data in edge_data.items() if data['x']}
+            if type_counts:
+                logger.info(f"边类型分布: {type_counts}")
+
+            # 创建不同类型边的可视化轨迹
+            edge_traces = []
+            edge_style_config = self._get_edge_type_config()
+        
+        # 为每种边类型创建Scatter3d轨迹
+        for edge_type, data in edge_data.items():
+            if not data['x']:  # 跳过空数据
                 continue
-
-            x0, y0, z0 = edge_start_node.pos
-            x1, y1, z1 = edge_end_node.pos
-            plot_x0 = (
-                graph_width - x0) if self.config.IMAGE_MIRROR and graph_width is not None else x0
-            plot_x1 = (
-                graph_width - x1) if self.config.IMAGE_MIRROR and graph_width is not None else x1
-
-            if abs(z0 - z1) < 0.1:
-                edge_x_horiz.extend([plot_x0, plot_x1, None])
-                edge_y_horiz.extend([y0, y1, None])
-                edge_z_horiz.extend([z0, z1, None])
-            else:
-                edge_x_vert.extend([plot_x0, plot_x1, None])
-                edge_y_vert.extend([y0, y1, None])
-                edge_z_vert.extend([z0, z1, None])
-
-        if edge_x_horiz:
-            edge_traces.append(go.Scatter3d(
-                x=edge_x_horiz, y=edge_y_horiz, z=edge_z_horiz,
+                
+            style = edge_style_config[edge_type]
+            line_config = {
+                'color': style['color'],
+                'width': style['width']
+            }
+            if style['dash']:
+                line_config['dash'] = style['dash']
+            
+            edge_trace = go.Scatter3d(
+                x=data['x'],
+                y=data['y'], 
+                z=data['z'],
                 mode='lines',
-                line=dict(color=self.config.HORIZONTAL_EDGE_COLOR,
-                          width=self.config.EDGE_WIDTH),
-                hoverinfo='none', name='水平连接'
-            ))
-        if edge_x_vert:
-            edge_traces.append(go.Scatter3d(
-                x=edge_x_vert, y=edge_y_vert, z=edge_z_vert,
-                mode='lines',
-                line=dict(color=self.config.VERTICAL_EDGE_COLOR,
-                          width=self.config.EDGE_WIDTH),
-                hoverinfo='none', name='垂直连接'
-            ))
+                line=line_config,
+                hoverinfo='none',
+                name=style['name'],
+                showlegend=True,  # 显示在图例中
+                legendgroup=f'edges_{edge_type}'  # 分组管理
+            )
+            edge_traces.append(edge_trace)
+            
+        logger.info(f"创建了 {len(edge_traces)} 种类型的边轨迹")
 
         # --- Layout and Figure (remains largely the same) ---
         layout = go.Layout(
             title=title,
             showlegend=True,
-            hovermode='closest',  # Important for hover behavior
+            hovermode='closest',
             margin=dict(b=20, l=5, r=5, t=40),
             scene=dict(
                 xaxis=dict(
@@ -347,9 +576,17 @@ class PlotlyPlotter(BasePlotter):
                     title='Y',
                     autorange='reversed', # 反转Y轴
                 ),
-                zaxis=dict(title='Z (楼层)', range=[min_z - 1, max_z + 1]),
-                aspectmode='data',  # 'data' is often good for spatial data
-                camera=dict(eye=dict(x=1.25, y=1.25, z=1.25))
+                zaxis=dict(title='Z (Floor)'),
+                aspectmode="manual",
+                aspectratio=dict(
+                    x=self.config.X_AXIS_RATIO,
+                    y=self.config.Y_AXIS_RATIO,
+                    z=self.config.Z_AXIS_RATIO
+                ),
+                camera=dict(
+                    # projection=dict(type='orthographic'),
+                    eye=dict(x=1.25, y=1.25, z=1.25)
+                    )
             ),
             legend=dict(
                 orientation="v",    # 垂直排列
@@ -358,8 +595,8 @@ class PlotlyPlotter(BasePlotter):
                 xanchor="left",     # X 锚点
                 yanchor="top",      # Y 锚点
                 bgcolor="rgba(255, 255, 255, 0.7)", # 可选：浅色背景提高可读性
-                bordercolor="rgba(120, 120, 120, 0.7)", # 可选：边框颜色
-                borderwidth=1         # 可选：边框宽度
+                # bordercolor="rgba(120, 120, 120, 0.7)", # 可选：边框颜色
+                # borderwidth=1         # 可选：边框宽度
             )
         )
 
@@ -372,7 +609,7 @@ class PlotlyPlotter(BasePlotter):
 
         if output_path:
             output_path.parent.mkdir(parents=True, exist_ok=True)
-            fig.write_html(str(output_path))
+            fig.write_html(str(output_path), config=self.config.PLOTLY_CONFIG)
             # Ensure logger
             logger.info(f"Plotly graph saved to {output_path}")
         else:

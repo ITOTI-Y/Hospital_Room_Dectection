@@ -153,12 +153,18 @@ class FloorManager:
             return {}
 
         sorted_floor_numbers = sorted(floor_to_path_map.keys())
+        
+        revision_num = 0
+        
+        if 0 not in sorted_floor_numbers:
+            revision_num = 1
+
 
         # Simple Z level calculation: floor_number * default_floor_height
         # This assumes a consistent floor height and that floor numbers represent relative positions.
         # For example, Floor 0 is at Z=0, Floor 1 at Z=10, Floor -1 at Z=-10.
         z_levels: Dict[int, float] = {
-            floor_num: float(floor_num * self.default_floor_height)
+            floor_num: float((floor_num - revision_num) * self.default_floor_height if floor_num > 0 else floor_num * self.default_floor_height)
             for floor_num in sorted_floor_numbers
         }
         return z_levels

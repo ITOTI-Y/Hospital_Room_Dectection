@@ -3,72 +3,72 @@
 import pathlib
 from typing import Dict, Tuple, List, Any, Optional
 
-# Global COLOR_MAP - Consider encapsulating or making it part of a config loader
+# 全局颜色映射表 - 医院区域类型的RGB颜色编码
 COLOR_MAP: Dict[Tuple[int, int, int], Dict[str, Any]] = {
-    (244, 67, 54): {'name': '内诊药房', 'time': 46},
-    (0, 150, 136): {'name': '挂号收费', 'time': 79},
-    (103, 58, 183): {'name': '急诊科', 'time': 9000},
-    (145, 102, 86): {'name': '中心供应室', 'time': 1},
-    (33, 150, 243): {'name': '全科', 'time': 435},
-    (3, 169, 244): {'name': '放射科', 'time': 250},
-    (0, 188, 212): {'name': '儿科', 'time': 640},
-    (207, 216, 220): {'name': '走廊', 'time': 1},
-    (117, 117, 117): {'name': '楼梯', 'time': 1},
-    (189, 189, 189): {'name': '电梯', 'time': 1},
-    (158, 158, 158): {'name': '扶梯', 'time': 1},
-    (76, 175, 80): {'name': '绿化', 'time': 1},
-    (255, 235, 59): {'name': '墙', 'time': 1},
-    (121, 85, 72): {'name': '门', 'time': 1},
-    (156, 39, 176): {'name': '室外', 'time': 1},
-    (139, 195, 74): {'name': '内镜中心', 'time': 960},
-    (205, 220, 57): {'name': '检验中心', 'time': 180},
-    (255, 193, 7): {'name': '消化内科', 'time': 245},
-    (255, 152, 0): {'name': '甲状腺外科', 'time': 256},
-    (254, 87, 34): {'name': '肾内科', 'time': 315},
-    (169, 238, 90): {'name': '心血管内科', 'time': 886},
-    (88, 67, 60): {'name': '采血处', 'time': 184},
-    (239, 199, 78): {'name': '眼科', 'time': 564},
-    (253, 186, 87): {'name': '中医科', 'time': 1486},
-    (250, 133, 96): {'name': '耳鼻喉科', 'time': 737},
-    (197, 254, 130): {'name': '口腔一区', 'time': 1004},
-    (173, 133, 11): {'name': '超声科', 'time': 670},
-    (119, 90, 10): {'name': '病理科', 'time': 1},
-    (250, 146, 138): {'name': '骨科', 'time': 223},
-    (255, 128, 171): {'name': '泌尿外科', 'time': 337},
-    (33, 250, 230): {'name': '肝胆胰外科', 'time': 397},
-    (82, 108, 255): {'name': '皮肤科', 'time': 462},
-    (226, 58, 255): {'name': '妇科', 'time': 442},
-    (100, 139, 55): {'name': '产科', 'time': 404},
-    (188, 246, 126): {'name': '产房', 'time': 1},
-    (113, 134, 91): {'name': '手术室', 'time': 1},
-    (175, 207, 142): {'name': '门诊手术室', 'time': 1},
-    (179, 116, 190): {'name': '中庭', 'time': 1},
-    (232, 137, 248): {'name': '口腔科二区', 'time': 1004},
-    (63, 100, 23): {'name': '神经内科', 'time': 428},
-    (240, 222, 165): {'name': '呼吸内科', 'time': 359},
-    (187, 24, 80): {'name': '综合激光科', 'time': 462},
-    (150, 133, 179): {'name': '透析中心', 'time': 14400},
-    (112, 40, 236): {'name': '肿瘤科', 'time': 2320},
-    (241, 190, 186): {'name': '产前诊断门诊', 'time': 442},
-    (186, 146, 160): {'name': '体检科', 'time': 1260},
-    (71, 195, 180): {'name': '生殖医学科', 'time': 425},
-    (187, 152, 247): {'name': '烧伤整形科', 'time': 256},
-    (254, 210, 145): {'name': '介入科', 'time': 3240},
-    (251, 242, 159): {'name': '栏杆', 'time': 1},
-    (240, 61, 123): {'name': 'NICU', 'time': 1},
-    (250, 162, 193): {'name': 'ICU', 'time': 1},
-    (252, 201, 126): {'name': '静配中心', 'time': 1},
-    (255, 255, 255): {'name': '空房间', 'time': 1}
+    (244, 67, 54): {'name': '内诊药房', 'time': 781, 'e_name': 'Pharmacy', 'code': 'T16'},
+    (0, 150, 136): {'name': '挂号收费', 'time': 678, 'e_name': 'Registration & fee', 'code': 'R1-R4'},
+    (103, 58, 183): {'name': '急诊科', 'time': 9000, 'e_name': 'Emergency', 'code': 'D26'},
+    (145, 102, 86): {'name': '中心供应室', 'time': 1, 'e_name': 'CSSD', 'code': 'T3'},
+    (33, 150, 243): {'name': '全科', 'time': 1965, 'e_name': 'General practice', 'code': 'D1'},
+    (3, 169, 244): {'name': '放射科', 'time': 1484, 'e_name': 'Radiology', 'code': 'T2'},
+    (0, 188, 212): {'name': '儿科', 'time': 5632, 'e_name': 'Pediatrics', 'code': 'D2'},
+    (207, 216, 220): {'name': '走廊', 'time': 1, 'e_name': "Corridor", 'code': "Z1"},
+    (117, 117, 117): {'name': '楼梯', 'time': 1, 'e_name': "Stairs", 'code': "Z2"},
+    (189, 189, 189): {'name': '电梯', 'time': 1, 'e_name': "Elevator", 'code': "Z3"},
+    (158, 158, 158): {'name': '扶梯', 'time': 1, 'e_name': "Escalator", 'code': "Z4"},
+    (76, 175, 80): {'name': '绿化', 'time': 1, 'e_name': "Greening", 'code': "Z5"},
+    (255, 235, 59): {'name': '墙', 'time': 1, 'e_name': "Wall", 'code': "Z6"},
+    (121, 85, 72): {'name': '门', 'time': 1, 'e_name': "Door", 'code': "Z7"},
+    (156, 39, 176): {'name': '室外', 'time': 1, 'e_name': "Outdoor", 'code': "Z8"},
+    (139, 195, 74): {'name': '内镜中心', 'time': 5333, 'e_name': 'Endoscopy', 'code': 'T7'},
+    (205, 220, 57): {'name': '检验中心', 'time': 180, 'e_name': 'Clinical Laboratory', 'code': 'T4'},
+    (255, 193, 7): {'name': '消化内科', 'time': 916, 'e_name': 'Gastroenterology', 'code': 'D10'},
+    (255, 152, 0): {'name': '甲状腺外科', 'time': 5637, 'e_name': 'Thyroid surgery', 'code': 'D18'},
+    (254, 87, 34): {'name': '肾内科', 'time': 1493, 'e_name': 'Nephrology', 'code': 'D6'},
+    (169, 238, 90): {'name': '心血管内科', 'time': 8089, 'e_name': 'Cardiovascular Medicine', 'code': 'D8'},
+    (88, 67, 60): {'name': '采血处', 'time': 1104, 'e_name': 'Blood collection', 'code': 'T15'},
+    (239, 199, 78): {'name': '眼科', 'time': 3228, 'e_name': 'Ophthalmology', 'code': 'D22'},
+    (253, 186, 87): {'name': '中医科', 'time': 3110, 'e_name': 'Chinese medicine', 'code': 'D3'},
+    (250, 133, 96): {'name': '耳鼻喉科', 'time': 9550, 'e_name': 'Otolaryngology', 'code': 'D23'},
+    (197, 254, 130): {'name': '口腔一区', 'time': 10542, 'e_name': 'Dental clinic 1', 'code': 'D24'},
+    (173, 133, 11): {'name': '超声科', 'time': 3023, 'e_name': 'Ultrasound', 'code': 'T1'},
+    (119, 90, 10): {'name': '病理科', 'time': 1, 'e_name': 'Pathology', 'code': 'T5'},
+    (250, 146, 138): {'name': '骨科', 'time': 1090, 'e_name': 'Orthopedics', 'code': 'D7'},
+    (255, 128, 171): {'name': '泌尿外科', 'time': 1019, 'e_name': 'Urology', 'code': 'D12'},
+    (33, 250, 230): {'name': '肝胆胰外科', 'time': 2953, 'e_name': 'Hepatobiliary & Pancreatic', 'code': 'D19'},
+    (82, 108, 255): {'name': '皮肤科', 'time': 2802, 'e_name': 'Dermatology', 'code': 'D21'},
+    (226, 58, 255): {'name': '妇科', 'time': 5000, 'e_name': 'Gynaecology', 'code': 'D15'},
+    (100, 139, 55): {'name': '产科', 'time': 2208, 'e_name': 'Obstetrics', 'code': 'D14'},
+    (170, 190, 150): {'name': '产房', 'time': 1, 'e_name': 'Delivery room', 'code': 'T9'},
+    (113, 134, 91): {'name': '手术室', 'time': 1, 'e_name': 'Theater', 'code': 'T13'},
+    (175, 207, 142): {'name': '门诊手术室', 'time': 1, 'e_name': 'Ambulatory Surgery', 'code': 'T12'},
+    (179, 116, 190): {'name': '中庭', 'time': 1, 'e_name': "Courtyard", 'code': "Z9"},
+    (232, 137, 248): {'name': '口腔科二区', 'time': 4964, 'e_name': 'Dental clinic 2', 'code': 'D25'},
+    (63, 100, 23): {'name': '神经内科', 'time': 2396, 'e_name': 'Neurology', 'code': 'D9'},
+    (240, 222, 165): {'name': '呼吸内科', 'time': 1457, 'e_name': 'Respiratory', 'code': 'D5'},
+    (187, 24, 80): {'name': '综合激光科', 'time': 1848, 'e_name': 'Laser clinic', 'code': 'D20'},
+    (150, 133, 179): {'name': '透析中心', 'time': 44267, 'e_name': 'Haemodialysis unit', 'code': 'T8'},
+    (112, 40, 236): {'name': '肿瘤科', 'time': 11729, 'e_name': 'Oncology', 'code': 'D11'},
+    (241, 190, 186): {'name': '产前诊断门诊', 'time': 1252, 'e_name': 'Prenatal Diagnosis', 'code': 'D13'},
+    (186, 146, 160): {'name': '体检科', 'time': 7336, 'e_name': 'Physical Examination', 'code': 'D4'},
+    (71, 195, 180): {'name': '生殖医学科', 'time': 1086, 'e_name': 'Reproductive Medicine', 'code': 'D16'},
+    (187, 152, 247): {'name': '烧伤整形科', 'time': 854, 'e_name': 'Plastic surgery', 'code': 'D17'},
+    (254, 210, 145): {'name': '介入科', 'time': 14688, 'e_name': 'Interventional Therapy', 'code': 'T6'},
+    (251, 242, 159): {'name': '栏杆', 'time': 1, 'e_name': "Handrail", 'code': "Z10"},
+    (240, 61, 123): {'name': 'NICU', 'time': 1, 'e_name': 'NICU', 'code': 'T10'},
+    (250, 162, 193): {'name': 'ICU', 'time': 1, 'e_name': 'ICU', 'code': 'T11'},
+    (252, 201, 126): {'name': '静配中心', 'time': 1, 'e_name': 'PIVAS', 'code': 'T14'},
+    (255, 255, 255): {'name': '空房间', 'time': 1, 'e_name': "Vacant Room", 'code': "Z11"}
 }
 
 class NetworkConfig:
     """Stores configuration parameters for network generation and plotting."""
 
     def __init__(self, color_map_data: Dict[Tuple[int, int, int], Dict[str, Any]] = COLOR_MAP):
-        self.RESULT_PATH: pathlib.Path = pathlib.Path(__file__).parent.parent / 'result'
+        self.RESULT_PATH: pathlib.Path = pathlib.Path(__file__).parent.parent / 'results' / 'network'
         self.DEBUG_PATH: pathlib.Path = pathlib.Path(__file__).parent.parent / 'debug'
         self.IMAGE_ROTATE: int = 180
-        self.AREA_THRESHOLD: int = 60  # Minimum area for a component to be considered a node
+        self.AREA_THRESHOLD: int = 60  # 被视为节点的连通区域最小面积阈值
 
         # Node Type Definitions (derived from COLOR_MAP)
         self.ALL_TYPES: List[str] = [v['name'] for v in color_map_data.values()]
@@ -85,37 +85,52 @@ class NetworkConfig:
         self.PEDESTRIAN_TYPES: List[str] = [name for name in ['走廊'] if name in self.ALL_TYPES]
         self.OUTSIDE_TYPES: List[str] = [name for name in ['室外'] if name in self.ALL_TYPES]
 
-        # Grid and Special IDs for pixel-level identification in id_map
-        self.GRID_SIZE: int = 40  # Base grid size for mesh node generation
-        self.OUTSIDE_ID_MAP_VALUE: int = -1  # Special ID for 'outside' areas in the id_map
-        self.BACKGROUND_ID_MAP_VALUE: int = -2 # Special ID for 'background' in the id_map
-        self.PEDESTRIAN_ID_MAP_VALUE: int = -3 # Special ID for 'pedestrian' areas in the id_map
+        # 网格和特殊ID用于在id_map中进行像素级别的识别
+        self.GRID_SIZE: int = 40  # mesh节点生成的基础网格大小
+        self.OUTSIDE_ID_MAP_VALUE: int = -1  # id_map中'室外'区域的特殊ID
+        self.BACKGROUND_ID_MAP_VALUE: int = -2  # id_map中'背景'区域的特殊ID
+        self.PEDESTRIAN_ID_MAP_VALUE: int = -3  # id_map中'行人通道'区域的特殊ID
 
-        # Node Property Times
-        self.OUTSIDE_MESH_TIMES_FACTOR: int = 2  # Multiplier for grid size and time for outside nodes
-        self.PEDESTRIAN_TIME: float = 1.75  # Default time for pedestrian nodes
+        # 节点属性时间配置
+        self.OUTSIDE_MESH_TIMES_FACTOR: int = 2  # 室外节点的网格大小和时间乘数因子
+        self.PEDESTRIAN_TIME: float = 1.75  # 行人节点的默认通行时间
         self.CONNECTION_TIME: float = 3.0  # Default time for connection nodes (e.g., doors)
 
-        # Plotting and Visualization
-        self.IMAGE_MIRROR: bool = True  # Whether to mirror the image horizontally in plots
-        self.NODE_COLOR_FROM_MAP: bool = True  # Use colors from COLOR_MAP for nodes in plots
+        # 绘图和可视化配置
+        self.IMAGE_MIRROR: bool = True  # 是否在绘图中水平镜像图像
+        self.NODE_COLOR_FROM_MAP: bool = True  # 在绘图中是否使用COLOR_MAP的颜色显示节点
 
-        self.NODE_SIZE_DEFAULT: int = 10
-        self.NODE_SIZE_PEDESTRIAN: int = 5
-        self.NODE_SIZE_CONNECTION: int = 8
-        self.NODE_SIZE_VERTICAL: int = 10
+        self.NODE_SIZE_DEFAULT: int = 2
+        self.NODE_SIZE_PEDESTRIAN: int = 2
+        self.NODE_SIZE_CONNECTION: int = 2
+        self.NODE_SIZE_VERTICAL: int = 2
         self.NODE_SIZE_ROOM: int = 7
-        self.NODE_SIZE_OUTSIDE: int = 4
+        self.NODE_SIZE_OUTSIDE: int = 2
         self.NODE_OPACITY: float = 0.8
         self.SHOW_PEDESTRIAN_LABELS: bool = False
 
         self.HORIZONTAL_EDGE_COLOR: str = "#1f77b4"
-        self.VERTICAL_EDGE_COLOR: str = "#ff7f0e"
-        self.EDGE_WIDTH: float = 0.5
+        self.VERTICAL_EDGE_COLOR: str = "rgba(151,152,155,0.7)"  #"#ff7e0e75"
+        self.DOOR_EDGE_COLOR: str = "#2ca02c"
+        self.SPECIAL_EDGE_COLOR: str = "#d62728"
+        self.EDGE_WIDTH: float = 1.5
 
-        # SuperNetwork Specific
-        self.DEFAULT_FLOOR_HEIGHT: float = 10.0
-        self.DEFAULT_VERTICAL_CONNECTION_TOLERANCE: int = 0 # Default pixel distance for connecting vertical nodes across floors
+        self.X_AXIS_RATIO: float = 1
+        self.Y_AXIS_RATIO: float = 1
+        self.Z_AXIS_RATIO: float = 2
+
+        #Plotly Configuration
+        self.PLOTLY_CONFIG = {
+            'toImageButtonOptions': {
+                'format': 'png',
+                'filename': 'Network',
+                'scale': 3
+            }
+        }
+
+        # SuperNetwork多层网络专用配置
+        self.DEFAULT_FLOOR_HEIGHT: float = 10
+        self.DEFAULT_VERTICAL_CONNECTION_TOLERANCE: int = 0  # 跨楼层连接垂直节点的默认像素距离容差
         # Estimated max nodes per floor. Used for pre-allocating ID ranges in multi-processing.
         # Should be an overestimate to avoid ID collisions.
         self.ESTIMATED_MAX_NODES_PER_FLOOR: int = 10000
@@ -150,7 +165,6 @@ class RLConfig:
         COST_MATRIX_CACHE (pathlib.Path): 预计算成本矩阵的缓存文件路径。
         AREA_SCALING_FACTOR (float): 科室面积允许的缩放容差。
         MANDATORY_ADJACENCY (List[List[str]]): 强制相邻的科室对列表。
-        PREFERRED_ADJACENCY (Dict[str, List[List[str]]]): 偏好相邻（软约束）的科室对字典。
         FIXED_NODE_TYPES (List[str]): 在布局中位置固定、不参与优化的节点类型列表。
         EMBEDDING_DIM (int): 节点嵌入向量的维度。
         TRANSFORMER_HEADS (int): Transformer编码器中的多头注意力头数。
@@ -168,20 +182,29 @@ class RLConfig:
         NUM_EPOCHS (int): 每次收集数据后，对数据进行优化的轮次。
         REWARD_TIME_WEIGHT (float): 奖励函数中通行时间成本的权重。
         REWARD_ADJACENCY_WEIGHT (float): 奖励函数中相邻性偏好的权重。
+        RESUME_TRAINING (bool): 是否启用断点续训功能。
+        PRETRAINED_MODEL_PATH (str): 预训练模型路径，用于断点续训。
+        CHECKPOINT_FREQUENCY (int): checkpoint保存频率（按训练步数计算）。
+        SAVE_TRAINING_STATE (bool): 是否保存完整训练状态（包括优化器、学习率调度器状态）。
     """
 
     def __init__(self):
         # --- 路径配置 (使用Pathlib) ---
+        """
+        初始化 RLConfig 类，设置强化学习布局优化所需的所有路径、输入文件、缓存文件、约束参数及模型训练超参数。
+        
+        该方法会自动创建缓存目录和日志目录（如不存在）。
+        """
         self.ROOT_PATH: pathlib.Path = pathlib.Path(__file__).parent.parent
         self.RL_OPTIMIZER_PATH: pathlib.Path = self.ROOT_PATH / 'src' / 'rl_optimizer'
         self.DATA_PATH: pathlib.Path = self.RL_OPTIMIZER_PATH / 'data'
         self.CACHE_PATH: pathlib.Path = self.DATA_PATH / 'cache'
         self.LOG_PATH: pathlib.Path = self.ROOT_PATH / 'logs'
-        self.RESULT_PATH: pathlib.Path = self.ROOT_PATH / 'result'
+        self.RESULT_PATH: pathlib.Path = self.ROOT_PATH / 'results'
 
         # --- 输入文件 ---
-        self.TRAVEL_TIMES_CSV: pathlib.Path = self.ROOT_PATH / 'result' / 'super_network_travel_times.csv'
-        self.PROCESS_TEMPLATES_JSON: pathlib.Path = self.DATA_PATH / 'process_templates.json'
+        self.TRAVEL_TIMES_CSV: pathlib.Path = self.RESULT_PATH / 'network' / 'hospital_travel_times.csv'
+        self.PROCESS_TEMPLATES_JSON: pathlib.Path = self.DATA_PATH / 'process_templates_traditional.json'
 
         # --- 自动生成/缓存的中间文件 ---
         self.NODE_VARIANTS_JSON: pathlib.Path = self.CACHE_PATH / 'node_variants.json'
@@ -191,38 +214,269 @@ class RLConfig:
 
         # --- 约束配置 ---
         self.AREA_SCALING_FACTOR: float = 0.1
+        self.EMPTY_SLOT_PENALTY_FACTOR: float = 10000.0  # 每个空槽位的惩罚系数
+        self.ALLOW_PARTIAL_LAYOUT: bool = True  # 是否允许部分布局（跳过槽位）
         self.MANDATORY_ADJACENCY: List[List[str]] = []  # 例如: [['手术室_30007', '中心供应室_10003']]
-        self.PREFERRED_ADJACENCY: Dict[str, List[List[str]]] = {
-            'positive': [], # 例如: [['检验中心_10007', '采血处_20007']]
-            'negative': []  # 例如: [['儿科_10006', '急诊科_1']]
-        }
         self.FIXED_NODE_TYPES: List[str] = [
             '门', '楼梯', '电梯', '扶梯', '走廊', '墙', '栏杆', 
-            '室外', '绿化', '中庭', '空房间'
+            '室外', '绿化', '中庭', '空房间', '急诊科','挂号收费'
         ]
 
-        # --- 模型超参数 ---
-        self.EMBEDDING_DIM: int = 128
-        self.TRANSFORMER_HEADS: int = 4
-        self.TRANSFORMER_LAYERS: int = 4
-        self.FEATURES_DIM: int = 256
-        self.LEARNING_RATE: float = 3e-4
+        # --- Transformer模型配置 ---
+        self.EMBEDDING_DIM: int = 128  # 嵌入维度
+        self.FEATURES_DIM: int = 128  # 特征提取器输出的特征维度
+        self.TRANSFORMER_HEADS: int = 4  # 多头注意力头数
+        self.TRANSFORMER_LAYERS: int = 4  # Transformer层数
+        self.TRANSFORMER_DROPOUT: float = 0.1  # Dropout比例
+        
+        # --- 策略网络配置 ---
+        self.POLICY_NET_ARCH: int = 128
+        self.POLICY_NET_LAYERS: int = 2
+        self.VALUE_NET_ARCH: int = 128
+        self.VALUE_NET_LAYERS: int = 2
+        
+        # --- 学习率调度器配置 ---
+        self.LEARNING_RATE_SCHEDULE_TYPE: str = "linear"  # "linear", "constant"
+        self.LEARNING_RATE_INITIAL: float = 3e-4  # 初始学习率
+        self.LEARNING_RATE_FINAL: float = 1e-6   # 最终学习率（线性衰减的目标值）
+        self.LEARNING_RATE: float = 3e-4  # 保持向后兼容性
 
         # --- PPO 训练超参数 ---
         self.NUM_ENVS: int = 8
-        self.NUM_STEPS: int = 512
+        self.N_STEPS: int = 512  # 修正为N_STEPS以匹配PPO参数
         self.TOTAL_TIMESTEPS: int = 5_000_000
         self.GAMMA: float = 0.99
         self.GAE_LAMBDA: float = 0.95
-        self.CLIP_EPS: float = 0.2
+        self.CLIP_RANGE: float = 0.2  # 修正为CLIP_RANGE以匹配PPO参数
         self.ENT_COEF: float = 0.01
+        self.VF_COEF: float = 0.5  # 添加值函数损失系数
+        self.MAX_GRAD_NORM: float = 0.5  # 添加梯度裁剪参数
         self.BATCH_SIZE: int = 64
-        self.NUM_EPOCHS: int = 10
+        self.N_EPOCHS: int = 10  # 修正为N_EPOCHS以匹配PPO参数
+        
+        # --- 性能优化参数 ---
+        self.COST_CACHE_SIZE: int = 1000  # LRU缓存大小
+        self.MAX_PATHWAY_COMBINATIONS: int = 10000  # 最大流线组合数
+        
+        # --- 算法默认参数 ---
+        self.DEFAULT_PENALTY: float = 1000.0  # 默认惩罚值
+        self.LARGE_PENALTY: float = 10000.0  # 大惩罚值
+        self.INVALID_ACTION_PENALTY: float = -100.0  # 无效动作惩罚
+        
+        # --- 模拟退火默认参数 ---
+        self.SA_DEFAULT_INITIAL_TEMP: float = 1000.0 # 初始温度
+        self.SA_DEFAULT_FINAL_TEMP: float = 0.1 # 最终温度
+        self.SA_DEFAULT_COOLING_RATE: float = 0.95 # 冷却速率
+        self.SA_DEFAULT_TEMPERATURE_LENGTH: int = 100 # 温度长度
+        self.SA_DEFAULT_MAX_ITERATIONS: int = 10000 # 最大迭代次数
+        self.SA_MAX_REPAIR_ATTEMPTS: int = 10 # 约束修复最大尝试次数
+
+        # --- 遗传算法默认参数 ---
+        self.GA_DEFAULT_POPULATION_SIZE: int = 300 # 种群大小
+        self.GA_DEFAULT_ELITE_SIZE: int = 20 # 精英大小
+        self.GA_DEFAULT_MUTATION_RATE: float = 0.15  # 初始变异率
+        self.GA_DEFAULT_CROSSOVER_RATE: float = 0.85  # 初始交叉率
+        self.GA_DEFAULT_TOURNAMENT_SIZE: int = 5 # 锦标赛大小
+        self.GA_DEFAULT_MAX_AGE: int = 100 # 最大代数
+        self.GA_DEFAULT_CONVERGENCE_THRESHOLD: int = 300 # 停滞代数阈值
+        self.GA_DEFAULT_MAX_ITERATIONS: int = 10000 # 最大迭代次数
+
+        # --- 约束感知遗传算法增强参数 ---
+        self.GA_CONSTRAINT_REPAIR_STRATEGY: str = 'greedy_area_matching'  # 默认约束修复策略
+        self.GA_ADAPTIVE_PARAMETERS: bool = True  # 启用自适应参数调整
+        self.GA_MAX_REPAIR_ATTEMPTS: int = 5  # 约束修复最大尝试次数
+        self.GA_DIVERSITY_THRESHOLD_LOW: float = 0.05  # TODO:多样性极低阈值
+        self.GA_DIVERSITY_THRESHOLD_MEDIUM: float = 0.15  # TODO:多样性较低阈值
+        
+        # --- 并发控制 ---
+        self.MAX_PARALLEL_ALGORITHMS: int = 3
+        
+        # --- 评估和检查点配置 ---
+        self.EVAL_FREQUENCY: int = 10000  # 添加评估频率
 
         # --- 软约束奖励权重 ---
         self.REWARD_TIME_WEIGHT: float = 1.0
         self.REWARD_ADJACENCY_WEIGHT: float = 0.1
+        self.REWARD_PLACEMENT_BONUS: float = 1.0  # 成功放置一个科室的即时奖励
+        self.REWARD_EMPTY_SLOT_PENALTY: float = 5.0  # 每个空槽位的最终惩罚
+        self.REWARD_SCALE_FACTOR: float = 20000.0  # 奖励缩放因子, 仅对加权总时间成本有效
+        
+        # --- 势函数奖励配置 ---
+        self.ENABLE_POTENTIAL_REWARD: bool = True  # 是否启用势函数奖励
+        self.POTENTIAL_REWARD_WEIGHT: float = 1.0  # 势函数奖励权重
+        
+        # --- 面积匹配奖励配置 ---
+        self.AREA_MATCH_REWARD_WEIGHT: float = 0.2  # 面积匹配在势函数中的权重
+        self.AREA_MATCH_BONUS_BASE: float = 10.0  # 基础面积匹配奖励值
+        
+        # --- 相邻性奖励配置 ---
+        # 相邻性奖励总开关
+        self.ENABLE_ADJACENCY_REWARD: bool = True
+        
+        # 相邻性奖励优化开关
+        self.ENABLE_ADJACENCY_OPTIMIZATION: bool = True  # 启用优化相邻性计算器
+        
+        # 相邻性奖励权重(在势函数中的权重)
+        self.ADJACENCY_REWARD_WEIGHT: float = 0.15
+        
+        # 多维度相邻性权重分配
+        self.SPATIAL_ADJACENCY_WEIGHT: float = 0.4      # 空间相邻性权重
+        self.FUNCTIONAL_ADJACENCY_WEIGHT: float = 0.5   # 功能相邻性权重  
+        self.CONNECTIVITY_ADJACENCY_WEIGHT: float = 0.1 # 连通性相邻性权重
+        
+        # 相邻性判定参数
+        self.ADJACENCY_PERCENTILE_THRESHOLD: float = 0.2  # 相邻性分位数阈值
+        self.ADJACENCY_K_NEAREST: int | None = None              # 最近邻数量(None=自动)
+        self.ADJACENCY_CLUSTER_EPS_PERCENTILE: float = 0.1 # 聚类邻域分位数
+        self.ADJACENCY_MIN_CLUSTER_SIZE: int = 2          # 最小聚类大小
+        
+        # 连通性相邻性参数
+        self.CONNECTIVITY_DISTANCE_PERCENTILE: float = 0.3  # 连通距离分位数阈值
+        self.CONNECTIVITY_MAX_PATH_LENGTH: int = 3          # 最大路径长度
+        self.CONNECTIVITY_WEIGHT_DECAY: float = 0.8         # 路径长度权重衰减因子
+        
+        # 奖励缩放参数
+        self.ADJACENCY_REWARD_BASE: float = 5.0           # 基础奖励值
+        self.ADJACENCY_PENALTY_MULTIPLIER: float = 1.5    # 负向惩罚倍数
+        
+        # 缓存和性能参数
+        self.ADJACENCY_CACHE_SIZE: int = 500              # 相邻性缓存大小
+        self.ADJACENCY_PRECOMPUTE: bool = True            # 是否预计算相邻性矩阵
+        
+        # 优化相邻性计算器配置
+        self.ADJACENCY_OPTIMIZATION_SPARSE_THRESHOLD: float = 0.1  # 稀疏矩阵阈值
+        self.ADJACENCY_OPTIMIZATION_VECTORIZE_BATCH_SIZE: int = 1000  # 向量化批处理大小
+        self.ADJACENCY_OPTIMIZATION_MEMORY_EFFICIENT: bool = True  # 启用内存优化
+        
+        # 医疗功能相邻性数据
+        self.MEDICAL_ADJACENCY_PREFERENCES: Dict[str, Dict[str, float]] = {
+            # 正向偏好 (值为正数)
+            "静配中心": {
+                "ICU": 0.8,      # 静配中心与ICU物流相关
+            },
+            "中心供应室": {
+                "内镜中心": 0.9,        # 中心供应室与内镜中心物流相关
+            },
+            "采血处": {
+                "检验中心": 0.5,    # 采血处与检验中心物流相关
+            },
+            "手术室": {
+                "ICU": 1.0,          # 手术室与ICU强相关
+                "门诊手术室": 1.0
+            },
+            "ICU": {
+                "NICU": 1.0          # ICU与NICU强相关
+            },
+            "产房": {
+                "NICU": 1.0          # 产房与NICU强相关
+            },
+            "检验中心": {
+                "病理科": 0.5,    # 检验中心与病理科物流相关
+            }
+        }
+
+        # --- 断点续训配置 ---
+        self.RESUME_TRAINING: bool = False  # 是否启用断点续训
+        self.PRETRAINED_MODEL_PATH: str = "data/model"  # 预训练模型路径（用于断点续训）
+        self.CHECKPOINT_FREQUENCY: int = 50000  # checkpoint保存频率（训练步数）
+        self.SAVE_TRAINING_STATE: bool = True  # 是否保存完整训练状态（优化器、调度器等）
 
         # 确保关键路径存在
         self.CACHE_PATH.mkdir(parents=True, exist_ok=True)
         self.LOG_PATH.mkdir(parents=True, exist_ok=True)
+        
+        # 验证相邻性奖励配置参数
+        if self.ENABLE_ADJACENCY_REWARD:
+            self._validate_adjacency_parameters()
+    
+    def _validate_adjacency_parameters(self):
+        """
+        验证相邻性奖励相关配置参数的有效性。
+        在配置错误时抛出异常或自动修正参数值。
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # 验证权重参数
+        weight_params = [
+            ('ADJACENCY_REWARD_WEIGHT', self.ADJACENCY_REWARD_WEIGHT),
+            ('SPATIAL_ADJACENCY_WEIGHT', self.SPATIAL_ADJACENCY_WEIGHT), 
+            ('FUNCTIONAL_ADJACENCY_WEIGHT', self.FUNCTIONAL_ADJACENCY_WEIGHT),
+            ('CONNECTIVITY_ADJACENCY_WEIGHT', self.CONNECTIVITY_ADJACENCY_WEIGHT)
+        ]
+        
+        for param_name, param_value in weight_params:
+            if not isinstance(param_value, (int, float)) or param_value < 0:
+                raise ValueError(f"相邻性权重参数 {param_name} 必须为非负数值，当前值：{param_value}")
+                
+        # 验证分位数阈值参数
+        if not (0 < self.ADJACENCY_PERCENTILE_THRESHOLD < 1):
+            raise ValueError(f"相邻性分位数阈值必须在(0,1)范围内，当前值：{self.ADJACENCY_PERCENTILE_THRESHOLD}")
+        
+        # 验证连通性参数
+        if self.CONNECTIVITY_ADJACENCY_WEIGHT > 0:
+            if not isinstance(self.CONNECTIVITY_MAX_PATH_LENGTH, int) or not (2 <= self.CONNECTIVITY_MAX_PATH_LENGTH <= 5):
+                logger.warning(f"连通性最大路径长度应在2-5之间，当前值：{self.CONNECTIVITY_MAX_PATH_LENGTH}，自动修正为3")
+                self.CONNECTIVITY_MAX_PATH_LENGTH = 3
+                
+            if not (0 < self.CONNECTIVITY_WEIGHT_DECAY < 1):
+                logger.warning(f"连通性权重衰减因子应在(0,1)范围内，当前值：{self.CONNECTIVITY_WEIGHT_DECAY}，自动修正为0.8")
+                self.CONNECTIVITY_WEIGHT_DECAY = 0.8
+                
+            if not (0 < self.CONNECTIVITY_DISTANCE_PERCENTILE < 1):
+                logger.warning(f"连通性距离分位数应在(0,1)范围内，当前值：{self.CONNECTIVITY_DISTANCE_PERCENTILE}，自动修正为0.3")
+                self.CONNECTIVITY_DISTANCE_PERCENTILE = 0.3
+        
+        # 验证奖励缩放参数
+        if not isinstance(self.ADJACENCY_REWARD_BASE, (int, float)) or self.ADJACENCY_REWARD_BASE <= 0:
+            raise ValueError(f"相邻性奖励基础值必须为正数，当前值：{self.ADJACENCY_REWARD_BASE}")
+            
+        if not isinstance(self.ADJACENCY_PENALTY_MULTIPLIER, (int, float)) or self.ADJACENCY_PENALTY_MULTIPLIER <= 0:
+            raise ValueError(f"相邻性惩罚倍数必须为正数，当前值：{self.ADJACENCY_PENALTY_MULTIPLIER}")
+        
+        # 验证优化配置参数
+        if not isinstance(self.ENABLE_ADJACENCY_OPTIMIZATION, bool):
+            logger.warning(f"相邻性优化开关应为布尔值，当前值：{self.ENABLE_ADJACENCY_OPTIMIZATION}，自动修正为True")
+            self.ENABLE_ADJACENCY_OPTIMIZATION = True
+            
+        if not (0 < self.ADJACENCY_OPTIMIZATION_SPARSE_THRESHOLD <= 1):
+            logger.warning(f"稀疏矩阵阈值应在(0,1]范围内，当前值：{self.ADJACENCY_OPTIMIZATION_SPARSE_THRESHOLD}，自动修正为0.1")
+            self.ADJACENCY_OPTIMIZATION_SPARSE_THRESHOLD = 0.1
+            
+        if not isinstance(self.ADJACENCY_OPTIMIZATION_VECTORIZE_BATCH_SIZE, int) or self.ADJACENCY_OPTIMIZATION_VECTORIZE_BATCH_SIZE <= 0:
+            logger.warning(f"向量化批处理大小应为正整数，当前值：{self.ADJACENCY_OPTIMIZATION_VECTORIZE_BATCH_SIZE}，自动修正为1000")
+            self.ADJACENCY_OPTIMIZATION_VECTORIZE_BATCH_SIZE = 1000
+        
+        # 验证缓存参数
+        if not isinstance(self.ADJACENCY_CACHE_SIZE, int) or self.ADJACENCY_CACHE_SIZE <= 0:
+            logger.warning(f"相邻性缓存大小应为正整数，当前值：{self.ADJACENCY_CACHE_SIZE}，自动修正为500")
+            self.ADJACENCY_CACHE_SIZE = 500
+        
+        # 验证医疗功能相邻性偏好数据
+        if not isinstance(self.MEDICAL_ADJACENCY_PREFERENCES, dict):
+            raise ValueError("医疗相邻性偏好配置必须为字典类型")
+            
+        # 检查偏好数据的格式正确性
+        for dept, preferences in self.MEDICAL_ADJACENCY_PREFERENCES.items():
+            if not isinstance(dept, str) or not isinstance(preferences, dict):
+                raise ValueError(f"医疗相邻性偏好格式错误：{dept} -> {preferences}")
+                
+            for target_dept, score in preferences.items():
+                if not isinstance(target_dept, str) or not isinstance(score, (int, float)):
+                    raise ValueError(f"医疗相邻性偏好分数格式错误：{dept} -> {target_dept}: {score}")
+                
+                if not (-2.0 <= score <= 2.0):
+                    logger.warning(f"医疗相邻性偏好分数建议在[-2.0, 2.0]范围内：{dept} -> {target_dept}: {score}")
+        
+        # 权重组合合理性检查
+        total_adjacency_weight = (self.SPATIAL_ADJACENCY_WEIGHT + 
+                                 self.FUNCTIONAL_ADJACENCY_WEIGHT + 
+                                 self.CONNECTIVITY_ADJACENCY_WEIGHT)
+        
+        if total_adjacency_weight <= 0:
+            raise ValueError("至少需要启用一种相邻性权重（空间、功能、连通性）")
+            
+        if total_adjacency_weight > 3.0:
+            logger.warning(f"相邻性权重总和过高可能影响训练稳定性：{total_adjacency_weight:.2f}")
+        
+        logger.info("相邻性奖励配置参数验证通过")

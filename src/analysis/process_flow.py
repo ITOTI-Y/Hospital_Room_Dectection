@@ -1,5 +1,6 @@
 import pandas as pd
 import logging
+from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Set, Any, Mapping
 from itertools import product
 
@@ -101,7 +102,7 @@ class PathFinder:
     and a CSV file defining available "Name_ID"s and their connections/travel times.
     """
 
-    def __init__(self, csv_filepath: str = None, config: NetworkConfig = None):
+    def __init__(self, csv_filepath: str | None  = None, config: NetworkConfig | None = None):
         """
         Initializes the PathFinder by loading and processing the CSV file.
 
@@ -115,9 +116,9 @@ class PathFinder:
             self.config: NetworkConfig = NetworkConfig()
 
         if csv_filepath:
-            self.csv_filepath: str = csv_filepath
+            self.csv_filepath: Path = Path(csv_filepath)
         else:
-            self.csv_filepath: str = self.config.RESULT_PATH / 'super_network_travel_times.csv'
+            self.csv_filepath: Path = self.config.RESULT_PATH / 'super_network_travel_times.csv'
 
         self.name_to_ids_map: Dict[str, List[str]] = {}
         self.all_name_ids: Set[str] = set()
@@ -129,7 +130,7 @@ class PathFinder:
         Parses a "Name_ID" string into its name and ID components.
 
         Args:
-            name_id_str (str): The string in "Name_ID" format (e.g., "门_11072").
+            name_id_str (str): The string in "Name_ID" format (e.g., "Door_11072").
 
         Returns:
             Tuple[str, str]: (name, id)
