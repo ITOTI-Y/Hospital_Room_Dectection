@@ -248,7 +248,7 @@ class RLConfig:
         self.GAMMA: float = 0.99
         self.GAE_LAMBDA: float = 0.95
         self.CLIP_RANGE: float = 0.2  # 修正为CLIP_RANGE以匹配PPO参数
-        self.ENT_COEF: float = 0.05
+        self.ENT_COEF: float = 0.10
         self.VF_COEF: float = 0.5  # 添加值函数损失系数
         self.MAX_GRAD_NORM: float = 0.5  # 添加梯度裁剪参数
         self.BATCH_SIZE: int = 64

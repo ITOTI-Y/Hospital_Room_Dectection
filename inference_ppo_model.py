@@ -8,7 +8,7 @@ import torch
 import numpy as np
 import pandas as pd
 from pathlib import Path
-from typing import Dict, List, Any
+from typing import Dict, List, Any, Optional
 
 # 添加项目路径
 sys.path.append(str(Path(__file__).parent))
@@ -28,7 +28,7 @@ logger = setup_logger(__name__)
 class PPOModelInference:
     """PPO模型推理器"""
     
-    def __init__(self, model_path: str, config: RLConfig = None):
+    def __init__(self, model_path: str, config: Optional[RLConfig] = None):
         """
         初始化推理器
         
@@ -150,6 +150,12 @@ class PPOModelInference:
         inner_env = env.env if hasattr(env, 'env') else env
         final_layout = inner_env._get_final_layout_str()
         
+        # 检查是否存在空余槽位
+        if None in final_layout:
+            empty_slots = final_layout.count(None)
+            logger.warning(f"推理结果存在 {empty_slots} 个空余槽位，不符合完整布局要求")
+            return None  # 返回None表示推理失败
+        
         # 计算成本
         total_cost = self.cost_calculator.calculate_total_cost(final_layout)
         per_process_cost = self.cost_calculator.calculate_per_process_cost(final_layout)
@@ -237,10 +243,18 @@ class PPOModelInference:
         results = []
         best_result = None
         best_cost = float('inf')
+        failed_episodes = 0
         
         for i in range(n_episodes):
             logger.info(f"\n--- Episode {i+1}/{n_episodes} ---")
             result = self.infer_single_episode(render=False)
+            
+            # 跳过无效结果（存在空余槽位的推理）
+            if result is None:
+                failed_episodes += 1
+                logger.warning(f"  Episode {i+1} 推理失败（存在空余槽位）")
+                continue
+                
             results.append(result)
             
             if result['total_cost'] < best_cost:
@@ -248,9 +262,25 @@ class PPOModelInference:
                 best_result = result
                 logger.info(f"  ★ 发现更优布局！成本: {best_cost:.2f}, 面积匹配度: {result['area_match_stats']['average']:.3f}")
         
+        # 检查是否有有效结果
+        if not results:
+            logger.error(f"所有 {n_episodes} 次推理均失败，无法生成完整布局")
+            return {
+                "best_result": None,
+                "all_results": [],
+                "statistics": {
+                    "n_episodes": n_episodes,
+                    "failed_episodes": failed_episodes,
+                    "valid_episodes": 0,
+                    "success_rate": 0.0
+                }
+            }
+        
         # 计算统计信息
         costs = [r['total_cost'] for r in results]
         area_matches = [r['area_match_stats']['average'] for r in results]
+        valid_episodes = len(results)
+        success_rate = valid_episodes / n_episodes
         
         stats = {
             "best_result": best_result,
@@ -261,6 +291,9 @@ class PPOModelInference:
                 "mean_cost": np.mean(costs),
                 "std_cost": np.std(costs),
                 "n_episodes": n_episodes,
+                "valid_episodes": valid_episodes,
+                "failed_episodes": failed_episodes,
+                "success_rate": success_rate,
                 "mean_area_match": np.mean(area_matches),
                 "std_area_match": np.std(area_matches)
             }
@@ -268,6 +301,10 @@ class PPOModelInference:
         
         logger.info("\n" + "="*60)
         logger.info("推理统计:")
+        logger.info(f"  总推理次数: {n_episodes}")
+        logger.info(f"  有效推理次数: {valid_episodes}")
+        logger.info(f"  失败推理次数: {failed_episodes}")
+        logger.info(f"  成功率: {success_rate:.1%}")
         logger.info(f"  最小成本: {stats['statistics']['min_cost']:.2f}")
         logger.info(f"  最大成本: {stats['statistics']['max_cost']:.2f}")
         logger.info(f"  平均成本: {stats['statistics']['mean_cost']:.2f}")
@@ -285,6 +322,11 @@ class PPOModelInference:
             results: 推理结果
             output_path: 输出路径
         """
+        # 检查是否存在有效结果
+        if results.get('best_result') is None:
+            logger.warning("没有有效的推理结果，跳过保存")
+            return
+        
         if output_path is None:
             output_path = Path("results") / "inference" / f"ppo_inference_{Path(self.model_path).parent.parent.name}.json"
         
@@ -372,18 +414,37 @@ def main():
         # 执行推理
         if args.single:
             logger.info("\n执行单次推理...")
-            results = inferencer.infer_single_episode(render=args.verbose)
-            # 包装为统一格式
-            results = {
-                "best_result": results,
-                "statistics": {
-                    "n_episodes": 1,
-                    "min_cost": results['total_cost'],
-                    "max_cost": results['total_cost'],
-                    "mean_cost": results['total_cost'],
-                    "std_cost": 0.0
+            result = inferencer.infer_single_episode(render=args.verbose)
+            
+            # 处理推理失败的情况
+            if result is None:
+                logger.error("单次推理失败（存在空余槽位），无法生成完整布局")
+                results = {
+                    "best_result": None,
+                    "statistics": {
+                        "n_episodes": 1,
+                        "valid_episodes": 0,
+                        "failed_episodes": 1,
+                        "success_rate": 0.0
+                    }
                 }
-            }
+            else:
+                # 包装为统一格式
+                results = {
+                    "best_result": result,
+                    "statistics": {
+                        "n_episodes": 1,
+                        "valid_episodes": 1,
+                        "failed_episodes": 0,
+                        "success_rate": 1.0,
+                        "min_cost": result['total_cost'],
+                        "max_cost": result['total_cost'],
+                        "mean_cost": result['total_cost'],
+                        "std_cost": 0.0,
+                        "mean_area_match": result['area_match_stats']['average'],
+                        "std_area_match": 0.0
+                    }
+                }
         else:
             results = inferencer.infer_multiple_episodes(n_episodes=args.n_episodes)
         
