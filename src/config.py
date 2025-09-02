@@ -237,9 +237,9 @@ class RLConfig:
         
         # --- 学习率调度器配置 ---
         self.LEARNING_RATE_SCHEDULE_TYPE: str = "linear"  # "linear", "constant"
-        self.LEARNING_RATE_INITIAL: float = 3e-4  # 初始学习率
-        self.LEARNING_RATE_FINAL: float = 1e-6   # 最终学习率（线性衰减的目标值）
-        self.LEARNING_RATE: float = 3e-4  # 保持向后兼容性
+        self.LEARNING_RATE_INITIAL: float = 1e-4  # 初始学习率
+        self.LEARNING_RATE_FINAL: float = 1e-8   # 最终学习率（线性衰减的目标值）
+        self.LEARNING_RATE: float = 1e-4  # 保持向后兼容性
 
         # --- PPO 训练超参数 ---
         self.NUM_ENVS: int = 8
@@ -248,7 +248,7 @@ class RLConfig:
         self.GAMMA: float = 0.99
         self.GAE_LAMBDA: float = 0.95
         self.CLIP_RANGE: float = 0.2  # 修正为CLIP_RANGE以匹配PPO参数
-        self.ENT_COEF: float = 0.01
+        self.ENT_COEF: float = 0.05
         self.VF_COEF: float = 0.5  # 添加值函数损失系数
         self.MAX_GRAD_NORM: float = 0.5  # 添加梯度裁剪参数
         self.BATCH_SIZE: int = 64
@@ -299,8 +299,10 @@ class RLConfig:
         self.REWARD_ADJACENCY_WEIGHT: float = 0.1
         self.REWARD_PLACEMENT_BONUS: float = 1.0  # 成功放置一个科室的即时奖励
         self.REWARD_EMPTY_SLOT_PENALTY: float = 5.0  # 每个空槽位的最终惩罚
-        self.REWARD_SCALE_FACTOR: float = 20000.0  # 奖励缩放因子, 仅对加权总时间成本有效
-        
+        self.REWARD_SCALE_FACTOR: float = 40000.0  # 奖励缩放因子, 仅对加权总时间成本有效
+        self.REWARD_SKIP_PENALTY: float = -2.0  # 跳过惩罚
+        self.REWARD_COMPLETION_BONUS: float = 100.0  # 完成奖励
+
         # --- 势函数奖励配置 ---
         self.ENABLE_POTENTIAL_REWARD: bool = True  # 是否启用势函数奖励
         self.POTENTIAL_REWARD_WEIGHT: float = 1.0  # 势函数奖励权重

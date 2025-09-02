@@ -166,3 +166,5 @@ results/comparison/
 results/plots/
 results/reports/
 results/layouts/
+results/inference/
+*.pkl

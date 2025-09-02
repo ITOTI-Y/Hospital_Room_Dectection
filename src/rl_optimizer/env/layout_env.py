@@ -292,11 +292,13 @@ class LayoutEnv(gym.Env):
         self.previous_potential = 0.0  # 上一步的势函数值
 
     def reset(self, *, seed: Optional[int] = None, options: Optional[dict] = None) -> Tuple[Dict, Dict]:
-        """重置环境，按面积从小到大排序槽位，并返回初始观测。"""
+        """重置环境，返回初始观测。"""
         super().reset(seed=seed)
         self._initialize_state_variables()
         # 修改：按槽位面积从小到大排序，而不是随机打乱
-        self.shuffled_slot_indices = np.argsort(self.slot_areas)
+        # self.shuffled_slot_indices = np.argsort(self.slot_areas)
+
+        np.random.shuffle(self.shuffled_slot_indices) # 尝试随机布局提高泛化性能
         
         # 初始化势函数值（空布局的势函数为0）
         self.previous_potential = 0.0
@@ -327,7 +329,7 @@ class LayoutEnv(gym.Env):
             current_slot_idx = self.shuffled_slot_indices[self.current_step]
             self.skipped_slots.add(current_slot_idx)
             logger.debug(f"跳过槽位 {self.placeable_slots[current_slot_idx]} (索引: {current_slot_idx})")
-            immediate_reward = 0.0  # 跳过动作不给奖励
+            immediate_reward = self.config.REWARD_SKIP_PENALTY
         else:
             # 检查科室是否已被放置
             if self.placed_mask[action]:
@@ -571,17 +573,22 @@ class LayoutEnv(gym.Env):
         
         # 2. 计算空槽位惩罚
         empty_slot_penalty = -num_empty_slots * self.config.REWARD_EMPTY_SLOT_PENALTY
-        
+
+        if num_empty_slots == 0:
+            complete_penalty = self.config.REWARD_COMPLETION_BONUS
+        else:
+            complete_penalty = 0.0
+
         # 3. 计算成功放置奖励（累积值）
         placement_bonus = num_placed_depts * self.config.REWARD_PLACEMENT_BONUS
         
         # 4. 计算总奖励
-        total_reward = time_reward * self.config.REWARD_TIME_WEIGHT + empty_slot_penalty + placement_bonus
-        
+        total_reward = time_reward * self.config.REWARD_TIME_WEIGHT + empty_slot_penalty + placement_bonus + complete_penalty
+
         logger.info(f"最终奖励计算: 时间成本={raw_time_cost:.2f}, "
                    f"时间奖励={time_reward:.2f}, 成功放置奖励={placement_bonus:.2f}, "
-                   f"空槽位惩罚={empty_slot_penalty:.2f}, 总奖励={total_reward:.2f}")
-        
+                   f"空槽位惩罚={empty_slot_penalty:.2f}, 完成奖励={complete_penalty:.2f}, 总奖励={total_reward:.2f}")
+
         return total_reward
     
     def _calculate_reward(self) -> float:
