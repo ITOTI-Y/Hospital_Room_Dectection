@@ -1,7 +1,7 @@
 """Handles image loading, preprocessing, and basic morphological operations."""
 
 import cv2
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 import numpy as np
 from PIL import Image
 from scipy.spatial import KDTree
@@ -9,7 +9,7 @@ from typing import Tuple, Dict, Any, Optional
 
 from src.config import NetworkConfig
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class ImageProcessor:

@@ -8,7 +8,7 @@ import os  # For os.cpu_count()
 import pathlib
 import networkx as nx
 import numpy as np
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 from typing import List, Dict, Tuple, Optional, Any
 from scipy.spatial import KDTree
 
@@ -17,7 +17,7 @@ from .node import Node
 from .network import Network  # The single-floor network builder
 from .floor_manager import FloorManager
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 # Worker function for multiprocessing - must be defined at the top-level or picklable
 

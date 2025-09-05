@@ -2,7 +2,7 @@
 结果对比分析器 - 提供详细的算法对比分析和可视化功能
 """
 
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
@@ -15,7 +15,7 @@ from datetime import datetime
 from src.algorithms.base_optimizer import OptimizationResult
 from src.rl_optimizer.data.cache_manager import CacheManager
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class ResultsComparator:

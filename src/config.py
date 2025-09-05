@@ -248,7 +248,7 @@ class RLConfig:
         self.GAMMA: float = 0.99
         self.GAE_LAMBDA: float = 0.95
         self.CLIP_RANGE: float = 0.2  # 修正为CLIP_RANGE以匹配PPO参数
-        self.ENT_COEF: float = 0.10
+        self.ENT_COEF: float = 0.05
         self.VF_COEF: float = 0.5  # 添加值函数损失系数
         self.MAX_GRAD_NORM: float = 0.5  # 添加梯度裁剪参数
         self.BATCH_SIZE: int = 64
@@ -259,8 +259,7 @@ class RLConfig:
         self.MAX_PATHWAY_COMBINATIONS: int = 10000  # 最大流线组合数
         
         # --- 算法默认参数 ---
-        self.DEFAULT_PENALTY: float = 1000.0  # 默认惩罚值
-        self.LARGE_PENALTY: float = 10000.0  # 大惩罚值
+        self.DEFAULT_PENALTY: float = max([i['time'] for i in COLOR_MAP.values()])  # 默认惩罚值使用最大通行时间
         self.INVALID_ACTION_PENALTY: float = -100.0  # 无效动作惩罚
         
         # --- 模拟退火默认参数 ---
@@ -304,7 +303,7 @@ class RLConfig:
         self.REWARD_COMPLETION_BONUS: float = 100.0  # 完成奖励
 
         # --- 势函数奖励配置 ---
-        self.ENABLE_POTENTIAL_REWARD: bool = True  # 是否启用势函数奖励
+        self.ENABLE_POTENTIAL_REWARD: bool = False  # 是否启用势函数奖励
         self.POTENTIAL_REWARD_WEIGHT: float = 1.0  # 势函数奖励权重
         
         # --- 面积匹配奖励配置 ---
@@ -327,7 +326,7 @@ class RLConfig:
         self.CONNECTIVITY_ADJACENCY_WEIGHT: float = 0.1 # 连通性相邻性权重
         
         # 相邻性判定参数
-        self.ADJACENCY_PERCENTILE_THRESHOLD: float = 0.2  # 相邻性分位数阈值
+        self.ADJACENCY_PERCENTILE_THRESHOLD: float = 0.1  # 相邻性分位数阈值
         self.ADJACENCY_K_NEAREST: int | None = None              # 最近邻数量(None=自动)
         self.ADJACENCY_CLUSTER_EPS_PERCENTILE: float = 0.1 # 聚类邻域分位数
         self.ADJACENCY_MIN_CLUSTER_SIZE: int = 2          # 最小聚类大小
@@ -354,26 +353,26 @@ class RLConfig:
         self.MEDICAL_ADJACENCY_PREFERENCES: Dict[str, Dict[str, float]] = {
             # 正向偏好 (值为正数)
             "静配中心": {
-                "ICU": 0.8,      # 静配中心与ICU物流相关
+                "ICU": 0.0,      # 静配中心与ICU物流相关
             },
             "中心供应室": {
-                "内镜中心": 0.9,        # 中心供应室与内镜中心物流相关
+                "内镜中心": 0.0,        # 中心供应室与内镜中心物流相关
             },
             "采血处": {
-                "检验中心": 0.5,    # 采血处与检验中心物流相关
+                "检验中心": 0.0,    # 采血处与检验中心物流相关
             },
             "手术室": {
-                "ICU": 1.0,          # 手术室与ICU强相关
-                "门诊手术室": 1.0
+                "ICU": 0.0,          # 手术室与ICU强相关
+                "门诊手术室": 0.0
             },
             "ICU": {
-                "NICU": 1.0          # ICU与NICU强相关
+                "NICU": 0.0          # ICU与NICU强相关
             },
             "产房": {
-                "NICU": 1.0          # 产房与NICU强相关
+                "NICU": 0.0          # 产房与NICU强相关
             },
             "检验中心": {
-                "病理科": 0.5,    # 检验中心与病理科物流相关
+                "病理科": 0.0,    # 检验中心与病理科物流相关
             }
         }
 
@@ -387,9 +386,100 @@ class RLConfig:
         self.CACHE_PATH.mkdir(parents=True, exist_ok=True)
         self.LOG_PATH.mkdir(parents=True, exist_ok=True)
         
+        # --- 动态基线奖励归一化配置 ---
+        self.ENABLE_DYNAMIC_BASELINE: bool = True  # 启用动态基线奖励归一化
+        self.EMA_ALPHA: float = 0.1  # 指数移动平均平滑因子 (0 < alpha <= 1)
+        self.BASELINE_WARMUP_EPISODES: int = 200  # 基线预热期episode数量
+        self.BASELINE_UPDATE_FREQUENCY: int = 10  # 基线更新频率（每N个episode更新一次）
+        
+        # 动态基线归一化权重（归一化后各组件的权重）
+        self.NORMALIZED_TIME_WEIGHT: float = 1.0  # 时间成本归一化权重
+        self.NORMALIZED_ADJACENCY_WEIGHT: float = 0.5  # 相邻性奖励归一化权重
+        self.NORMALIZED_AREA_WEIGHT: float = 0.3  # 面积匹配归一化权重
+        self.NORMALIZED_SKIP_PENALTY_WEIGHT: float = 0.3  # 跳过惩罚归一化权重
+        self.NORMALIZED_COMPLETION_BONUS_WEIGHT: float = 0.1  # 完成奖励归一化权重
+        
+        # 奖励归一化参数
+        self.REWARD_NORMALIZATION_CLIP_RANGE: float = 3.0  # 归一化时的裁剪范围（几个标准差）
+        self.REWARD_NORMALIZATION_MIN_STD: float = 1e-8  # 最小标准差，防止除零错误
+        self.ENABLE_REWARD_CLIPPING: bool = True  # 启用奖励裁剪
+        self.REWARD_CLIP_RANGE: Tuple[float, float] = (-10.0, 10.0)  # 最终奖励裁剪范围
+        
+        # 基线预测相关配置
+        self.ENABLE_RELATIVE_IMPROVEMENT_REWARD: bool = True  # 启用相对改进奖励
+        self.RELATIVE_IMPROVEMENT_SCALE: float = 5.0  # 相对改进奖励缩放因子
+        self.BASELINE_SMOOTHING_WINDOW: int = 50  # 基线平滑窗口大小
+        
         # 验证相邻性奖励配置参数
         if self.ENABLE_ADJACENCY_REWARD:
             self._validate_adjacency_parameters()
+        
+        # 验证动态基线配置参数
+        if self.ENABLE_DYNAMIC_BASELINE:
+            self._validate_dynamic_baseline_parameters()
+    
+    def _validate_dynamic_baseline_parameters(self):
+        """
+        验证动态基线配置参数的有效性。
+        在配置错误时抛出异常或自动修正参数值。
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # 验证EMA平滑因子
+        if not (0 < self.EMA_ALPHA <= 1):
+            raise ValueError(f"EMA平滑因子必须在(0,1]范围内，当前值：{self.EMA_ALPHA}")
+        
+        # 验证预热期参数
+        if not isinstance(self.BASELINE_WARMUP_EPISODES, int) or self.BASELINE_WARMUP_EPISODES < 0:
+            logger.warning(f"基线预热期必须为非负整数，当前值：{self.BASELINE_WARMUP_EPISODES}，自动修正为200")
+            self.BASELINE_WARMUP_EPISODES = 200
+        
+        # 验证更新频率
+        if not isinstance(self.BASELINE_UPDATE_FREQUENCY, int) or self.BASELINE_UPDATE_FREQUENCY <= 0:
+            logger.warning(f"基线更新频率必须为正整数，当前值：{self.BASELINE_UPDATE_FREQUENCY}，自动修正为10")
+            self.BASELINE_UPDATE_FREQUENCY = 10
+        
+        # 验证归一化权重
+        weight_params = [
+            ('NORMALIZED_TIME_WEIGHT', self.NORMALIZED_TIME_WEIGHT),
+            ('NORMALIZED_ADJACENCY_WEIGHT', self.NORMALIZED_ADJACENCY_WEIGHT),
+            ('NORMALIZED_AREA_WEIGHT', self.NORMALIZED_AREA_WEIGHT),
+            ('NORMALIZED_SKIP_PENALTY_WEIGHT', self.NORMALIZED_SKIP_PENALTY_WEIGHT),
+            ('NORMALIZED_COMPLETION_BONUS_WEIGHT', self.NORMALIZED_COMPLETION_BONUS_WEIGHT)
+        ]
+        
+        for param_name, param_value in weight_params:
+            if not isinstance(param_value, (int, float)) or param_value < 0:
+                raise ValueError(f"归一化权重参数 {param_name} 必须为非负数值，当前值：{param_value}")
+        
+        # 验证裁剪范围
+        if not isinstance(self.REWARD_NORMALIZATION_CLIP_RANGE, (int, float)) or self.REWARD_NORMALIZATION_CLIP_RANGE <= 0:
+            raise ValueError(f"奖励归一化裁剪范围必须为正数，当前值：{self.REWARD_NORMALIZATION_CLIP_RANGE}")
+        
+        # 验证最小标准差
+        if not isinstance(self.REWARD_NORMALIZATION_MIN_STD, (int, float)) or self.REWARD_NORMALIZATION_MIN_STD <= 0:
+            raise ValueError(f"最小标准差必须为正数，当前值：{self.REWARD_NORMALIZATION_MIN_STD}")
+        
+        # 验证奖励裁剪范围
+        if isinstance(self.REWARD_CLIP_RANGE, (list, tuple)) and len(self.REWARD_CLIP_RANGE) == 2:
+            min_reward, max_reward = self.REWARD_CLIP_RANGE
+            if min_reward >= max_reward:
+                raise ValueError(f"奖励裁剪范围必须满足min < max，当前值：{self.REWARD_CLIP_RANGE}")
+        else:
+            raise ValueError(f"奖励裁剪范围必须为包含两个元素的tuple，当前值：{self.REWARD_CLIP_RANGE}")
+        
+        # 验证相对改进奖励配置
+        if not isinstance(self.RELATIVE_IMPROVEMENT_SCALE, (int, float)) or self.RELATIVE_IMPROVEMENT_SCALE <= 0:
+            logger.warning(f"相对改进奖励缩放因子必须为正数，当前值：{self.RELATIVE_IMPROVEMENT_SCALE}，自动修正为5.0")
+            self.RELATIVE_IMPROVEMENT_SCALE = 5.0
+        
+        # 验证基线平滑窗口
+        if not isinstance(self.BASELINE_SMOOTHING_WINDOW, int) or self.BASELINE_SMOOTHING_WINDOW <= 0:
+            logger.warning(f"基线平滑窗口必须为正整数，当前值：{self.BASELINE_SMOOTHING_WINDOW}，自动修正为50")
+            self.BASELINE_SMOOTHING_WINDOW = 50
+        
+        logger.info("动态基线配置参数验证通过")
     
     def _validate_adjacency_parameters(self):
         """

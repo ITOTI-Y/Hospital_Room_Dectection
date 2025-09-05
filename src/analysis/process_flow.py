@@ -1,5 +1,5 @@
 import pandas as pd
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Set, Any, Mapping
 from itertools import product
@@ -7,7 +7,7 @@ from itertools import product
 from src.analysis.word_detect import WordDetect
 from src.config import NetworkConfig
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class PeopleFlow:

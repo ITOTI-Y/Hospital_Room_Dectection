@@ -6,9 +6,9 @@ import os
 import re
 import pathlib
 from typing import List, Dict, Tuple, Optional
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 class FloorManager:
     """

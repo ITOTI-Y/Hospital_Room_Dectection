@@ -1,12 +1,13 @@
 # src/rl_optimizer/utils/setup.py
 
-import logging
 import sys
 from typing import Any, Optional
 import json
 import pathlib
 import pickle
 import numpy as np
+import multiprocessing
+from loguru import logger
 
 class NpEncoder(json.JSONEncoder):
     """自定义JSON编码器，以处理Numpy数据类型和路径对象。"""
@@ -21,65 +22,79 @@ class NpEncoder(json.JSONEncoder):
             return str(obj)
         return super(NpEncoder, self).default(obj)
     
-def setup_logger(name: str, log_file: Optional[pathlib.Path] = None, level: int = logging.INFO) -> logging.Logger:
-    """配置并返回一个标准化的日志记录器。
+def setup_logger(name: str, log_file: Optional[pathlib.Path] = None, level: int = 20) -> "logger":
+    """配置并返回loguru日志记录器。
 
     Args:
-        name (str): 日志记录器的名称。
+        name (str): 日志记录器的名称（用于上下文标识）。
         log_file (Optional[pathlib.Path]): 可选的日志文件路径。
-        level (int): 日志级别，默认为INFO。
+        level (int): 日志级别，默认为20（INFO）。
 
     Returns:
-        logging.Logger: 配置好的日志记录器实例。
+        logger: 配置好的loguru日志记录器实例。
     """
-    import os
-    import multiprocessing
+    # 转换标准logging级别到loguru级别
+    level_map = {10: "DEBUG", 20: "INFO", 30: "WARNING", 40: "ERROR", 50: "CRITICAL"}
+    log_level = level_map.get(level, "INFO")
     
-    logger = logging.getLogger(name)
-    logger.setLevel(level)
-    
-    # 防止日志向上级传播，避免重复输出
-    logger.propagate = False
-    
-    # 检查是否已经配置过handler，避免重复添加
-    if logger.handlers:
-        return logger
-    
-    # 在多进程环境中，只有主进程输出详细日志
-    # 这里通过检查进程名来判断是否为主进程
+    # 检查是否为多进程环境中的子进程
     is_main_process = True
     try:
-        # 检查是否在多进程环境中
         current_process = multiprocessing.current_process()
         if current_process.name != 'MainProcess':
             is_main_process = False
-            # 子进程只使用WARNING级别以上的日志
-            logger.setLevel(logging.WARNING)
     except:
-        # 如果无法确定进程信息，默认为主进程
         pass
     
-    # 创建formatter
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    # 为每个模块创建唯一的logger标识符
+    logger_id = f"module_{name}"
     
-    # 控制台处理器
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(level if is_main_process else logging.WARNING)
-    # 给handler添加唯一标识，防止重复添加
-    console_handler.set_name(f"console_{name}")
-    logger.addHandler(console_handler)
+    # 移除现有的handlers以避免重复配置
+    logger.remove()
     
-    # 文件处理器（只在主进程中添加，避免文件冲突）
+    # 配置控制台输出（彩色日志）
+    console_format = (
+        "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+        "<level>{level: <8}</level> | "
+        "<cyan>{extra[module]}</cyan> | "
+        "<level>{message}</level>"
+    )
+    
+    # 为主进程和子进程设置不同的日志级别
+    console_level = log_level if is_main_process else "WARNING"
+    
+    logger.add(
+        sys.stdout,
+        format=console_format,
+        level=console_level,
+        colorize=True,
+        backtrace=True,
+        diagnose=True
+    )
+    
+    # 如果提供了日志文件路径且在主进程中，添加文件处理器
     if log_file and is_main_process:
         log_file.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
-        file_handler.setFormatter(formatter)
-        file_handler.setLevel(level)
-        file_handler.set_name(f"file_{name}")
-        logger.addHandler(file_handler)
+        
+        file_format = (
+            "{time:YYYY-MM-DD HH:mm:ss.SSS} | "
+            "{level: <8} | "
+            "{extra[module]} | "
+            "{message}"
+        )
+        
+        logger.add(
+            str(log_file),
+            format=file_format,
+            level=log_level,
+            rotation="10 MB",
+            retention="30 days",
+            compression="zip",
+            encoding="utf-8"
+        )
     
-    return logger
+    # 绑定模块名称到logger上下文
+    return logger.bind(module=name)
 
 def save_json(data: dict, path: pathlib.Path):
     """使用自定义编码器将字典保存为JSON文件。"""

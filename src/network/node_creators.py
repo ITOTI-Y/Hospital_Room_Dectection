@@ -9,7 +9,7 @@ base class.
 import abc
 import cv2
 import numpy as np
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 from scipy.spatial import KDTree
 from typing import Dict, Tuple, List, Any, Optional
 
@@ -18,7 +18,7 @@ from .node import Node
 from .graph_manager import GraphManager
 from src.image_processing.processor import ImageProcessor
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class BaseNodeCreator(abc.ABC):

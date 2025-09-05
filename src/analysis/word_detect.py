@@ -1,9 +1,9 @@
 import torch
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 from sentence_transformers import SentenceTransformer, util
 from src.config import NetworkConfig
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 class WordDetect:
     def __init__(self, model: SentenceTransformer = None, config: NetworkConfig = None):

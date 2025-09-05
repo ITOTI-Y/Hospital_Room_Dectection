@@ -5,14 +5,14 @@
 import math
 import random
 import copy
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 from typing import List, Optional, Dict, Any
 
 from src.algorithms.base_optimizer import BaseOptimizer, OptimizationResult
 from src.algorithms.constraint_manager import ConstraintManager
 from src.rl_optimizer.env.cost_calculator import CostCalculator
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class SimulatedAnnealingOptimizer(BaseOptimizer):

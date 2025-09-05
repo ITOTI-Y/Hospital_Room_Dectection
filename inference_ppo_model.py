@@ -71,6 +71,8 @@ class PPOModelInference:
             placeable_slots=self.cache_manager.placeable_slots,
             placeable_departments=self.cache_manager.placeable_departments
         )
+
+        self.origin_total_cost = self.cost_calculator.calculate_total_cost(self.travel_times.columns.to_list())
         
         # 初始化约束管理器
         self.constraint_manager = ConstraintManager(
@@ -201,6 +203,7 @@ class PPOModelInference:
             "layout": final_layout,
             "layout_map": layout_map,
             "total_cost": total_cost,
+            "improve_ratio": total_cost / self.origin_total_cost if self.origin_total_cost else 0,
             "per_process_cost": per_process_cost,
             "steps": step_count,
             "actions": actions_taken,
@@ -305,6 +308,7 @@ class PPOModelInference:
         logger.info(f"  有效推理次数: {valid_episodes}")
         logger.info(f"  失败推理次数: {failed_episodes}")
         logger.info(f"  成功率: {success_rate:.1%}")
+        logger.info(f"  最优优化比例: {stats['best_result']['improve_ratio']:.1%}")
         logger.info(f"  最小成本: {stats['statistics']['min_cost']:.2f}")
         logger.info(f"  最大成本: {stats['statistics']['max_cost']:.2f}")
         logger.info(f"  平均成本: {stats['statistics']['mean_cost']:.2f}")

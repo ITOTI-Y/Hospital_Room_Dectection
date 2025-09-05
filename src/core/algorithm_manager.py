@@ -2,7 +2,7 @@
 算法管理器 - 统一管理和运行所有优化算法
 """
 
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 import time
 import pandas as pd
 from pathlib import Path
@@ -19,7 +19,7 @@ from src.rl_optimizer.env.cost_calculator import CostCalculator
 from src.rl_optimizer.data.cache_manager import CacheManager
 from src.config import RLConfig, NetworkConfig
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class AlgorithmManager:

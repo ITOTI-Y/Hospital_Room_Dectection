@@ -63,7 +63,7 @@ class EpisodeInfoVecEnvWrapper(VecEnvWrapper):
                     info['episode'] = episode_info
                     
                     # 只有主进程输出调试日志，且仅在真正需要时输出
-                    if self.is_main_process and logger.isEnabledFor(10):  # DEBUG级别
+                    if self.is_main_process:  # DEBUG级别
                         logger.debug(f"环境{i} Episode {self.episode_count}结束")
                         if 'time_cost' in episode_info:
                             logger.debug(f"时间成本: {episode_info['time_cost']:.2f}")

@@ -5,7 +5,7 @@
 import random
 import copy
 import numpy as np
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 from typing import List, Optional, Dict, Any, Tuple, Set
 from dataclasses import dataclass
 
@@ -13,7 +13,7 @@ from src.algorithms.base_optimizer import BaseOptimizer, OptimizationResult
 from src.algorithms.constraint_manager import ConstraintManager, SmartConstraintRepairer
 from src.rl_optimizer.env.cost_calculator import CostCalculator
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 @dataclass

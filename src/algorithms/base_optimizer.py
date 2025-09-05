@@ -5,13 +5,10 @@
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Tuple, Optional
 import time
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 from dataclasses import dataclass
 
 from src.rl_optimizer.env.cost_calculator import CostCalculator
-
-logger = logging.getLogger(__name__)
-
 
 @dataclass
 class OptimizationResult:
@@ -50,7 +47,7 @@ class BaseOptimizer(ABC):
         self.cost_calculator = cost_calculator
         self.constraint_manager = constraint_manager
         self.name = name
-        self.logger = logging.getLogger(f"{__name__}.{name}")
+        self.logger = setup_logger(__name__)
         
         # 优化过程跟踪
         self.current_iteration = 0

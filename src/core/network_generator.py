@@ -2,7 +2,7 @@
 网络生成器 - 整合医院网络生成功能
 """
 
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 import pathlib
 from typing import Dict, List, Optional
 
@@ -11,7 +11,7 @@ from src.network.super_network import SuperNetwork
 from src.plotting.plotter import PlotlyPlotter
 from src.analysis.travel_time import calculate_room_travel_times
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class NetworkGenerator:

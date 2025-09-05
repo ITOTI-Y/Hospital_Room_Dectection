@@ -2,12 +2,12 @@
 
 import itertools
 import networkx as nx
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 from typing import Dict, Optional, Iterator, List, Tuple, Any
 
 from .node import Node
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class GraphManager:

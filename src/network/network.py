@@ -4,7 +4,7 @@ Orchestrates the construction of a single-floor network graph.
 
 import numpy as np
 import networkx as nx
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 from typing import Dict, Tuple, Any, List, Optional
 from scipy.spatial import KDTree
 
@@ -21,7 +21,7 @@ from .node_creators import (  # 节点创建器模块
     ConnectionNodeCreator
 )
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 class Network:
     """

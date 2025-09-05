@@ -2,7 +2,7 @@
 约束管理器 - 统一处理布局优化中的各种约束条件
 """
 
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 import random
 import numpy as np
 from typing import List, Dict, Set, Tuple, Optional, Any
@@ -12,7 +12,7 @@ import pandas as pd
 from src.config import RLConfig
 from src.rl_optimizer.data.cache_manager import CacheManager
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 @dataclass
@@ -469,7 +469,7 @@ class SmartConstraintRepairer:
             constraint_manager: 约束管理器实例
         """
         self.constraint_manager = constraint_manager
-        self.logger = logging.getLogger(__name__)
+        self.logger = setup_logger(__name__)
         
         # 修复统计信息
         self.repair_attempts = 0

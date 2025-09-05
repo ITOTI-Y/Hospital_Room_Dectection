@@ -1,9 +1,9 @@
 """简化的节点类，用于网络图构建"""
 
 from typing import Tuple, Optional, Dict, Any
-import logging
+from src.rl_optimizer.utils.setup import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
 
 class Node:
