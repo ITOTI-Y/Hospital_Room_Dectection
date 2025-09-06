@@ -13,6 +13,8 @@ from src.rl_optimizer.env.cost_calculator import CostCalculator
 from src.rl_optimizer.utils.setup import setup_logger
 from src.algorithms.constraint_manager import ConstraintManager
 from src.rl_optimizer.env.adjacency_reward_calculator import create_adjacency_calculator
+from src.rl_optimizer.utils.shared_state_manager import SharedStateManager, get_shared_state_manager
+from src.rl_optimizer.utils.reward_normalizer import RewardNormalizer, RewardComponents
 
 logger = setup_logger(__name__)  # 使用默认INFO级别
 
@@ -35,7 +37,7 @@ class LayoutEnv(gym.Env):
 
     metadata = {'render_modes': ['human']}
 
-    def __init__(self, config: RLConfig, cache_manager: CacheManager, cost_calculator: CostCalculator, constraint_manager: ConstraintManager):
+    def __init__(self, config: RLConfig, cache_manager: CacheManager, cost_calculator: CostCalculator, constraint_manager: ConstraintManager, shared_state_manager: Optional[SharedStateManager] = None):
         """
         初始化布局优化环境。
 
@@ -44,6 +46,7 @@ class LayoutEnv(gym.Env):
             cache_manager (CacheManager): 已初始化的数据缓存管理器。
             cost_calculator (CostCalculator): 已初始化的成本计算器。
             constraint_manager (ConstraintManager): 约束管理器。
+            shared_state_manager (SharedStateManager, optional): 共享状态管理器，用于动态基线。
         """
         super().__init__()
         self.config = config
@@ -54,6 +57,23 @@ class LayoutEnv(gym.Env):
         self._initialize_nodes_and_slots()
         self._define_spaces()
         self._initialize_state_variables()
+        
+        # 初始化动态基线和奖励归一化组件
+        if self.config.ENABLE_DYNAMIC_BASELINE:
+            if shared_state_manager is None:
+                self.shared_state = get_shared_state_manager(
+                    alpha=self.config.EMA_ALPHA,
+                    warmup_episodes=self.config.BASELINE_WARMUP_EPISODES
+                )
+            else:
+                self.shared_state = shared_state_manager
+            
+            self.reward_normalizer = RewardNormalizer(self.config, self.shared_state)
+            logger.info("动态基线奖励归一化已启用")
+        else:
+            self.shared_state = None
+            self.reward_normalizer = None
+            logger.info("使用传统固定奖励计算")
         
         # 初始化相邻性奖励相关组件
         if self.config.ENABLE_ADJACENCY_REWARD:
@@ -394,7 +414,7 @@ class LayoutEnv(gym.Env):
         info = self._get_info(terminated)
         
         # 调试日志：检查episode结束时的info内容
-        if terminated and logger.isEnabledFor(20):  # INFO级别
+        if terminated:  # INFO级别
             logger.debug(f"Episode结束，info内容: {info}")
             if 'episode' in info:
                 logger.debug(f"Episode数据: {info['episode']}")
@@ -440,52 +460,55 @@ class LayoutEnv(gym.Env):
             # 计算时间成本（只基于已放置的科室）
             if num_placed_depts > 0:
                 raw_time_cost = self.cc.calculate_total_cost(placed_depts)
-                time_reward = -raw_time_cost / self.config.REWARD_SCALE_FACTOR
             else:
-                raw_time_cost = 0.0
-                time_reward = -1000.0
-            
-            # 计算空槽位惩罚
-            empty_penalty = -num_empty_slots * self.config.REWARD_EMPTY_SLOT_PENALTY
-            
-            # 调试日志：确认传递的是原始值
-            if logger.isEnabledFor(20):  # INFO级别
-                logger.debug(f"Episode结束 - 原始时间成本: {raw_time_cost:.2f}, "
-                           f"放置科室数: {num_placed_depts}, 空槽位数: {num_empty_slots}")
+                raw_time_cost = np.inf
             
             # Episode结束时添加详细信息
             info['episode'] = {
                 'time_cost': raw_time_cost,  # 原始时间成本
-                'time_reward': time_reward,  # 时间奖励部分
-                'empty_penalty': empty_penalty,  # 空槽位惩罚
                 'placement_bonus': num_placed_depts * self.config.REWARD_PLACEMENT_BONUS,  # 成功放置的累积奖励
                 'final_reward': self.cached_final_reward if hasattr(self, 'cached_final_reward') else 0.0,  # 使用缓存的最终奖励
                 'num_placed_depts': num_placed_depts,  # 放置的科室数
                 'num_empty_slots': num_empty_slots,  # 空槽位数
                 'layout': final_layout_depts.copy(),  # 完整布局（包括None）
                 'placed_layout': placed_depts.copy(),  # 只包含已放置的科室
-                'r': time_reward + empty_penalty + num_placed_depts * self.config.REWARD_PLACEMENT_BONUS,  # 总奖励
+                'r': self.cached_final_reward if hasattr(self, 'cached_final_reward') else 0.0, # 总奖励
                 'l': self.current_step  # episode长度
             }
             
-            # 如果启用了详细日志，还可以添加更多信息
-            if logger.isEnabledFor(20):  # INFO级别
-                if num_placed_depts > 0:
-                    info['episode']['per_process_costs'] = self.cc.calculate_per_process_cost(placed_depts)
+            if num_placed_depts > 0:
+                info['episode']['per_process_costs'] = self.cc.calculate_per_process_cost(placed_depts)
             
             # 添加面积匹配统计信息
-            area_match_stats = self._calculate_area_match_statistics()
-            info['episode']['area_match_avg'] = area_match_stats['avg_match_score']
-            info['episode']['area_match_min'] = area_match_stats['min_match_score']
-            info['episode']['area_match_max'] = area_match_stats['max_match_score']
+            # area_match_stats = self._calculate_area_match_statistics()
+            # info['episode']['area_match_avg'] = area_match_stats['avg_match_score']
+            # info['episode']['area_match_min'] = area_match_stats['min_match_score']
+            # info['episode']['area_match_max'] = area_match_stats['max_match_score']
             
-            # 添加相邻性奖励统计信息
-            if self.config.ENABLE_ADJACENCY_REWARD and num_placed_depts >= 2:
-                adjacency_stats = self._calculate_adjacency_statistics(placed_depts)
-                info['episode']['adjacency_spatial'] = adjacency_stats['spatial_reward']
-                info['episode']['adjacency_functional'] = adjacency_stats['functional_reward'] 
-                info['episode']['adjacency_connectivity'] = adjacency_stats['connectivity_reward']
-                info['episode']['adjacency_total'] = adjacency_stats['total_reward']
+            # # 添加相邻性奖励统计信息
+            # if self.config.ENABLE_ADJACENCY_REWARD and num_placed_depts >= 2:
+            #     adjacency_stats = self._calculate_adjacency_statistics(placed_depts)
+            #     info['episode']['adjacency_spatial'] = adjacency_stats['spatial_reward']
+            #     info['episode']['adjacency_functional'] = adjacency_stats['functional_reward'] 
+            #     info['episode']['adjacency_connectivity'] = adjacency_stats['connectivity_reward']
+            #     info['episode']['adjacency_total'] = adjacency_stats['total_reward']
+            
+            # 添加动态基线统计信息
+            if self.config.ENABLE_DYNAMIC_BASELINE and self.reward_normalizer is not None:
+                normalization_stats = self.reward_normalizer.get_normalization_stats()
+                info['episode']['baseline_stats'] = {
+                    'time_cost_baseline': normalization_stats.get('time_cost_baseline'),
+                    'adjacency_baseline': normalization_stats.get('adjacency_baseline'),
+                    'area_match_baseline': normalization_stats.get('area_match_baseline'),
+                    'warmup_complete': normalization_stats.get('warmup_complete', False),
+                    'episode_count': normalization_stats.get('episode_count', 0)
+                }
+                
+                # 如果有归一化奖励信息，也添加进去
+                if hasattr(self, '_last_normalized_reward_info'):
+                    info['episode']['normalized_reward'] = self._last_normalized_reward_info.total_normalized_reward
+                    info['episode']['is_relative_improvement'] = self._last_normalized_reward_info.is_relative_improvement
+                    info['episode']['improvement_scores'] = self._last_normalized_reward_info.improvement_scores
         
         return info
     
@@ -533,8 +556,9 @@ class LayoutEnv(gym.Env):
         """
         在回合结束时，计算最终奖励。
         
-        最终奖励 = -(路程加权时间) / 缩放因子 - 空槽位数 * 惩罚
-        注意：成功放置的奖励已经在每步动作时给出
+        支持两种模式：
+        1. 传统模式：使用固定缩放因子
+        2. 动态基线模式：使用归一化奖励和相对改进
         """
         # 构建最终布局（包括空槽位）
         final_layout_depts = []
@@ -560,35 +584,108 @@ class LayoutEnv(gym.Env):
         
         logger.debug(f"布局统计: 放置 {num_placed_depts} 个科室，跳过 {num_empty_slots} 个槽位")
         
-        # 1. 计算时间成本（只基于已放置的科室）
+        # 1. 计算原始奖励组件
+        raw_components = self._compute_raw_reward_components(placed_depts, final_layout_depts, num_empty_slots, num_placed_depts)
+        
+        # 2. 使用归一化奖励计算模式
+        return self._compute_normalized_reward(raw_components)
+    
+    def _compute_raw_reward_components(self, placed_depts: List[str], final_layout_depts: List[Optional[str]], 
+                                      num_empty_slots: int, num_placed_depts: int) -> RewardComponents:
+        """
+        计算原始奖励组件
+        
+        Returns:
+            RewardComponents: 包含各种原始奖励组件的数据类
+        """
+        components = RewardComponents()
+        
+        # 1. 计算时间成本
+        layout_tuple = tuple(final_layout_depts)
         if num_placed_depts > 0:
-            raw_time_cost = self.cc.calculate_total_cost(placed_depts)
-            # 将时间成本转换为负奖励（时间越少越好）
-            time_reward = -raw_time_cost / self.config.REWARD_SCALE_FACTOR
+            raw_time_cost = self.cc.calculate_total_cost(layout_tuple)
+            components.time_cost = raw_time_cost
         else:
-            # 如果没有放置任何科室，给予极大惩罚
-            raw_time_cost = float('inf')
-            time_reward = -1000.0
-            logger.warning("没有放置任何科室，给予极大惩罚")
-        
-        # 2. 计算空槽位惩罚
-        empty_slot_penalty = -num_empty_slots * self.config.REWARD_EMPTY_SLOT_PENALTY
-
-        if num_empty_slots == 0:
-            complete_penalty = self.config.REWARD_COMPLETION_BONUS
+            components.time_cost = 1e10  # 极大惩罚值
+            
+        # 2. 计算相邻性奖励
+        if self.config.ENABLE_ADJACENCY_REWARD and num_placed_depts >= 2:
+            components.adjacency_reward = self._calculate_adjacency_reward(layout_tuple)
         else:
-            complete_penalty = 0.0
-
-        # 3. 计算成功放置奖励（累积值）
-        placement_bonus = num_placed_depts * self.config.REWARD_PLACEMENT_BONUS
+            components.adjacency_reward = 0.0
         
-        # 4. 计算总奖励
-        total_reward = time_reward * self.config.REWARD_TIME_WEIGHT + empty_slot_penalty + placement_bonus + complete_penalty
-
-        logger.info(f"最终奖励计算: 时间成本={raw_time_cost:.2f}, "
-                   f"时间奖励={time_reward:.2f}, 成功放置奖励={placement_bonus:.2f}, "
-                   f"空槽位惩罚={empty_slot_penalty:.2f}, 完成奖励={complete_penalty:.2f}, 总奖励={total_reward:.2f}")
-
+        # 3. 计算面积匹配奖励
+        area_match_stats = self._calculate_area_match_statistics()
+        components.area_match_reward = area_match_stats.get('avg_match_score', 0.0)
+        
+        # 4. 计算惩罚和奖励
+        components.skip_penalty = -num_empty_slots * self.config.REWARD_EMPTY_SLOT_PENALTY
+        components.completion_bonus = self.config.REWARD_COMPLETION_BONUS if num_empty_slots == 0 else 0.0
+        components.placement_bonus = num_placed_depts * self.config.REWARD_PLACEMENT_BONUS
+        
+        return components
+    
+    def _compute_normalized_reward(self, raw_components: RewardComponents) -> float:
+        """
+        使用动态基线计算归一化奖励
+        
+        Args:
+            raw_components: 原始奖励组件
+            
+        Returns:
+            float: 归一化后的总奖励
+        """
+        # 增加episode计数
+        current_episode = self.shared_state.increment_episode_count()
+        
+        # 更新基线（每隔一定频率更新）
+        if current_episode % self.config.BASELINE_UPDATE_FREQUENCY == 0:
+            self.reward_normalizer.update_baselines(raw_components)
+        
+        # 归一化奖励
+        reward_info = self.reward_normalizer.normalize_reward_components(raw_components)
+        
+        # 存储最后的归一化奖励信息，供_get_info使用
+        self._last_normalized_reward_info = reward_info
+        
+        # 记录详细日志
+        # loguru直接使用debug，会根据级别自动过滤
+        logger.info(f"Episode {current_episode} 动态基线奖励: 原始时间成本={raw_components.time_cost:.2f}秒, "
+                    f"归一化总奖励={reward_info.total_normalized_reward:.4f}")
+        
+        if reward_info.is_relative_improvement:
+            logger.info(f"使用相对改进奖励，改进分数: {reward_info.improvement_scores}")
+        
+        # 详细调试日志
+        self.reward_normalizer.log_reward_info(reward_info, current_episode)
+        
+        return reward_info.total_normalized_reward
+    
+    def _compute_traditional_reward(self, raw_components: RewardComponents) -> float:
+        """
+        使用传统方法计算奖励
+        
+        Args:
+            raw_components: 原始奖励组件
+            
+        Returns:
+            float: 传统计算的总奖励
+        """
+        # 时间成本奖励（负值，转换为奖励）
+        time_reward = -raw_components.time_cost / self.config.REWARD_SCALE_FACTOR
+        
+        # 其他奖励组件
+        total_reward = (
+            time_reward * self.config.REWARD_TIME_WEIGHT +
+            raw_components.adjacency_reward * self.config.REWARD_ADJACENCY_WEIGHT +
+            raw_components.skip_penalty +
+            raw_components.placement_bonus +
+            raw_components.completion_bonus
+        )
+        
+        logger.info(f"传统奖励计算: 时间成本={raw_components.time_cost:.2f}秒, "
+                   f"时间奖励={time_reward:.4f}, 总奖励={total_reward:.4f}")
+        
         return total_reward
     
     def _calculate_reward(self) -> float:
@@ -650,16 +747,12 @@ class LayoutEnv(gym.Env):
         
         return total_reward
     
-    @lru_cache(maxsize=500)
     def _calculate_adjacency_reward(self, layout_tuple: Tuple[str, ...]) -> float:
         """
         计算当前布局的多维度相邻性奖励。
         
         相邻性奖励包含三个维度：
-        1. 空间相邻性：基于距离分位数的空间邻近关系
-        2. 功能相邻性：基于医疗流程的功能协作关系  
-        3. 连通性相邻性：基于图连通性的可达性关系
-        
+        1. 功能相邻性：基于医疗流程的功能协作关系  
         Args:
             layout_tuple: 当前布局的元组形式（用于LRU缓存）
             
@@ -668,38 +761,22 @@ class LayoutEnv(gym.Env):
         """
         if not self.config.ENABLE_ADJACENCY_REWARD:
             return 0.0
+
+        if np.sum(np.array(layout_tuple) != None) < 2:
+            return 0.0
         
-        # 过滤掉None值
-        placed_depts = [dept for dept in layout_tuple if dept is not None]
-        
-        if len(placed_depts) < 2:
-            return 0.0  # 少于两个科室无法计算相邻性
-        
-        # 选择使用优化计算器还是传统方法
-        if hasattr(self, 'use_optimized_adjacency') and self.use_optimized_adjacency:
-            # 使用优化的相邻性奖励计算器
-            try:
-                rewards_dict = self.adjacency_calculator.calculate_adjacency_reward_optimized(
-                    tuple(placed_depts)
-                )
-                total_reward = rewards_dict.get('total_reward', 0.0)
-                
-                # 调试日志
-                if logger.isEnabledFor(10):  # DEBUG级别
-                    logger.debug(f"优化相邻性奖励详情: 空间={rewards_dict.get('spatial_reward', 0.0):.3f}, "
-                                f"功能={rewards_dict.get('functional_reward', 0.0):.3f}, "
-                                f"连通性={rewards_dict.get('connectivity_reward', 0.0):.3f}, "
-                                f"总计={total_reward:.3f}")
-                
-                return total_reward
-                
-            except Exception as e:
-                logger.error(f"优化相邻性计算器执行失败，降级到传统方法：{e}")
-                # 降级到传统方法
-                return self._calculate_legacy_adjacency_reward(placed_depts)
-        else:
-            # 使用传统的相邻性计算方法
-            return self._calculate_legacy_adjacency_reward(placed_depts)
+        # 使用优化的相邻性奖励计算器
+        try:
+            rewards_dict = self.adjacency_calculator.calculate_reward(
+                layout_tuple
+            )
+            total_reward = rewards_dict.get('total_reward', 0.0)
+            
+            return total_reward
+            
+        except Exception as e:
+            logger.error(f"优化相邻性计算器执行失败：{e}, 返回0奖励")
+            return 0.0
     
     def _calculate_legacy_adjacency_reward(self, placed_depts: List[str]) -> float:
         """
@@ -727,7 +804,8 @@ class LayoutEnv(gym.Env):
         ) * self.config.ADJACENCY_REWARD_BASE
         
         # 调试日志
-        if logger.isEnabledFor(10):  # DEBUG级别
+        # loguru直接使用debug，会根据级别自动过滤
+        if True:  # loguru handles level filtering automatically  # DEBUG级别
             logger.debug(f"传统相邻性奖励详情: 空间={spatial_reward:.3f}, "
                         f"功能={functional_reward:.3f}, 连通性={connectivity_reward:.3f}, "
                         f"总计={total_reward:.3f}")
@@ -1303,7 +1381,8 @@ class LayoutEnv(gym.Env):
         )
         
         # 详细的调试日志
-        if logger.isEnabledFor(10):  # DEBUG级别
+        # loguru直接使用debug，会根据级别自动过滤
+        if True:  # loguru handles level filtering automatically  # DEBUG级别
             logger.debug(f"势函数计算详情: "
                         f"已放置{len(placed_depts)}个科室, "
                         f"时间成本势={time_cost_potential:.4f}, "
@@ -1367,7 +1446,7 @@ class LayoutEnv(gym.Env):
         if hasattr(self, 'use_optimized_adjacency') and self.use_optimized_adjacency:
             # 使用优化的相邻性奖励计算器
             try:
-                rewards_dict = self.adjacency_calculator.calculate_adjacency_reward_optimized(
+                rewards_dict = self.adjacency_calculator.calculate_reward(
                     tuple(placed_depts)
                 )
                 return {

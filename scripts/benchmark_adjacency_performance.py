@@ -244,7 +244,7 @@ class AdjacencyPerformanceBenchmark:
         optimized_results = []
         for layout in test_layouts:
             try:
-                rewards_dict = adjacency_calculator.calculate_adjacency_reward_optimized(
+                rewards_dict = adjacency_calculator.calculate_reward(
                     tuple(layout)
                 )
                 total_reward = rewards_dict.get('total_reward', 0.0)

@@ -25,6 +25,8 @@ from src.rl_optimizer.utils.setup import setup_logger, save_json
 from src.rl_optimizer.utils.lr_scheduler import get_lr_scheduler
 from src.rl_optimizer.utils.checkpoint_callback import CheckpointCallback
 from src.rl_optimizer.data.cache_manager import CacheManager
+from src.rl_optimizer.utils.shared_state_manager import get_shared_state_manager
+from src.rl_optimizer.utils.tensorboard_callback import TensorboardBaselineCallback
 from src.config import RLConfig
 
 logger = setup_logger(__name__)
@@ -141,12 +143,25 @@ class PPOOptimizer(BaseOptimizer):
         self.config = config
         self.cache_manager = cache_manager
         
+        # 初始化共享状态管理器（如果启用动态基线）
+        if self.config.ENABLE_DYNAMIC_BASELINE:
+            self.shared_state_manager = get_shared_state_manager(
+                alpha=self.config.EMA_ALPHA,
+                warmup_episodes=self.config.BASELINE_WARMUP_EPISODES
+            )
+            logger.info(f"动态基线共享状态管理器已初始化: alpha={self.config.EMA_ALPHA}, "
+                       f"warmup_episodes={self.config.BASELINE_WARMUP_EPISODES}")
+        else:
+            self.shared_state_manager = None
+            logger.info("未启用动态基线，使用传统奖励计算")
+        
         # 环境参数
         self.env_kwargs = {
             "config": self.config,
             "cache_manager": self.cache_manager,
             "cost_calculator": self.cost_calculator,
-            "constraint_manager": self.constraint_manager
+            "constraint_manager": self.constraint_manager,
+            "shared_state_manager": self.shared_state_manager
         }
         
         # 训练状态
@@ -221,6 +236,42 @@ class PPOOptimizer(BaseOptimizer):
             raise
         
         return self.finish_optimization()
+    
+    def finish_optimization(self) -> OptimizationResult:
+        """
+        结束PPO优化过程并返回结果，包含动态基线统计信息
+        
+        Returns:
+            OptimizationResult: 优化结果
+        """
+        # 调用父类的finish_optimization方法
+        result = super().finish_optimization()
+        
+        # 如果启用了动态基线，添加相关统计信息
+        if self.config.ENABLE_DYNAMIC_BASELINE and self.shared_state_manager is not None:
+            baseline_stats = self.shared_state_manager.get_statistics()
+            
+            logger.info("=== 动态基线统计信息 ===")
+            logger.info(f"总episodes: {baseline_stats['total_episodes']}")
+            logger.info(f"全局episode计数: {baseline_stats['global_episode_count']}")
+            logger.info(f"预热状态: {'完成' if baseline_stats['warmup_complete'] else '未完成'}")
+            logger.info(f"运行时间: {baseline_stats['uptime_seconds']:.2f}秒")
+            
+            # 记录各种基线值
+            ema_states = baseline_stats.get('ema_states', {})
+            for key, ema_info in ema_states.items():
+                if ema_info and ema_info.get('is_initialized'):
+                    baseline_value = ema_info.get('value', 0)
+                    std_value = ema_info.get('std', 0)
+                    count = ema_info.get('count', 0)
+                    logger.info(f"{key}: 基线={baseline_value:.6f}, 标准差={std_value:.6f}, 样本数={count}")
+            
+            # 将基线统计信息添加到结果中
+            if not hasattr(result, 'additional_metrics'):
+                result.additional_metrics = {}
+            result.additional_metrics['dynamic_baseline_stats'] = baseline_stats
+        
+        return result
     
     def _check_for_resume(self):
         """检查是否需要从checkpoint恢复训练"""
@@ -382,6 +433,12 @@ class PPOOptimizer(BaseOptimizer):
         # 设置回调
         callbacks = []
         
+        # Tensorboard回调
+        tensorboard_callback = TensorboardBaselineCallback(
+        log_freq=1000,  # 每1000步记录一次
+        verbose=1
+        )
+        callbacks.append(tensorboard_callback)
         
         # Checkpoint回调
         checkpoint_callback = CheckpointCallback(

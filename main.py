@@ -6,7 +6,6 @@
 """
 
 import argparse
-import logging
 import sys
 import pathlib
 from typing import List, Optional, Dict, Any
@@ -22,37 +21,10 @@ from src.comparison.results_comparator import ResultsComparator
 from src.rl_optimizer.data.cache_manager import CacheManager
 from src.rl_optimizer.env.cost_calculator import CostCalculator
 from src.algorithms.constraint_manager import ConstraintManager
+from src.rl_optimizer.utils.setup import setup_logger
 
-logger = logging.getLogger(__name__)
+logger = setup_logger(__name__)
 
-
-def setup_logging(level=logging.INFO, log_file: Optional[pathlib.Path] = None):
-    """配置日志系统"""
-    root_logger = logging.getLogger()
-    
-    if root_logger.hasHandlers():
-        return
-    
-    formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    # 控制台处理器
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setFormatter(formatter)
-    console_handler.setLevel(level)
-    root_logger.addHandler(console_handler)
-    
-    # 文件处理器
-    if log_file:
-        log_file.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file, mode='a', encoding='utf-8')
-        file_handler.setFormatter(formatter)
-        file_handler.setLevel(level)
-        root_logger.addHandler(file_handler)
-    
-    root_logger.setLevel(level)
 
 
 class HospitalLayoutOptimizer:
@@ -401,10 +373,10 @@ def main():
     args = parser.parse_args()
     
     # 设置日志
-    log_level = logging.DEBUG if args.verbose else logging.INFO
+    log_level = 10 if args.verbose else 20  # DEBUG=10, INFO=20
     log_dir = pathlib.Path("./logs")
     log_dir.mkdir(parents=True, exist_ok=True)
-    setup_logging(level=log_level, log_file=log_dir / "hospital_optimizer.log")
+    # loguru logger会在setup_logger中自动配置文件输出
     
     logger.info("=== 医院布局优化系统启动 ===")
     logger.info(f"运行模式: {args.mode}")

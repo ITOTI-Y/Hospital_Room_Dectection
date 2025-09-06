@@ -53,9 +53,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
   - `graph_manager.py`: 图管理器
 - `src/rl_optimizer/`: 强化学习优化器
   - `env/cost_calculator.py`: 成本计算器（所有算法共用）
-  - `env/layout_env.py`: 布局优化环境
+  - `env/layout_env.py`: 布局优化环境（支持动态基线奖励归一化）
   - `data/cache_manager.py`: 数据缓存管理
   - `utils/lr_scheduler.py`: 学习率调度器工具
+  - `utils/shared_state_manager.py`: 跨进程共享状态管理器
+  - `utils/reward_normalizer.py`: 动态基线奖励归一化器
+  - `utils/baseline_monitor.py`: 基线变化监控和可视化工具
 - `src/analysis/`: 分析工具
   - `travel_time.py`: 行程时间计算
   - `process_flow.py`: 就医流程分析
@@ -263,6 +266,15 @@ logs/
 
 ## 最近更新记录
 
+- 2025-09-04: **实现动态基线奖励归一化系统** - 解决PPO训练中奖励尺度不一致问题，实现智能的相对改进奖励机制：
+  - 新增SharedStateManager跨进程共享状态管理器，支持多并行环境的EMA基线维护
+  - 创建RewardNormalizer奖励归一化器，实现各奖励组件的标准化和相对改进计算
+  - 修改LayoutEnv环境，集成动态基线奖励计算，支持传统模式和归一化模式双模切换
+  - 更新PPO优化器，完整集成共享状态管理和归一化奖励统计
+  - 新增BaselineMonitor基线监控器，提供实时监控、历史追踪和可视化分析功能
+  - 新增配置参数：ENABLE_DYNAMIC_BASELINE、EMA_ALPHA、BASELINE_WARMUP_EPISODES等
+  - 核心优势：自适应奖励缩放、相对改进激励、训练稳定性提升、跨环境状态同步
+  - 完整测试验证：通过test_dynamic_baseline.py全面验证系统功能正确性
 - 2025-08-05: 初始创建动态CLAUDE.md文档，包含完整架构概述和uv命令格式
 - 2025-08-05: 添加重要开发注意事项，包含颜色映射系统、数据预处理要求和性能考虑
 - 2025-08-05: 完善技术栈信息，添加MaskablePPO等具体实现细节

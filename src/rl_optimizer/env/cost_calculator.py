@@ -72,6 +72,7 @@ class CostCalculator:
         """
         self.config = config
         self.travel_times = travel_times
+        self.max_taravel_time = travel_times.values.max()
         self.placeable_slots = placeable_slots
         self.num_slots = len(placeable_slots)
         
@@ -190,15 +191,13 @@ class CostCalculator:
             node_from = dept_to_slot_node.get(dept_from)
             node_to = dept_to_slot_node.get(dept_to)
             
-            # 如果两个科室都已放置，则从通行时间矩阵中查找时间
-            if node_from is not None and node_to is not None:
-                try:
-                    time_vector[col_idx] = self.travel_times.loc[node_from, node_to]
-                except KeyError as e:
-                    # 错误处理：如果找不到节点对，使用默认值
-                    default_penalty = getattr(self.config, 'DEFAULT_PENALTY', 1000.0)
-                    logger.warning(f"找不到节点对 {node_from}->{node_to} 的行程时间，使用默认值{default_penalty}")
-                    time_vector[col_idx] = default_penalty
+            try:
+                time_vector[col_idx] = self.travel_times.loc[node_from, node_to]
+            except KeyError as e:
+                # 错误处理：如果找不到节点对，使用默认值
+                default_penalty = self.max_taravel_time
+                logger.debug(f"找不到节点对 {node_from}->{node_to} 的行程时间，使用最大通行值{default_penalty}")
+                time_vector[col_idx] = default_penalty
         
         # 存入缓存
         self._time_vector_cache.put(layout_key, time_vector)

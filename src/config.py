@@ -296,11 +296,11 @@ class RLConfig:
         # --- 软约束奖励权重 ---
         self.REWARD_TIME_WEIGHT: float = 1.0
         self.REWARD_ADJACENCY_WEIGHT: float = 0.1
-        self.REWARD_PLACEMENT_BONUS: float = 1.0  # 成功放置一个科室的即时奖励
-        self.REWARD_EMPTY_SLOT_PENALTY: float = 5.0  # 每个空槽位的最终惩罚
+        self.REWARD_PLACEMENT_BONUS: float = 0.1  # 成功放置一个科室的即时奖励
+        self.REWARD_EMPTY_SLOT_PENALTY: float = 0.5  # 每个空槽位的最终惩罚
         self.REWARD_SCALE_FACTOR: float = 40000.0  # 奖励缩放因子, 仅对加权总时间成本有效
-        self.REWARD_SKIP_PENALTY: float = -2.0  # 跳过惩罚
-        self.REWARD_COMPLETION_BONUS: float = 100.0  # 完成奖励
+        self.REWARD_SKIP_PENALTY: float = -0.2  # 跳过惩罚
+        self.REWARD_COMPLETION_BONUS: float = 1.0  # 完成奖励
 
         # --- 势函数奖励配置 ---
         self.ENABLE_POTENTIAL_REWARD: bool = False  # 是否启用势函数奖励
@@ -353,26 +353,26 @@ class RLConfig:
         self.MEDICAL_ADJACENCY_PREFERENCES: Dict[str, Dict[str, float]] = {
             # 正向偏好 (值为正数)
             "静配中心": {
-                "ICU": 0.0,      # 静配中心与ICU物流相关
+                "ICU": 0.8,      # 静配中心与ICU物流相关
             },
             "中心供应室": {
-                "内镜中心": 0.0,        # 中心供应室与内镜中心物流相关
+                "内镜中心": 0.8,        # 中心供应室与内镜中心物流相关
             },
             "采血处": {
-                "检验中心": 0.0,    # 采血处与检验中心物流相关
+                "检验中心": 0.8,    # 采血处与检验中心物流相关
             },
             "手术室": {
-                "ICU": 0.0,          # 手术室与ICU强相关
-                "门诊手术室": 0.0
+                "ICU": 0.8,          # 手术室与ICU强相关
+                "门诊手术室": 0.6
             },
             "ICU": {
-                "NICU": 0.0          # ICU与NICU强相关
+                "NICU": 0.8          # ICU与NICU强相关
             },
             "产房": {
-                "NICU": 0.0          # 产房与NICU强相关
+                "NICU": 0.8          # 产房与NICU强相关
             },
             "检验中心": {
-                "病理科": 0.0,    # 检验中心与病理科物流相关
+                "病理科": 0.8,    # 检验中心与病理科物流相关
             }
         }
 
@@ -389,7 +389,7 @@ class RLConfig:
         # --- 动态基线奖励归一化配置 ---
         self.ENABLE_DYNAMIC_BASELINE: bool = True  # 启用动态基线奖励归一化
         self.EMA_ALPHA: float = 0.1  # 指数移动平均平滑因子 (0 < alpha <= 1)
-        self.BASELINE_WARMUP_EPISODES: int = 200  # 基线预热期episode数量
+        self.BASELINE_WARMUP_EPISODES: int = 10  # 基线预热期episode数量
         self.BASELINE_UPDATE_FREQUENCY: int = 10  # 基线更新频率（每N个episode更新一次）
         
         # 动态基线归一化权重（归一化后各组件的权重）
@@ -397,10 +397,11 @@ class RLConfig:
         self.NORMALIZED_ADJACENCY_WEIGHT: float = 0.5  # 相邻性奖励归一化权重
         self.NORMALIZED_AREA_WEIGHT: float = 0.3  # 面积匹配归一化权重
         self.NORMALIZED_SKIP_PENALTY_WEIGHT: float = 0.3  # 跳过惩罚归一化权重
+        self.NORMALIZED_PLACEMENT_BONUS_WEIGHT: float = 0.1  # 放置奖励归一化权重
         self.NORMALIZED_COMPLETION_BONUS_WEIGHT: float = 0.1  # 完成奖励归一化权重
         
         # 奖励归一化参数
-        self.REWARD_NORMALIZATION_CLIP_RANGE: float = 3.0  # 归一化时的裁剪范围（几个标准差）
+        self.REWARD_NORMALIZATION_CLIP_RANGE: float = 1.0  # 归一化时的裁剪范围（几个标准差）
         self.REWARD_NORMALIZATION_MIN_STD: float = 1e-8  # 最小标准差，防止除零错误
         self.ENABLE_REWARD_CLIPPING: bool = True  # 启用奖励裁剪
         self.REWARD_CLIP_RANGE: Tuple[float, float] = (-10.0, 10.0)  # 最终奖励裁剪范围
