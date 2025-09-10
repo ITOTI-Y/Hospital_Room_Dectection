@@ -78,8 +78,6 @@ src/
     __init__.py
     plotter.py
   rl_optimizer/
-    agent/
-      ppo_agent.py
     data/
       cache/
         node_variants.json
@@ -101,1184 +99,13 @@ src/
       reward_normalizer.py
       setup.py
       shared_state_manager.py
+      tensorboard_callback.py
   config.py
 main.py
 </directory_structure>
 
 <files>
 This section contains the contents of the repository's files.
-
-<file path="src/rl_optimizer/utils/baseline_monitor.py">
-"""
-BaselineMonitor - 动态基线监控器
-
-监控和记录动态基线的变化，提供实时统计和可视化支持。
-"""
-
-import time
-from src.rl_optimizer.utils.setup import setup_logger
-from typing import Dict, Any, List, Optional, Tuple
-from pathlib import Path
-import json
-from dataclasses import dataclass, asdict
-from datetime import datetime
-import matplotlib.pyplot as plt
-import numpy as np
-
-from src.config import RLConfig
-from src.rl_optimizer.utils.shared_state_manager import SharedStateManager
-
-logger = setup_logger(__name__)
-
-
-@dataclass
-class BaselineSnapshot:
-    """基线快照数据类"""
-    timestamp: float
-    episode_count: int
-    time_cost_baseline: Optional[float]
-    adjacency_baseline: Optional[float]
-    area_match_baseline: Optional[float]
-    time_cost_std: Optional[float]
-    adjacency_std: Optional[float]
-    area_match_std: Optional[float]
-    warmup_complete: bool
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """转换为字典格式"""
-        return asdict(self)
-
-
-class BaselineMonitor:
-    """
-    动态基线监控器
-    
-    负责监控动态基线的变化，记录历史数据，并提供可视化功能。
-    """
-    
-    def __init__(self, config: RLConfig, shared_state_manager: SharedStateManager, 
-                 log_dir: Optional[Path] = None):
-        """
-        初始化基线监控器
-        
-        Args:
-            config: RL配置对象
-            shared_state_manager: 共享状态管理器
-            log_dir: 日志目录，默认使用config中的LOG_PATH
-        """
-        self.config = config
-        self.shared_state = shared_state_manager
-        self.log_dir = log_dir or config.LOG_PATH
-        
-        # 创建监控输出目录
-        self.monitor_dir = self.log_dir / 'baseline_monitor'
-        self.monitor_dir.mkdir(exist_ok=True)
-        
-        # 历史数据存储
-        self.snapshots: List[BaselineSnapshot] = []
-        self.last_snapshot_time = 0.0
-        self.snapshot_interval = 60.0  # 每60秒记录一次快照
-        
-        # 统计文件路径
-        self.stats_file = self.monitor_dir / 'baseline_history.json'
-        self.plots_dir = self.monitor_dir / 'plots'
-        self.plots_dir.mkdir(exist_ok=True)
-        
-        logger.info(f"基线监控器初始化完成，监控目录: {self.monitor_dir}")
-    
-    def take_snapshot(self) -> BaselineSnapshot:
-        """
-        记录当前状态的快照
-        
-        Returns:
-            BaselineSnapshot: 当前状态快照
-        """
-        current_time = time.time()
-        
-        # 从共享状态管理器获取当前状态
-        stats = self.shared_state.get_statistics()
-        
-        snapshot = BaselineSnapshot(
-            timestamp=current_time,
-            episode_count=stats['global_episode_count'],
-            time_cost_baseline=self.shared_state.get_time_cost_baseline(),
-            adjacency_baseline=self.shared_state.get_adjacency_baseline(),
-            area_match_baseline=self.shared_state.get_area_match_baseline(),
-            time_cost_std=self.shared_state.get_ema_std('time_cost_std'),
-            adjacency_std=self.shared_state.get_ema_std('adjacency_reward_std'),
-            area_match_std=self.shared_state.get_ema_std('area_match_std'),
-            warmup_complete=stats['warmup_complete']
-        )
-        
-        return snapshot
-    
-    def record_snapshot(self, force: bool = False) -> bool:
-        """
-        记录快照（如果满足时间间隔或强制记录）
-        
-        Args:
-            force: 是否强制记录，忽略时间间隔
-            
-        Returns:
-            bool: 是否成功记录了快照
-        """
-        current_time = time.time()
-        
-        if not force and (current_time - self.last_snapshot_time) < self.snapshot_interval:
-            return False
-        
-        try:
-            snapshot = self.take_snapshot()
-            self.snapshots.append(snapshot)
-            self.last_snapshot_time = current_time
-            
-            # 定期保存到文件
-            if len(self.snapshots) % 10 == 0:  # 每10个快照保存一次
-                self.save_history()
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"记录基线快照时发生错误: {e}")
-            return False
-    
-    def save_history(self) -> None:
-        """将快照历史保存到文件"""
-        try:
-            history_data = {
-                'config': {
-                    'ema_alpha': self.config.EMA_ALPHA,
-                    'warmup_episodes': self.config.BASELINE_WARMUP_EPISODES,
-                    'enable_dynamic_baseline': self.config.ENABLE_DYNAMIC_BASELINE,
-                    'enable_relative_improvement': self.config.ENABLE_RELATIVE_IMPROVEMENT_REWARD
-                },
-                'snapshots': [snapshot.to_dict() for snapshot in self.snapshots],
-                'last_updated': datetime.now().isoformat()
-            }
-            
-            with open(self.stats_file, 'w') as f:
-                json.dump(history_data, f, indent=2)
-                
-            logger.debug(f"基线历史数据已保存: {len(self.snapshots)}个快照")
-            
-        except Exception as e:
-            logger.error(f"保存基线历史数据时发生错误: {e}")
-    
-    def load_history(self) -> bool:
-        """从文件加载快照历史"""
-        try:
-            if not self.stats_file.exists():
-                return False
-            
-            with open(self.stats_file, 'r') as f:
-                history_data = json.load(f)
-            
-            # 重建快照列表
-            self.snapshots = []
-            for snapshot_dict in history_data.get('snapshots', []):
-                snapshot = BaselineSnapshot(**snapshot_dict)
-                self.snapshots.append(snapshot)
-            
-            logger.info(f"已加载 {len(self.snapshots)} 个历史快照")
-            return True
-            
-        except Exception as e:
-            logger.error(f"加载基线历史数据时发生错误: {e}")
-            return False
-    
-    def get_baseline_trends(self) -> Dict[str, List[Tuple[float, float]]]:
-        """
-        获取基线变化趋势
-        
-        Returns:
-            dict: 包含各基线的时间序列数据
-        """
-        if not self.snapshots:
-            return {}
-        
-        trends = {
-            'time_cost': [],
-            'adjacency': [],
-            'area_match': [],
-            'time_cost_std': [],
-            'adjacency_std': [],
-            'area_match_std': []
-        }
-        
-        for snapshot in self.snapshots:
-            timestamp = snapshot.timestamp
-            
-            if snapshot.time_cost_baseline is not None:
-                trends['time_cost'].append((timestamp, snapshot.time_cost_baseline))
-            if snapshot.adjacency_baseline is not None:
-                trends['adjacency'].append((timestamp, snapshot.adjacency_baseline))
-            if snapshot.area_match_baseline is not None:
-                trends['area_match'].append((timestamp, snapshot.area_match_baseline))
-            if snapshot.time_cost_std is not None:
-                trends['time_cost_std'].append((timestamp, snapshot.time_cost_std))
-            if snapshot.adjacency_std is not None:
-                trends['adjacency_std'].append((timestamp, snapshot.adjacency_std))
-            if snapshot.area_match_std is not None:
-                trends['area_match_std'].append((timestamp, snapshot.area_match_std))
-        
-        return trends
-    
-    def plot_baseline_evolution(self, save_plots: bool = True) -> Optional[str]:
-        """
-        绘制基线演变图表
-        
-        Args:
-            save_plots: 是否保存图表到文件
-            
-        Returns:
-            str: 保存的图表文件路径，如果未保存则返回None
-        """
-        if not self.snapshots:
-            logger.warning("没有快照数据，无法生成图表")
-            return None
-        
-        try:
-            trends = self.get_baseline_trends()
-            
-            # 创建子图
-            fig, axes = plt.subplots(2, 2, figsize=(15, 10))
-            fig.suptitle('动态基线演变趋势', fontsize=16)
-            
-            # 设置中文字体
-            plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'DejaVu Sans']
-            plt.rcParams['axes.unicode_minus'] = False
-            
-            # 绘制时间成本基线
-            if trends['time_cost']:
-                times, values = zip(*trends['time_cost'])
-                times_rel = [(t - times[0]) / 3600 for t in times]  # 转换为小时
-                axes[0, 0].plot(times_rel, values, 'b-', linewidth=2, label='时间成本基线')
-                axes[0, 0].set_title('时间成本基线演变')
-                axes[0, 0].set_xlabel('训练时间 (小时)')
-                axes[0, 0].set_ylabel('时间成本 (秒)')
-                axes[0, 0].grid(True, alpha=0.3)
-                axes[0, 0].legend()
-            
-            # 绘制相邻性基线
-            if trends['adjacency']:
-                times, values = zip(*trends['adjacency'])
-                times_rel = [(t - times[0]) / 3600 for t in times]
-                axes[0, 1].plot(times_rel, values, 'g-', linewidth=2, label='相邻性奖励基线')
-                axes[0, 1].set_title('相邻性奖励基线演变')
-                axes[0, 1].set_xlabel('训练时间 (小时)')
-                axes[0, 1].set_ylabel('相邻性奖励')
-                axes[0, 1].grid(True, alpha=0.3)
-                axes[0, 1].legend()
-            
-            # 绘制面积匹配基线
-            if trends['area_match']:
-                times, values = zip(*trends['area_match'])
-                times_rel = [(t - times[0]) / 3600 for t in times]
-                axes[1, 0].plot(times_rel, values, 'r-', linewidth=2, label='面积匹配基线')
-                axes[1, 0].set_title('面积匹配基线演变')
-                axes[1, 0].set_xlabel('训练时间 (小时)')
-                axes[1, 0].set_ylabel('面积匹配分数')
-                axes[1, 0].grid(True, alpha=0.3)
-                axes[1, 0].legend()
-            
-            # 绘制标准差演变
-            ax_std = axes[1, 1]
-            if trends['time_cost_std']:
-                times, values = zip(*trends['time_cost_std'])
-                times_rel = [(t - times[0]) / 3600 for t in times]
-                ax_std.plot(times_rel, values, 'b--', linewidth=2, label='时间成本标准差')
-            if trends['adjacency_std']:
-                times, values = zip(*trends['adjacency_std'])
-                times_rel = [(t - times[0]) / 3600 for t in times]
-                ax_std.plot(times_rel, values, 'g--', linewidth=2, label='相邻性标准差')
-            if trends['area_match_std']:
-                times, values = zip(*trends['area_match_std'])
-                times_rel = [(t - times[0]) / 3600 for t in times]
-                ax_std.plot(times_rel, values, 'r--', linewidth=2, label='面积匹配标准差')
-            
-            ax_std.set_title('标准差演变')
-            ax_std.set_xlabel('训练时间 (小时)')
-            ax_std.set_ylabel('标准差')
-            ax_std.grid(True, alpha=0.3)
-            ax_std.legend()
-            
-            plt.tight_layout()
-            
-            if save_plots:
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-                plot_file = self.plots_dir / f'baseline_evolution_{timestamp}.png'
-                plt.savefig(plot_file, dpi=300, bbox_inches='tight')
-                plt.close()
-                logger.info(f"基线演变图表已保存: {plot_file}")
-                return str(plot_file)
-            else:
-                plt.show()
-                return None
-                
-        except Exception as e:
-            logger.error(f"绘制基线演变图表时发生错误: {e}")
-            return None
-    
-    def generate_summary_report(self) -> Dict[str, Any]:
-        """
-        生成基线监控摘要报告
-        
-        Returns:
-            dict: 摘要报告数据
-        """
-        if not self.snapshots:
-            return {'error': '没有可用的快照数据'}
-        
-        latest_snapshot = self.snapshots[-1]
-        first_snapshot = self.snapshots[0]
-        
-        # 计算训练持续时间
-        duration_hours = (latest_snapshot.timestamp - first_snapshot.timestamp) / 3600
-        
-        report = {
-            'monitoring_period': {
-                'start_time': datetime.fromtimestamp(first_snapshot.timestamp).isoformat(),
-                'end_time': datetime.fromtimestamp(latest_snapshot.timestamp).isoformat(),
-                'duration_hours': duration_hours,
-                'total_snapshots': len(self.snapshots)
-            },
-            'training_progress': {
-                'total_episodes': latest_snapshot.episode_count,
-                'warmup_complete': latest_snapshot.warmup_complete,
-                'warmup_episodes': self.config.BASELINE_WARMUP_EPISODES
-            },
-            'latest_baselines': {
-                'time_cost': latest_snapshot.time_cost_baseline,
-                'adjacency': latest_snapshot.adjacency_baseline,
-                'area_match': latest_snapshot.area_match_baseline
-            },
-            'latest_std_devs': {
-                'time_cost': latest_snapshot.time_cost_std,
-                'adjacency': latest_snapshot.adjacency_std,
-                'area_match': latest_snapshot.area_match_std
-            },
-            'baseline_stability': self._analyze_baseline_stability(),
-            'recommendations': self._generate_recommendations()
-        }
-        
-        return report
-    
-    def _analyze_baseline_stability(self) -> Dict[str, Any]:
-        """分析基线稳定性"""
-        if len(self.snapshots) < 10:
-            return {'status': 'insufficient_data', 'message': '数据不足，需要更多快照'}
-        
-        # 取最近的快照分析稳定性
-        recent_snapshots = self.snapshots[-10:]
-        
-        def coefficient_of_variation(values):
-            """计算变异系数"""
-            if not values or len(values) < 2:
-                return None
-            values_array = np.array(values)
-            mean_val = np.mean(values_array)
-            if mean_val == 0:
-                return None
-            return np.std(values_array) / abs(mean_val)
-        
-        # 提取最近的基线值
-        time_costs = [s.time_cost_baseline for s in recent_snapshots if s.time_cost_baseline is not None]
-        adjacencies = [s.adjacency_baseline for s in recent_snapshots if s.adjacency_baseline is not None]
-        area_matches = [s.area_match_baseline for s in recent_snapshots if s.area_match_baseline is not None]
-        
-        stability = {
-            'time_cost_cv': coefficient_of_variation(time_costs),
-            'adjacency_cv': coefficient_of_variation(adjacencies),
-            'area_match_cv': coefficient_of_variation(area_matches),
-            'overall_stability': 'unknown'
-        }
-        
-        # 评估整体稳定性
-        cvs = [cv for cv in [stability['time_cost_cv'], stability['adjacency_cv'], stability['area_match_cv']] if cv is not None]
-        if cvs:
-            avg_cv = np.mean(cvs)
-            if avg_cv < 0.1:
-                stability['overall_stability'] = 'stable'
-            elif avg_cv < 0.3:
-                stability['overall_stability'] = 'moderate'
-            else:
-                stability['overall_stability'] = 'unstable'
-        
-        return stability
-    
-    def _generate_recommendations(self) -> List[str]:
-        """生成基于监控数据的建议"""
-        recommendations = []
-        
-        if not self.snapshots:
-            return ["需要更多训练数据进行分析"]
-        
-        latest = self.snapshots[-1]
-        
-        # 检查预热状态
-        if not latest.warmup_complete:
-            recommendations.append("基线仍在预热期，建议继续训练直到预热完成")
-        
-        # 检查基线数据完整性
-        if latest.time_cost_baseline is None:
-            recommendations.append("时间成本基线未初始化，可能需要调整EMA参数")
-        
-        if latest.adjacency_baseline is None and self.config.ENABLE_ADJACENCY_REWARD:
-            recommendations.append("相邻性奖励基线未初始化，检查相邻性奖励配置")
-        
-        # 分析稳定性
-        stability = self._analyze_baseline_stability()
-        if stability.get('overall_stability') == 'unstable':
-            recommendations.append("基线变化较大，考虑降低EMA平滑因子alpha或增加预热期")
-        
-        # 检查训练进度
-        if len(self.snapshots) > 1:
-            episode_rate = (latest.episode_count - self.snapshots[0].episode_count) / len(self.snapshots)
-            if episode_rate < 5:
-                recommendations.append("训练进度较慢，考虑增加并行环境数量或调整训练参数")
-        
-        return recommendations if recommendations else ["基线监控正常，继续当前训练配置"]
-    
-    def close(self) -> None:
-        """关闭监控器，保存最终数据"""
-        self.record_snapshot(force=True)  # 强制记录最后一个快照
-        self.save_history()
-        
-        # 生成最终报告
-        final_report = self.generate_summary_report()
-        report_file = self.monitor_dir / 'final_report.json'
-        
-        try:
-            with open(report_file, 'w') as f:
-                json.dump(final_report, f, indent=2)
-            logger.info(f"基线监控最终报告已保存: {report_file}")
-        except Exception as e:
-            logger.error(f"保存最终报告时发生错误: {e}")
-        
-        # 生成最终图表
-        self.plot_baseline_evolution(save_plots=True)
-        
-        logger.info("基线监控器已关闭")
-</file>
-
-<file path="src/rl_optimizer/utils/reward_normalizer.py">
-"""
-RewardNormalizer - 奖励归一化器
-
-实现基于动态基线的奖励归一化，将各种奖励组件标准化到合理范围内，
-并支持相对改进奖励机制。
-"""
-
-import numpy as np
-from src.rl_optimizer.utils.setup import setup_logger
-from typing import Dict, Any, Optional, Tuple
-from dataclasses import dataclass
-
-from src.config import RLConfig
-from src.rl_optimizer.utils.shared_state_manager import SharedStateManager
-
-logger = setup_logger(__name__)
-
-
-@dataclass
-class RewardComponents:
-    """奖励组件数据类"""
-    time_cost: float = 0.0
-    adjacency_reward: float = 0.0
-    area_match_reward: float = 0.0
-    skip_penalty: float = 0.0
-    completion_bonus: float = 0.0
-    placement_bonus: float = 0.0
-    
-    def to_dict(self) -> Dict[str, float]:
-        """转换为字典格式"""
-        return {
-            'time_cost': self.time_cost,
-            'adjacency_reward': self.adjacency_reward,
-            'area_match_reward': self.area_match_reward,
-            'skip_penalty': self.skip_penalty,
-            'completion_bonus': self.completion_bonus,
-            'placement_bonus': self.placement_bonus
-        }
-
-
-@dataclass
-class NormalizedRewardInfo:
-    """归一化奖励信息数据类"""
-    normalized_components: RewardComponents
-    total_normalized_reward: float
-    raw_components: RewardComponents
-    baselines_used: Dict[str, Optional[float]]
-    improvement_scores: Dict[str, Optional[float]]
-    is_relative_improvement: bool = False
-
-
-class RewardNormalizer:
-    """
-    奖励归一化器
-    
-    负责将各种奖励组件归一化到统一范围，基于动态基线计算相对改进奖励，
-    并提供统一的权重组合机制。
-    """
-    
-    def __init__(self, config: RLConfig, shared_state_manager: SharedStateManager):
-        """
-        初始化奖励归一化器
-        
-        Args:
-            config: RL配置对象
-            shared_state_manager: 共享状态管理器
-        """
-        self.config = config
-        self.shared_state = shared_state_manager
-        
-        # 验证配置
-        if not config.ENABLE_DYNAMIC_BASELINE:
-            logger.warning("动态基线未启用，将使用固定基线归一化")
-        
-        logger.info("奖励归一化器初始化完成")
-    
-    def normalize_reward_components(self, components: RewardComponents) -> NormalizedRewardInfo:
-        """
-        归一化所有奖励组件
-        
-        Args:
-            components: 原始奖励组件
-            
-        Returns:
-            NormalizedRewardInfo: 归一化后的奖励信息
-        """
-        normalized_components = RewardComponents()
-        baselines_used = {}
-        improvement_scores = {}
-        
-        # 1. 归一化时间成本（越小越好，所以取负值）
-        time_cost_normalized, time_baseline, time_improvement = self._normalize_time_cost(
-            -abs(components.time_cost)  # 确保时间成本为负值
-        )
-        normalized_components.time_cost = time_cost_normalized
-        baselines_used['time_cost'] = time_baseline
-        improvement_scores['time_cost'] = time_improvement
-        
-        # 2. 归一化相邻性奖励（越大越好）
-        adj_normalized, adj_baseline, adj_improvement = self._normalize_adjacency_reward(
-            components.adjacency_reward
-        )
-        normalized_components.adjacency_reward = adj_normalized
-        baselines_used['adjacency_reward'] = adj_baseline
-        improvement_scores['adjacency_reward'] = adj_improvement
-        
-        # 3. 归一化面积匹配奖励（越大越好）
-        area_normalized, area_baseline, area_improvement = self._normalize_area_match_reward(
-            components.area_match_reward
-        )
-        normalized_components.area_match_reward = area_normalized
-        baselines_used['area_match_reward'] = area_baseline
-        improvement_scores['area_match_reward'] = area_improvement
-        
-        # 4. 处理惩罚和奖励项（这些通常是预定义的，不需要基线归一化）
-        normalized_components.skip_penalty = self._clip_value(
-            components.skip_penalty, -5.0, 0.0
-        )
-        normalized_components.completion_bonus = self._clip_value(
-            components.completion_bonus, 0.0, 5.0
-        )
-        normalized_components.placement_bonus = self._clip_value(
-            components.placement_bonus, 0.0, 5.0
-        )
-        
-        # 5. 计算加权总奖励
-        total_normalized_reward = self._compute_weighted_reward(normalized_components)
-        
-        # 6. 应用最终裁剪
-        if self.config.ENABLE_REWARD_CLIPPING:
-            total_normalized_reward = self._clip_value(
-                total_normalized_reward, 
-                self.config.REWARD_CLIP_RANGE[0],
-                self.config.REWARD_CLIP_RANGE[1]
-            )
-        
-        # 7. 检查是否使用了相对改进
-        is_relative_improvement = any(score is not None for score in improvement_scores.values())
-        
-        return NormalizedRewardInfo(
-            normalized_components=normalized_components,
-            total_normalized_reward=total_normalized_reward,
-            raw_components=components,
-            baselines_used=baselines_used,
-            improvement_scores=improvement_scores,
-            is_relative_improvement=is_relative_improvement
-        )
-    
-    def _normalize_time_cost(self, time_cost: float) -> Tuple[float, Optional[float], Optional[float]]:
-        """
-        归一化时间成本
-        
-        Args:
-            time_cost: 原始时间成本（应为负值）
-            
-        Returns:
-            tuple: (归一化值, 使用的基线, 改进分数)
-        """
-        baseline = self.shared_state.get_time_cost_baseline()
-        
-        if baseline is None or not self.config.ENABLE_DYNAMIC_BASELINE:
-            # 没有基线时，使用固定缩放
-            normalized = time_cost / 10000.0  # 固定缩放因子
-            return self._clip_normalized_value(normalized), baseline, None
-        
-        # 使用动态基线进行相对改进计算
-        if self.config.ENABLE_RELATIVE_IMPROVEMENT_REWARD:
-            # 计算相对改进（时间成本越小越好）
-            improvement_ratio = (baseline - time_cost) / (abs(baseline) + 1e-8)
-            improvement_score = improvement_ratio * self.config.RELATIVE_IMPROVEMENT_SCALE
-            normalized = self._clip_normalized_value(improvement_score)
-            return normalized, baseline, improvement_ratio
-        else:
-            # 基于基线的标准化
-            time_cost_std = self.shared_state.get_ema_std('time_cost_std')
-            if time_cost_std and time_cost_std > self.config.REWARD_NORMALIZATION_MIN_STD:
-                normalized = (time_cost - baseline) / time_cost_std
-                normalized = self._clip_normalized_value(normalized)
-            else:
-                normalized = self._clip_normalized_value(time_cost / 10000.0)
-            return normalized, baseline, None
-    
-    def _normalize_adjacency_reward(self, adjacency_reward: float) -> Tuple[float, Optional[float], Optional[float]]:
-        """
-        归一化相邻性奖励
-        
-        Args:
-            adjacency_reward: 原始相邻性奖励
-            
-        Returns:
-            tuple: (归一化值, 使用的基线, 改进分数)
-        """
-        baseline = self.shared_state.get_adjacency_baseline()
-        
-        if baseline is None or not self.config.ENABLE_DYNAMIC_BASELINE:
-            # 没有基线时，直接裁剪到合理范围
-            normalized = self._clip_value(adjacency_reward, -2.0, 2.0)
-            return normalized, baseline, None
-        
-        # 使用动态基线
-        if self.config.ENABLE_RELATIVE_IMPROVEMENT_REWARD:
-            # 计算相对改进（相邻性奖励越大越好）
-            improvement_ratio = (adjacency_reward - baseline) / (abs(baseline) + 1e-8)
-            improvement_score = improvement_ratio * self.config.RELATIVE_IMPROVEMENT_SCALE
-            normalized = self._clip_normalized_value(improvement_score)
-            return normalized, baseline, improvement_ratio
-        else:
-            # 基于基线的标准化
-            adj_std = self.shared_state.get_ema_std('adjacency_reward_std')
-            if adj_std and adj_std > self.config.REWARD_NORMALIZATION_MIN_STD:
-                normalized = (adjacency_reward - baseline) / adj_std
-                normalized = self._clip_normalized_value(normalized)
-            else:
-                normalized = self._clip_value(adjacency_reward, -2.0, 2.0)
-            return normalized, baseline, None
-    
-    def _normalize_area_match_reward(self, area_match_reward: float) -> Tuple[float, Optional[float], Optional[float]]:
-        """
-        归一化面积匹配奖励
-        
-        Args:
-            area_match_reward: 原始面积匹配奖励
-            
-        Returns:
-            tuple: (归一化值, 使用的基线, 改进分数)
-        """
-        baseline = self.shared_state.get_area_match_baseline()
-        
-        if baseline is None or not self.config.ENABLE_DYNAMIC_BASELINE:
-            # 没有基线时，直接裁剪到合理范围
-            normalized = self._clip_value(area_match_reward, -1.0, 1.0)
-            return normalized, baseline, None
-        
-        # 使用动态基线
-        if self.config.ENABLE_RELATIVE_IMPROVEMENT_REWARD:
-            # 计算相对改进（面积匹配奖励越大越好）
-            improvement_ratio = (area_match_reward - baseline) / (abs(baseline) + 1e-8)
-            improvement_score = improvement_ratio * self.config.RELATIVE_IMPROVEMENT_SCALE
-            normalized = self._clip_normalized_value(improvement_score)
-            return normalized, baseline, improvement_ratio
-        else:
-            # 基于基线的标准化
-            area_std = self.shared_state.get_ema_std('area_match_std')
-            if area_std and area_std > self.config.REWARD_NORMALIZATION_MIN_STD:
-                normalized = (area_match_reward - baseline) / area_std
-                normalized = self._clip_normalized_value(normalized)
-            else:
-                normalized = self._clip_value(area_match_reward, -1.0, 1.0)
-            return normalized, baseline, None
-    
-    def _compute_weighted_reward(self, components: RewardComponents) -> float:
-        """
-        计算加权总奖励
-        
-        Args:
-            components: 归一化后的奖励组件
-            
-        Returns:
-            float: 加权总奖励
-        """
-        total_reward = (
-            components.time_cost * self.config.NORMALIZED_TIME_WEIGHT +
-            components.adjacency_reward * self.config.NORMALIZED_ADJACENCY_WEIGHT +
-            components.area_match_reward * self.config.NORMALIZED_AREA_WEIGHT +
-            components.skip_penalty * self.config.NORMALIZED_SKIP_PENALTY_WEIGHT +
-            components.completion_bonus * self.config.NORMALIZED_COMPLETION_BONUS_WEIGHT +
-            components.placement_bonus * 0.1  # placement_bonus权重相对较小
-        )
-        
-        return total_reward
-    
-    def _clip_normalized_value(self, value: float) -> float:
-        """
-        裁剪归一化值到合理范围
-        
-        Args:
-            value: 待裁剪的值
-            
-        Returns:
-            float: 裁剪后的值
-        """
-        clip_range = self.config.REWARD_NORMALIZATION_CLIP_RANGE
-        return self._clip_value(value, -clip_range, clip_range)
-    
-    def _clip_value(self, value: float, min_val: float, max_val: float) -> float:
-        """
-        裁剪值到指定范围
-        
-        Args:
-            value: 待裁剪的值
-            min_val: 最小值
-            max_val: 最大值
-            
-        Returns:
-            float: 裁剪后的值
-        """
-        return np.clip(value, min_val, max_val)
-    
-    def update_baselines(self, components: RewardComponents) -> None:
-        """
-        更新动态基线
-        
-        Args:
-            components: 当前episode的奖励组件
-        """
-        if not self.config.ENABLE_DYNAMIC_BASELINE:
-            return
-        
-        # 更新时间成本基线（使用绝对值）
-        self.shared_state.update_time_cost_baseline(abs(components.time_cost))
-        
-        # 更新相邻性奖励基线
-        if components.adjacency_reward != 0.0:  # 避免更新零值
-            self.shared_state.update_adjacency_baseline(components.adjacency_reward)
-        
-        # 更新面积匹配基线
-        if components.area_match_reward != 0.0:  # 避免更新零值
-            self.shared_state.update_area_match_baseline(components.area_match_reward)
-        
-        # 更新标准差估计（用于计算方差的EMA）
-        self._update_variance_baselines(components)
-    
-    def _update_variance_baselines(self, components: RewardComponents) -> None:
-        """
-        更新方差基线（用于标准差计算）
-        
-        Args:
-            components: 当前episode的奖励组件
-        """
-        # 获取当前基线
-        time_baseline = self.shared_state.get_time_cost_baseline()
-        adj_baseline = self.shared_state.get_adjacency_baseline()
-        area_baseline = self.shared_state.get_area_match_baseline()
-        
-        # 计算偏差的平方并更新方差EMA
-        if time_baseline is not None:
-            time_deviation_sq = (abs(components.time_cost) - time_baseline) ** 2
-            self.shared_state.update_ema('time_cost_std', time_deviation_sq)
-        
-        if adj_baseline is not None and components.adjacency_reward != 0.0:
-            adj_deviation_sq = (components.adjacency_reward - adj_baseline) ** 2
-            self.shared_state.update_ema('adjacency_reward_std', adj_deviation_sq)
-        
-        if area_baseline is not None and components.area_match_reward != 0.0:
-            area_deviation_sq = (components.area_match_reward - area_baseline) ** 2
-            self.shared_state.update_ema('area_match_std', area_deviation_sq)
-    
-    def get_normalization_stats(self) -> Dict[str, Any]:
-        """
-        获取当前归一化统计信息
-        
-        Returns:
-            dict: 包含基线、标准差等统计信息
-        """
-        stats = {
-            'time_cost_baseline': self.shared_state.get_time_cost_baseline(),
-            'adjacency_baseline': self.shared_state.get_adjacency_baseline(),
-            'area_match_baseline': self.shared_state.get_area_match_baseline(),
-            'time_cost_std': self.shared_state.get_ema_std('time_cost_std'),
-            'adjacency_reward_std': self.shared_state.get_ema_std('adjacency_reward_std'),
-            'area_match_std': self.shared_state.get_ema_std('area_match_std'),
-            'warmup_complete': self.shared_state.is_warmup_complete(),
-            'episode_count': self.shared_state.get_episode_count(),
-            'config': {
-                'enable_dynamic_baseline': self.config.ENABLE_DYNAMIC_BASELINE,
-                'enable_relative_improvement': self.config.ENABLE_RELATIVE_IMPROVEMENT_REWARD,
-                'ema_alpha': self.config.EMA_ALPHA,
-                'warmup_episodes': self.config.BASELINE_WARMUP_EPISODES,
-                'relative_improvement_scale': self.config.RELATIVE_IMPROVEMENT_SCALE
-            }
-        }
-        
-        return stats
-    
-    def log_reward_info(self, reward_info: NormalizedRewardInfo, episode: int) -> None:
-        """
-        记录奖励信息到日志
-        
-        Args:
-            reward_info: 归一化奖励信息
-            episode: 当前episode编号
-        """
-        if not True:
-            return
-        
-        raw = reward_info.raw_components
-        norm = reward_info.normalized_components
-        
-        logger.debug(f"Episode {episode} 奖励归一化详情:")
-        logger.debug(f"  原始组件: 时间成本={raw.time_cost:.2f}, 相邻性={raw.adjacency_reward:.4f}, "
-                    f"面积匹配={raw.area_match_reward:.4f}")
-        logger.debug(f"  归一化组件: 时间成本={norm.time_cost:.4f}, 相邻性={norm.adjacency_reward:.4f}, "
-                    f"面积匹配={norm.area_match_reward:.4f}")
-        logger.debug(f"  惩罚奖励: 跳过惩罚={norm.skip_penalty:.2f}, 完成奖励={norm.completion_bonus:.2f}")
-        logger.debug(f"  总归一化奖励: {reward_info.total_normalized_reward:.4f}")
-        
-        if reward_info.is_relative_improvement:
-            logger.debug(f"  改进分数: {reward_info.improvement_scores}")
-            logger.debug(f"  使用基线: {reward_info.baselines_used}")
-</file>
-
-<file path="src/rl_optimizer/utils/shared_state_manager.py">
-"""
-SharedStateManager - 跨进程共享状态管理器
-
-用于PPO多进程训练环境中维护全局共享的动态基线状态。
-"""
-
-import multiprocessing as mp
-from multiprocessing import Lock, Manager
-from threading import RLock
-from typing import Dict, Any, Optional, Union
-import time
-from src.rl_optimizer.utils.setup import setup_logger
-from dataclasses import dataclass
-
-logger = setup_logger(__name__)
-
-
-@dataclass
-class EMAState:
-    """指数移动平均状态数据类"""
-    value: float = 0.0
-    count: int = 0
-    last_updated: float = 0.0
-    is_initialized: bool = False
-
-
-class SharedStateManager:
-    """
-    跨进程共享状态管理器
-    
-    实现PPO多进程环境之间的全局状态共享，主要用于维护动态基线的
-    指数移动平均值和相关统计信息。使用multiprocessing.Manager
-    实现真正的跨进程数据共享。
-    """
-
-    _instance = None
-    _lock = RLock()
-    
-    def __new__(cls, *args, **kwargs):
-        """单例模式，确保全局只有一个实例"""
-        with cls._lock:
-            if cls._instance is None:
-                cls._instance = super().__new__(cls)
-                cls._instance._initialized = False
-            return cls._instance
-    
-    def __init__(self, alpha: float = 0.1, warmup_episodes: int = 100):
-        """
-        初始化共享状态管理器
-        
-        Args:
-            alpha: 指数移动平均的平滑因子 (0 < alpha <= 1)
-            warmup_episodes: 预热期间episode数量，在此期间不更新基线
-        """
-        if self._initialized:
-            return
-            
-        self.alpha = alpha
-        self.warmup_episodes = warmup_episodes
-        
-        # 创建进程管理器和共享数据结构
-        self.manager = Manager()
-        self.shared_dict = self.manager.dict()
-        self.update_lock = self.manager.Lock()
-        
-        # 初始化各种EMA状态
-        self._init_ema_states()
-        
-        # 初始化全局统计信息
-        self.shared_dict['global_episode_count'] = 0
-        self.shared_dict['total_episodes'] = 0
-        self.shared_dict['start_time'] = time.time()
-        
-        self._initialized = True
-        logger.info(f"SharedStateManager初始化完成: alpha={alpha}, warmup_episodes={warmup_episodes}")
-    
-    def _init_ema_states(self):
-        """初始化各种指数移动平均状态"""
-        ema_keys = [
-            'time_cost_baseline',       # 时间成本基线
-            'adjacency_reward_baseline', # 相邻性奖励基线
-            'area_match_baseline',      # 面积匹配基线
-            'total_reward_baseline',    # 总奖励基线
-            'time_cost_std',           # 时间成本标准差
-            'adjacency_reward_std',     # 相邻性奖励标准差
-            'area_match_std',          # 面积匹配标准差
-        ]
-        
-        for key in ema_keys:
-            self.shared_dict[key] = {
-                'value': 0.0,
-                'count': 0,
-                'last_updated': time.time(),
-                'is_initialized': False,
-                'variance': 0.0  # 用于计算标准差
-            }
-    
-    def update_ema(self, key: str, new_value: float, force_update: bool = False) -> None:
-        """
-        更新指定键的指数移动平均值
-        
-        Args:
-            key: 要更新的EMA键名
-            new_value: 新的观测值
-            force_update: 是否强制更新（忽略预热期）
-        """
-        if key not in self.shared_dict:
-            logger.error(f"未知的EMA键: {key}")
-            return
-            
-        with self.update_lock:
-            current_episodes = self.shared_dict['global_episode_count']
-            
-            # 检查是否在预热期内
-            if not force_update and current_episodes < self.warmup_episodes:
-                # 预热期只收集数据，不更新基线
-                ema_data = dict(self.shared_dict[key])
-                ema_data['count'] += 1
-                ema_data['last_updated'] = time.time()
-                self.shared_dict[key] = ema_data
-                return
-            
-            # 获取当前EMA状态
-            ema_data = dict(self.shared_dict[key])
-            
-            if not ema_data['is_initialized']:
-                # 首次初始化
-                ema_data['value'] = new_value
-                ema_data['is_initialized'] = True
-                ema_data['variance'] = 0.0
-                logger.info(f"初始化EMA基线 {key}: {new_value:.6f}")
-            else:
-                # 更新EMA值
-                old_value = ema_data['value']
-                ema_data['value'] = (1 - self.alpha) * old_value + self.alpha * new_value
-                
-                # 更新方差（用于计算标准差）
-                if ema_data['count'] > 0:
-                    delta = new_value - old_value
-                    ema_data['variance'] = (1 - self.alpha) * ema_data['variance'] + self.alpha * delta * delta
-            
-            # 更新统计信息
-            ema_data['count'] += 1
-            ema_data['last_updated'] = time.time()
-            
-            # 写回共享字典
-            self.shared_dict[key] = ema_data
-            
-            # loguru直接使用debug，会根据级别自动过滤
-            std_dev = ema_data['variance'] ** 0.5 if ema_data['variance'] > 0 else 0.0
-            logger.debug(f"更新EMA {key}: 新值={new_value:.6f}, EMA={ema_data['value']:.6f}, 标准差={std_dev:.6f}")
-    
-    def get_ema_value(self, key: str) -> Optional[float]:
-        """
-        获取指定键的EMA值
-        
-        Args:
-            key: EMA键名
-            
-        Returns:
-            float: EMA值，如果未初始化返回None
-        """
-        if key not in self.shared_dict:
-            return None
-            
-        ema_data = self.shared_dict[key]
-        if not ema_data['is_initialized']:
-            return None
-            
-        return ema_data['value']
-    
-    def get_ema_std(self, key: str) -> Optional[float]:
-        """
-        获取指定键的EMA标准差
-        
-        Args:
-            key: EMA键名
-            
-        Returns:
-            float: 标准差值，如果未初始化返回None
-        """
-        if key not in self.shared_dict:
-            return None
-            
-        ema_data = self.shared_dict[key]
-        if not ema_data['is_initialized'] or ema_data['variance'] <= 0:
-            return None
-            
-        return ema_data['variance'] ** 0.5
-    
-    def get_ema_info(self, key: str) -> Optional[Dict[str, Any]]:
-        """
-        获取指定键的完整EMA信息
-        
-        Args:
-            key: EMA键名
-            
-        Returns:
-            dict: 包含value, count, std等完整信息的字典
-        """
-        if key not in self.shared_dict:
-            return None
-            
-        ema_data = dict(self.shared_dict[key])
-        ema_data['std'] = ema_data['variance'] ** 0.5 if ema_data['variance'] > 0 else 0.0
-        return ema_data
-    
-    def is_warmup_complete(self) -> bool:
-        """检查预热期是否完成"""
-        return self.shared_dict['global_episode_count'] >= self.warmup_episodes
-    
-    def increment_episode_count(self) -> int:
-        """增加全局episode计数并返回当前值"""
-        with self.update_lock:
-            self.shared_dict['global_episode_count'] += 1
-            self.shared_dict['total_episodes'] += 1
-            return self.shared_dict['global_episode_count']
-    
-    def get_episode_count(self) -> int:
-        """获取当前的全局episode计数"""
-        return self.shared_dict['global_episode_count']
-    
-    def get_statistics(self) -> Dict[str, Any]:
-        """
-        获取所有共享状态的统计信息
-        
-        Returns:
-            dict: 包含所有EMA状态和全局统计信息
-        """
-        stats = {
-            'global_episode_count': self.shared_dict['global_episode_count'],
-            'total_episodes': self.shared_dict['total_episodes'],
-            'warmup_complete': self.is_warmup_complete(),
-            'uptime_seconds': time.time() - self.shared_dict['start_time'],
-            'ema_states': {}
-        }
-        
-        # 收集所有EMA状态信息
-        for key in self.shared_dict:
-            if isinstance(self.shared_dict[key], dict) and 'value' in self.shared_dict[key]:
-                stats['ema_states'][key] = self.get_ema_info(key)
-        
-        return stats
-    
-    def reset(self):
-        """重置所有状态（主要用于测试）"""
-        with self.update_lock:
-            logger.info("重置SharedStateManager状态")
-            self._init_ema_states()
-            self.shared_dict['global_episode_count'] = 0
-            self.shared_dict['total_episodes'] = 0
-            self.shared_dict['start_time'] = time.time()
-    
-    def update_time_cost_baseline(self, time_cost: float) -> None:
-        """更新时间成本基线的便捷方法"""
-        self.update_ema('time_cost_baseline', time_cost)
-    
-    def update_adjacency_baseline(self, adjacency_reward: float) -> None:
-        """更新相邻性奖励基线的便捷方法"""
-        self.update_ema('adjacency_reward_baseline', adjacency_reward)
-    
-    def update_area_match_baseline(self, area_match_score: float) -> None:
-        """更新面积匹配基线的便捷方法"""
-        self.update_ema('area_match_baseline', area_match_score)
-    
-    def update_total_reward_baseline(self, total_reward: float) -> None:
-        """更新总奖励基线的便捷方法"""
-        self.update_ema('total_reward_baseline', total_reward)
-    
-    def get_time_cost_baseline(self) -> Optional[float]:
-        """获取时间成本基线的便捷方法"""
-        return self.get_ema_value('time_cost_baseline')
-    
-    def get_adjacency_baseline(self) -> Optional[float]:
-        """获取相邻性奖励基线的便捷方法"""
-        return self.get_ema_value('adjacency_reward_baseline')
-    
-    def get_area_match_baseline(self) -> Optional[float]:
-        """获取面积匹配基线的便捷方法"""
-        return self.get_ema_value('area_match_baseline')
-    
-    def get_total_reward_baseline(self) -> Optional[float]:
-        """获取总奖励基线的便捷方法"""
-        return self.get_ema_value('total_reward_baseline')
-
-
-# 全局实例（延迟初始化）
-_global_shared_state_manager = None
-
-
-def get_shared_state_manager(alpha: float = 0.1, warmup_episodes: int = 100) -> SharedStateManager:
-    """
-    获取全局共享状态管理器实例
-    
-    Args:
-        alpha: EMA平滑因子（仅在首次调用时有效）
-        warmup_episodes: 预热期episodes数量（仅在首次调用时有效）
-        
-    Returns:
-        SharedStateManager: 全局实例
-    """
-    global _global_shared_state_manager
-    
-    if _global_shared_state_manager is None:
-        _global_shared_state_manager = SharedStateManager(alpha=alpha, warmup_episodes=warmup_episodes)
-    
-    return _global_shared_state_manager
-
-
-def reset_shared_state_manager():
-    """重置全局共享状态管理器（主要用于测试）"""
-    global _global_shared_state_manager
-    if _global_shared_state_manager is not None:
-        _global_shared_state_manager.reset()
-</file>
 
 <file path="src/algorithms/adjacency/__init__.py">
 """
@@ -2091,460 +918,457 @@ __all__ = ["BasePlotter", "PlotlyPlotter"]
 ]
 </file>
 
-<file path="src/rl_optimizer/env/adjacency_reward_calculator.py">
-# src/rl_optimizer/env/adjacency_reward_calculator.py
+<file path="src/rl_optimizer/utils/baseline_monitor.py">
+"""
+BaselineMonitor - 动态基线监控器
 
-import numpy as np
-import scipy.sparse as sp
-from typing import List, Dict, Tuple, Optional, Set
-from functools import lru_cache
-from src.rl_optimizer.utils.setup import setup_logger
-from dataclasses import dataclass
+监控和记录动态基线的变化，提供实时统计和可视化支持。
+"""
+
 import time
+from src.rl_optimizer.utils.setup import setup_logger
+from typing import Dict, Any, List, Optional, Tuple
+from pathlib import Path
+import json
+from dataclasses import dataclass, asdict
+from datetime import datetime
+import matplotlib.pyplot as plt
+import numpy as np
 
 from src.config import RLConfig
+from src.rl_optimizer.utils.shared_state_manager import SharedStateManager
 
 logger = setup_logger(__name__)
 
-@dataclass
-class AdjacencyMetrics:
-    """相邻性奖励计算的性能指标数据类。"""
-    total_time: float = 0.0
-    spatial_time: float = 0.0
-    functional_time: float = 0.0
-    connectivity_time: float = 0.0
-    cache_hits: int = 0
-    cache_misses: int = 0
-    computation_count: int = 0
 
-class OptimizedAdjacencyRewardCalculator:
+@dataclass
+class BaselineSnapshot:
+    """基线快照数据类"""
+    timestamp: float
+    episode_count: int
+    time_cost_baseline: Optional[float]
+    adjacency_baseline: Optional[float]
+    area_match_baseline: Optional[float]
+    time_cost_std: Optional[float]
+    adjacency_std: Optional[float]
+    area_match_std: Optional[float]
+    warmup_complete: bool
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典格式"""
+        return asdict(self)
+
+
+class BaselineMonitor:
     """
-    相邻性奖励计算器。
+    动态基线监控器
+    
+    负责监控动态基线的变化，记录历史数据，并提供可视化功能。
     """
     
-    def __init__(self, config: RLConfig, placeable_depts: List[str], 
-                 travel_times_matrix, constraint_manager):
+    def __init__(self, config: RLConfig, shared_state_manager: SharedStateManager, 
+                 log_dir: Optional[Path] = None):
         """
-        初始化优化的相邻性奖励计算器。
+        初始化基线监控器
         
         Args:
-            config: 配置对象
-            placeable_depts: 可放置科室列表
-            travel_times_matrix: 行程时间矩阵
-            constraint_manager: 约束管理器
+            config: RL配置对象
+            shared_state_manager: 共享状态管理器
+            log_dir: 日志目录，默认使用config中的LOG_PATH
         """
         self.config = config
-        self.placeable_depts = placeable_depts
-        self.travel_times_matrix = travel_times_matrix
-        self.constraint_manager = constraint_manager
+        self.shared_state = shared_state_manager
+        self.log_dir = log_dir or config.LOG_PATH
         
-        # 性能监控
-        self.metrics = AdjacencyMetrics()
-        self.enable_optimization = getattr(config, 'ENABLE_ADJACENCY_OPTIMIZATION', True)
+        # 创建监控输出目录
+        self.monitor_dir = self.log_dir / 'baseline_monitor'
+        self.monitor_dir.mkdir(exist_ok=True)
         
-        # 科室索引映射（预计算）
-        self.dept_to_idx = {dept: i for i, dept in enumerate(placeable_depts)}
-        self.n_depts = len(placeable_depts)
+        # 历史数据存储
+        self.snapshots: List[BaselineSnapshot] = []
+        self.last_snapshot_time = 0.0
+        self.snapshot_interval = 60.0  # 每60秒记录一次快照
         
-        # 初始化优化组件
-        self._initialize_optimized_matrices()
-        self._initialize_vectorized_indices()
-        self._initialize_batch_computation_cache()
+        # 统计文件路径
+        self.stats_file = self.monitor_dir / 'baseline_history.json'
+        self.plots_dir = self.monitor_dir / 'plots'
+        self.plots_dir.mkdir(exist_ok=True)
         
-        logger.info(f"优化相邻性计算器初始化完成：{self.n_depts}个科室，"
-                   f"稀疏矩阵优化={'启用' if self.enable_optimization else '禁用'}")
+        logger.info(f"基线监控器初始化完成，监控目录: {self.monitor_dir}")
     
-    def _initialize_optimized_matrices(self):
-        """初始化优化的稀疏矩阵结构。"""
-        logger.debug("初始化优化矩阵结构...")
-        
-        # 初始化稀疏矩阵存储
-        self.spatial_adjacency_sparse = None
-        self.functional_adjacency_sparse = None
-        self.connectivity_adjacency_sparse = None
-        
-        # 预计算所有相邻性矩阵
-        if self.config.ADJACENCY_PRECOMPUTE:
-            self._precompute_all_adjacency_matrices()
-    
-    def _precompute_all_adjacency_matrices(self):
-        """预计算所有相邻性矩阵并转换为稀疏格式。"""
-        logger.debug("预计算并稀疏化相邻性矩阵...")
-        
-        # 1. 空间相邻性矩阵
-        spatial_matrix = self._compute_spatial_adjacency_matrix()
-        if spatial_matrix is not None:
-            # 转换为稀疏矩阵（COO格式便于后续处理）
-            self.spatial_adjacency_sparse = sp.coo_matrix(spatial_matrix)
-            logger.debug(f"空间相邻性稀疏矩阵：{self.spatial_adjacency_sparse.nnz}/{self.n_depts**2} 非零元素")
-        
-        # 2. 功能相邻性矩阵
-        functional_matrix = self._compute_functional_adjacency_matrix()
-        if functional_matrix is not None:
-            self.functional_adjacency_sparse = sp.coo_matrix(functional_matrix)
-            logger.debug(f"功能相邻性稀疏矩阵：{self.functional_adjacency_sparse.nnz}/{self.n_depts**2} 非零元素")
-        
-        # 3. 连通性相邻性矩阵
-        if self.config.CONNECTIVITY_ADJACENCY_WEIGHT > 0:
-            connectivity_matrix = self._compute_connectivity_adjacency_matrix()
-            if connectivity_matrix is not None:
-                self.connectivity_adjacency_sparse = sp.coo_matrix(connectivity_matrix)
-                logger.debug(f"连通性相邻性稀疏矩阵：{self.connectivity_adjacency_sparse.nnz}/{self.n_depts**2} 非零元素")
-    
-    def _compute_spatial_adjacency_matrix(self) -> Optional[np.ndarray]:
-        """计算空间相邻性矩阵。"""
-        try:
-            # 获取有效节点
-            valid_nodes = [node for node in self.placeable_depts 
-                          if node in self.travel_times_matrix.columns]
-            
-            if len(valid_nodes) < 2:
-                logger.warning("可放置节点数量过少，跳过空间相邻性计算")
-                return None
-            
-            # 构建距离矩阵（向量化）
-            node_indices = [self.travel_times_matrix.columns.get_loc(node) for node in valid_nodes]
-            distance_submatrix = self.travel_times_matrix.iloc[node_indices, node_indices].values
-            
-            # 计算分位数阈值
-            upper_triangle = np.triu(distance_submatrix, k=1)
-            valid_distances = upper_triangle[upper_triangle > 0]
-            
-            if len(valid_distances) == 0:
-                logger.warning("无有效距离数据，使用默认空间相邻性矩阵")
-                return np.eye(len(valid_nodes))
-            
-            threshold = np.percentile(valid_distances, self.config.ADJACENCY_PERCENTILE_THRESHOLD * 100)
-            
-            # 向量化生成相邻性矩阵
-            adjacency_matrix = (distance_submatrix <= threshold).astype(np.float32)
-            np.fill_diagonal(adjacency_matrix, 0)  # 自身不相邻
-            
-            # 确保对称性
-            adjacency_matrix = (adjacency_matrix + adjacency_matrix.T) / 2
-            
-            return adjacency_matrix
-            
-        except Exception as e:
-            logger.error(f"空间相邻性矩阵计算失败：{e}")
-            return None
-    
-    def _compute_functional_adjacency_matrix(self) -> Optional[np.ndarray]:
-        """计算功能相邻性矩阵。"""
-        try:
-            adjacency_matrix = np.zeros((self.n_depts, self.n_depts), dtype=np.float32)
-            
-            # 向量化计算功能偏好
-            for i, dept1 in enumerate(self.placeable_depts):
-                generic1 = dept1.split('_')[0]
-                for j, dept2 in enumerate(self.placeable_depts):
-                    if i != j:
-                        generic2 = dept2.split('_')[0]
-                        preference_score = self._get_functional_preference(generic1, generic2)
-                        adjacency_matrix[i, j] = preference_score
-            
-            return adjacency_matrix
-            
-        except Exception as e:
-            logger.error(f"功能相邻性矩阵计算失败：{e}")
-            return None
-    
-    def _compute_connectivity_adjacency_matrix(self) -> Optional[np.ndarray]:
-        """计算连通性相邻性矩阵。"""
-        try:
-            adjacency_matrix = np.zeros((self.n_depts, self.n_depts), dtype=np.float32)
-            
-            # 获取距离矩阵
-            valid_nodes = [node for node in self.placeable_depts 
-                          if node in self.travel_times_matrix.columns]
-            
-            if len(valid_nodes) < 2:
-                return adjacency_matrix
-            
-            # 构建距离矩阵
-            node_indices = [self.travel_times_matrix.columns.get_loc(node) for node in valid_nodes]
-            distance_matrix = self.travel_times_matrix.iloc[node_indices, node_indices].values
-            
-            # 计算连通性阈值
-            valid_distances = distance_matrix[distance_matrix > 0]
-            if len(valid_distances) == 0:
-                return adjacency_matrix
-            
-            connectivity_threshold = np.percentile(
-                valid_distances, 
-                self.config.CONNECTIVITY_DISTANCE_PERCENTILE * 100
-            )
-            
-            # 向量化计算连通性权重
-            mask = (distance_matrix > 0) & (distance_matrix <= connectivity_threshold)
-            adjacency_matrix[mask] = np.exp(-distance_matrix[mask] / connectivity_threshold)
-            
-            return adjacency_matrix
-            
-        except Exception as e:
-            logger.error(f"连通性相邻性矩阵计算失败：{e}")
-            return None
-    
-    def _initialize_vectorized_indices(self):
-        """初始化向量化计算所需的索引结构。"""
-        # 预计算所有可能的科室对索引
-        dept_pairs = []
-        for i in range(self.n_depts):
-            for j in range(i + 1, self.n_depts):
-                dept_pairs.append((i, j))
-        
-        self.dept_pairs = np.array(dept_pairs)
-        self.n_pairs = len(dept_pairs)
-        
-        logger.debug(f"预计算科室对索引：{self.n_pairs}个科室对")
-    
-    def _initialize_batch_computation_cache(self):
-        """初始化批量计算缓存。"""
-        # 布局模式缓存（用于识别常见的科室组合模式）
-        self.layout_pattern_cache = {}
-        
-        # 预计算缓存
-        self.precomputed_rewards = {}
-        
-        logger.debug("批量计算缓存初始化完成")
-    
-    def _get_functional_preference(self, generic1: str, generic2: str) -> float:
-        """获取功能相邻性偏好分数。"""
-        preferences = self.config.MEDICAL_ADJACENCY_PREFERENCES
-        
-        # 正向偏好
-        if generic1 in preferences and generic2 in preferences[generic1]:
-            return preferences[generic1][generic2]
-        
-        # 反向偏好
-        if generic2 in preferences and generic1 in preferences[generic2]:
-            return preferences[generic2][generic1]
-        
-        # 默认无偏好
-        return 0.0
-    
-    @lru_cache(maxsize=1000)
-    def calculate_adjacency_reward_optimized(self, placed_depts_tuple: Tuple[str, ...]) -> Dict[str, float]:
+    def take_snapshot(self) -> BaselineSnapshot:
         """
-        优化的相邻性奖励计算方法。
+        记录当前状态的快照
+        
+        Returns:
+            BaselineSnapshot: 当前状态快照
+        """
+        current_time = time.time()
+        
+        # 从共享状态管理器获取当前状态
+        stats = self.shared_state.get_statistics()
+        
+        snapshot = BaselineSnapshot(
+            timestamp=current_time,
+            episode_count=stats['global_episode_count'],
+            time_cost_baseline=self.shared_state.get_time_cost_baseline(),
+            adjacency_baseline=self.shared_state.get_adjacency_baseline(),
+            area_match_baseline=self.shared_state.get_area_match_baseline(),
+            time_cost_std=self.shared_state.get_ema_std('time_cost_std'),
+            adjacency_std=self.shared_state.get_ema_std('adjacency_reward_std'),
+            area_match_std=self.shared_state.get_ema_std('area_match_std'),
+            warmup_complete=stats['warmup_complete']
+        )
+        
+        return snapshot
+    
+    def record_snapshot(self, force: bool = False) -> bool:
+        """
+        记录快照（如果满足时间间隔或强制记录）
         
         Args:
-            placed_depts_tuple: 已放置科室的元组（用于缓存）
+            force: 是否强制记录，忽略时间间隔
             
         Returns:
-            Dict[str, float]: 包含各维度奖励的字典
+            bool: 是否成功记录了快照
         """
-        start_time = time.time()
-        self.metrics.computation_count += 1
+        current_time = time.time()
         
-        # 过滤有效科室
-        placed_depts = [dept for dept in placed_depts_tuple if dept is not None]
+        if not force and (current_time - self.last_snapshot_time) < self.snapshot_interval:
+            return False
         
-        if len(placed_depts) < 2:
-            return {
-                'spatial_reward': 0.0,
-                'functional_reward': 0.0,
-                'connectivity_reward': 0.0,
-                'total_reward': 0.0
-            }
-        
-        # 检查缓存
-        cache_key = tuple(sorted(placed_depts))
-        if cache_key in self.precomputed_rewards:
-            self.metrics.cache_hits += 1
-            return self.precomputed_rewards[cache_key]
-        
-        self.metrics.cache_misses += 1
-        
-        # 获取科室索引
         try:
-            dept_indices = [self.dept_to_idx[dept] for dept in placed_depts]
-        except KeyError as e:
-            logger.warning(f"科室不在索引映射中：{e}")
-            return {'spatial_reward': 0.0, 'functional_reward': 0.0, 'connectivity_reward': 0.0, 'total_reward': 0.0}
-        
-        # 向量化计算各维度奖励
-        if self.enable_optimization and hasattr(self, 'spatial_adjacency_sparse'):
-            rewards = self._calculate_vectorized_rewards(dept_indices)
-        else:
-            # 降级到原有算法
-            rewards = self._calculate_legacy_rewards(placed_depts)
-        
-        # 计算总奖励
-        total_reward = (
-            self.config.SPATIAL_ADJACENCY_WEIGHT * rewards['spatial_reward'] +
-            self.config.FUNCTIONAL_ADJACENCY_WEIGHT * rewards['functional_reward'] +
-            self.config.CONNECTIVITY_ADJACENCY_WEIGHT * rewards['connectivity_reward']
-        ) * self.config.ADJACENCY_REWARD_BASE
-        
-        rewards['total_reward'] = total_reward
-        
-        # 缓存结果
-        self.precomputed_rewards[cache_key] = rewards
-        
-        # 更新性能指标
-        self.metrics.total_time += time.time() - start_time
-        
-        return rewards
+            snapshot = self.take_snapshot()
+            self.snapshots.append(snapshot)
+            self.last_snapshot_time = current_time
+            
+            # 定期保存到文件
+            if len(self.snapshots) % 10 == 0:  # 每10个快照保存一次
+                self.save_history()
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"记录基线快照时发生错误: {e}")
+            return False
     
-    def _calculate_vectorized_rewards(self, dept_indices: List[int]) -> Dict[str, float]:
-        """使用向量化方法计算相邻性奖励。"""
-        n_depts = len(dept_indices)
+    def save_history(self) -> None:
+        """将快照历史保存到文件"""
+        try:
+            history_data = {
+                'config': {
+                    'ema_alpha': self.config.EMA_ALPHA,
+                    'warmup_episodes': self.config.BASELINE_WARMUP_EPISODES,
+                    'enable_dynamic_baseline': self.config.ENABLE_DYNAMIC_BASELINE,
+                    'enable_relative_improvement': self.config.ENABLE_RELATIVE_IMPROVEMENT_REWARD
+                },
+                'snapshots': [snapshot.to_dict() for snapshot in self.snapshots],
+                'last_updated': datetime.now().isoformat()
+            }
+            
+            with open(self.stats_file, 'w') as f:
+                json.dump(history_data, f, indent=2)
+                
+            logger.debug(f"基线历史数据已保存: {len(self.snapshots)}个快照")
+            
+        except Exception as e:
+            logger.error(f"保存基线历史数据时发生错误: {e}")
+    
+    def load_history(self) -> bool:
+        """从文件加载快照历史"""
+        try:
+            if not self.stats_file.exists():
+                return False
+            
+            with open(self.stats_file, 'r') as f:
+                history_data = json.load(f)
+            
+            # 重建快照列表
+            self.snapshots = []
+            for snapshot_dict in history_data.get('snapshots', []):
+                snapshot = BaselineSnapshot(**snapshot_dict)
+                self.snapshots.append(snapshot)
+            
+            logger.info(f"已加载 {len(self.snapshots)} 个历史快照")
+            return True
+            
+        except Exception as e:
+            logger.error(f"加载基线历史数据时发生错误: {e}")
+            return False
+    
+    def get_baseline_trends(self) -> Dict[str, List[Tuple[float, float]]]:
+        """
+        获取基线变化趋势
         
-        # 创建索引网格
-        i_indices, j_indices = np.meshgrid(dept_indices, dept_indices, indexing='ij')
-        mask = i_indices < j_indices  # 只计算上三角
+        Returns:
+            dict: 包含各基线的时间序列数据
+        """
+        if not self.snapshots:
+            return {}
         
-        valid_i = i_indices[mask]
-        valid_j = j_indices[mask]
-        
-        rewards = {
-            'spatial_reward': 0.0,
-            'functional_reward': 0.0,
-            'connectivity_reward': 0.0
+        trends = {
+            'time_cost': [],
+            'adjacency': [],
+            'area_match': [],
+            'time_cost_std': [],
+            'adjacency_std': [],
+            'area_match_std': []
         }
         
-        if len(valid_i) == 0:
-            return rewards
+        for snapshot in self.snapshots:
+            timestamp = snapshot.timestamp
+            
+            if snapshot.time_cost_baseline is not None:
+                trends['time_cost'].append((timestamp, snapshot.time_cost_baseline))
+            if snapshot.adjacency_baseline is not None:
+                trends['adjacency'].append((timestamp, snapshot.adjacency_baseline))
+            if snapshot.area_match_baseline is not None:
+                trends['area_match'].append((timestamp, snapshot.area_match_baseline))
+            if snapshot.time_cost_std is not None:
+                trends['time_cost_std'].append((timestamp, snapshot.time_cost_std))
+            if snapshot.adjacency_std is not None:
+                trends['adjacency_std'].append((timestamp, snapshot.adjacency_std))
+            if snapshot.area_match_std is not None:
+                trends['area_match_std'].append((timestamp, snapshot.area_match_std))
         
-        # 1. 空间相邻性奖励（向量化）
-        if self.spatial_adjacency_sparse is not None:
-            spatial_start = time.time()
-            
-            # 使用稀疏矩阵的高效索引
-            spatial_values = self.spatial_adjacency_sparse.tocsr()[valid_i, valid_j].A1
-            rewards['spatial_reward'] = np.mean(spatial_values)
-            
-            self.metrics.spatial_time += time.time() - spatial_start
-        
-        # 2. 功能相邻性奖励（向量化）
-        if self.functional_adjacency_sparse is not None:
-            functional_start = time.time()
-            
-            functional_values = self.functional_adjacency_sparse.tocsr()[valid_i, valid_j].A1
-            # 分别处理正向和负向偏好
-            positive_values = functional_values[functional_values > 0]
-            negative_values = functional_values[functional_values < 0]
-            
-            reward = 0.0
-            if len(positive_values) > 0:
-                reward += np.mean(positive_values)
-            if len(negative_values) > 0:
-                penalty_multiplier = getattr(self.config, 'ADJACENCY_PENALTY_MULTIPLIER', 1.0)
-                reward += np.mean(negative_values) * penalty_multiplier
-            
-            rewards['functional_reward'] = reward
-            
-            self.metrics.functional_time += time.time() - functional_start
-        
-        # 3. 连通性相邻性奖励（向量化）
-        if (self.config.CONNECTIVITY_ADJACENCY_WEIGHT > 0 and 
-            self.connectivity_adjacency_sparse is not None):
-            connectivity_start = time.time()
-            
-            connectivity_values = self.connectivity_adjacency_sparse.tocsr()[valid_i, valid_j].A1
-            rewards['connectivity_reward'] = np.mean(connectivity_values)
-            
-            self.metrics.connectivity_time += time.time() - connectivity_start
-        
-        return rewards
+        return trends
     
-    def _calculate_legacy_rewards(self, placed_depts: List[str]) -> Dict[str, float]:
-        """降级算法：使用原有的循环计算方法。"""
-        logger.debug("使用降级算法计算相邻性奖励")
+    def plot_baseline_evolution(self, save_plots: bool = True) -> Optional[str]:
+        """
+        绘制基线演变图表
         
-        rewards = {
-            'spatial_reward': 0.0,
-            'functional_reward': 0.0,
-            'connectivity_reward': 0.0
+        Args:
+            save_plots: 是否保存图表到文件
+            
+        Returns:
+            str: 保存的图表文件路径，如果未保存则返回None
+        """
+        if not self.snapshots:
+            logger.warning("没有快照数据，无法生成图表")
+            return None
+        
+        try:
+            trends = self.get_baseline_trends()
+            
+            # 创建子图
+            fig, axes = plt.subplots(2, 2, figsize=(15, 10))
+            fig.suptitle('动态基线演变趋势', fontsize=16)
+            
+            # 设置中文字体
+            plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'DejaVu Sans']
+            plt.rcParams['axes.unicode_minus'] = False
+            
+            # 绘制时间成本基线
+            if trends['time_cost']:
+                times, values = zip(*trends['time_cost'])
+                times_rel = [(t - times[0]) / 3600 for t in times]  # 转换为小时
+                axes[0, 0].plot(times_rel, values, 'b-', linewidth=2, label='时间成本基线')
+                axes[0, 0].set_title('时间成本基线演变')
+                axes[0, 0].set_xlabel('训练时间 (小时)')
+                axes[0, 0].set_ylabel('时间成本 (秒)')
+                axes[0, 0].grid(True, alpha=0.3)
+                axes[0, 0].legend()
+            
+            # 绘制相邻性基线
+            if trends['adjacency']:
+                times, values = zip(*trends['adjacency'])
+                times_rel = [(t - times[0]) / 3600 for t in times]
+                axes[0, 1].plot(times_rel, values, 'g-', linewidth=2, label='相邻性奖励基线')
+                axes[0, 1].set_title('相邻性奖励基线演变')
+                axes[0, 1].set_xlabel('训练时间 (小时)')
+                axes[0, 1].set_ylabel('相邻性奖励')
+                axes[0, 1].grid(True, alpha=0.3)
+                axes[0, 1].legend()
+            
+            # 绘制面积匹配基线
+            if trends['area_match']:
+                times, values = zip(*trends['area_match'])
+                times_rel = [(t - times[0]) / 3600 for t in times]
+                axes[1, 0].plot(times_rel, values, 'r-', linewidth=2, label='面积匹配基线')
+                axes[1, 0].set_title('面积匹配基线演变')
+                axes[1, 0].set_xlabel('训练时间 (小时)')
+                axes[1, 0].set_ylabel('面积匹配分数')
+                axes[1, 0].grid(True, alpha=0.3)
+                axes[1, 0].legend()
+            
+            # 绘制标准差演变
+            ax_std = axes[1, 1]
+            if trends['time_cost_std']:
+                times, values = zip(*trends['time_cost_std'])
+                times_rel = [(t - times[0]) / 3600 for t in times]
+                ax_std.plot(times_rel, values, 'b--', linewidth=2, label='时间成本标准差')
+            if trends['adjacency_std']:
+                times, values = zip(*trends['adjacency_std'])
+                times_rel = [(t - times[0]) / 3600 for t in times]
+                ax_std.plot(times_rel, values, 'g--', linewidth=2, label='相邻性标准差')
+            if trends['area_match_std']:
+                times, values = zip(*trends['area_match_std'])
+                times_rel = [(t - times[0]) / 3600 for t in times]
+                ax_std.plot(times_rel, values, 'r--', linewidth=2, label='面积匹配标准差')
+            
+            ax_std.set_title('标准差演变')
+            ax_std.set_xlabel('训练时间 (小时)')
+            ax_std.set_ylabel('标准差')
+            ax_std.grid(True, alpha=0.3)
+            ax_std.legend()
+            
+            plt.tight_layout()
+            
+            if save_plots:
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+                plot_file = self.plots_dir / f'baseline_evolution_{timestamp}.png'
+                plt.savefig(plot_file, dpi=300, bbox_inches='tight')
+                plt.close()
+                logger.info(f"基线演变图表已保存: {plot_file}")
+                return str(plot_file)
+            else:
+                plt.show()
+                return None
+                
+        except Exception as e:
+            logger.error(f"绘制基线演变图表时发生错误: {e}")
+            return None
+    
+    def generate_summary_report(self) -> Dict[str, Any]:
+        """
+        生成基线监控摘要报告
+        
+        Returns:
+            dict: 摘要报告数据
+        """
+        if not self.snapshots:
+            return {'error': '没有可用的快照数据'}
+        
+        latest_snapshot = self.snapshots[-1]
+        first_snapshot = self.snapshots[0]
+        
+        # 计算训练持续时间
+        duration_hours = (latest_snapshot.timestamp - first_snapshot.timestamp) / 3600
+        
+        report = {
+            'monitoring_period': {
+                'start_time': datetime.fromtimestamp(first_snapshot.timestamp).isoformat(),
+                'end_time': datetime.fromtimestamp(latest_snapshot.timestamp).isoformat(),
+                'duration_hours': duration_hours,
+                'total_snapshots': len(self.snapshots)
+            },
+            'training_progress': {
+                'total_episodes': latest_snapshot.episode_count,
+                'warmup_complete': latest_snapshot.warmup_complete,
+                'warmup_episodes': self.config.BASELINE_WARMUP_EPISODES
+            },
+            'latest_baselines': {
+                'time_cost': latest_snapshot.time_cost_baseline,
+                'adjacency': latest_snapshot.adjacency_baseline,
+                'area_match': latest_snapshot.area_match_baseline
+            },
+            'latest_std_devs': {
+                'time_cost': latest_snapshot.time_cost_std,
+                'adjacency': latest_snapshot.adjacency_std,
+                'area_match': latest_snapshot.area_match_std
+            },
+            'baseline_stability': self._analyze_baseline_stability(),
+            'recommendations': self._generate_recommendations()
         }
         
-        count = 0
-        
-        for i, dept1 in enumerate(placed_depts):
-            for j, dept2 in enumerate(placed_depts[i+1:], i+1):
-                if dept1 in self.dept_to_idx and dept2 in self.dept_to_idx:
-                    idx1, idx2 = self.dept_to_idx[dept1], self.dept_to_idx[dept2]
-                    
-                    # 空间相邻性
-                    if hasattr(self, 'spatial_adjacency_sparse') and self.spatial_adjacency_sparse is not None:
-                        spatial_score = self.spatial_adjacency_sparse.tocsr()[idx1, idx2]
-                        rewards['spatial_reward'] += spatial_score
-                    
-                    # 功能相邻性
-                    if hasattr(self, 'functional_adjacency_sparse') and self.functional_adjacency_sparse is not None:
-                        functional_score = self.functional_adjacency_sparse.tocsr()[idx1, idx2]
-                        if functional_score > 0:
-                            rewards['functional_reward'] += functional_score
-                        elif functional_score < 0:
-                            penalty_multiplier = getattr(self.config, 'ADJACENCY_PENALTY_MULTIPLIER', 1.0)
-                            rewards['functional_reward'] += functional_score * penalty_multiplier
-                    
-                    # 连通性相邻性
-                    if (self.config.CONNECTIVITY_ADJACENCY_WEIGHT > 0 and 
-                        hasattr(self, 'connectivity_adjacency_sparse') and 
-                        self.connectivity_adjacency_sparse is not None):
-                        connectivity_score = self.connectivity_adjacency_sparse.tocsr()[idx1, idx2]
-                        rewards['connectivity_reward'] += connectivity_score
-                    
-                    count += 1
-        
-        # 计算平均值
-        if count > 0:
-            for key in rewards:
-                rewards[key] /= count
-        
-        return rewards
+        return report
     
-    def get_performance_metrics(self) -> Dict[str, float]:
-        """获取性能指标。"""
-        total_calls = self.metrics.cache_hits + self.metrics.cache_misses
-        cache_hit_rate = self.metrics.cache_hits / total_calls if total_calls > 0 else 0.0
+    def _analyze_baseline_stability(self) -> Dict[str, Any]:
+        """分析基线稳定性"""
+        if len(self.snapshots) < 10:
+            return {'status': 'insufficient_data', 'message': '数据不足，需要更多快照'}
         
-        return {
-            'total_computation_time': self.metrics.total_time,
-            'avg_computation_time': self.metrics.total_time / max(1, self.metrics.computation_count),
-            'spatial_computation_time': self.metrics.spatial_time,
-            'functional_computation_time': self.metrics.functional_time,
-            'connectivity_computation_time': self.metrics.connectivity_time,
-            'cache_hit_rate': cache_hit_rate,
-            'total_computations': self.metrics.computation_count,
-            'cache_hits': self.metrics.cache_hits,
-            'cache_misses': self.metrics.cache_misses
+        # 取最近的快照分析稳定性
+        recent_snapshots = self.snapshots[-10:]
+        
+        def coefficient_of_variation(values):
+            """计算变异系数"""
+            if not values or len(values) < 2:
+                return None
+            values_array = np.array(values)
+            mean_val = np.mean(values_array)
+            if mean_val == 0:
+                return None
+            return np.std(values_array) / abs(mean_val)
+        
+        # 提取最近的基线值
+        time_costs = [s.time_cost_baseline for s in recent_snapshots if s.time_cost_baseline is not None]
+        adjacencies = [s.adjacency_baseline for s in recent_snapshots if s.adjacency_baseline is not None]
+        area_matches = [s.area_match_baseline for s in recent_snapshots if s.area_match_baseline is not None]
+        
+        stability = {
+            'time_cost_cv': coefficient_of_variation(time_costs),
+            'adjacency_cv': coefficient_of_variation(adjacencies),
+            'area_match_cv': coefficient_of_variation(area_matches),
+            'overall_stability': 'unknown'
         }
-    
-    def reset_metrics(self):
-        """重置性能指标。"""
-        self.metrics = AdjacencyMetrics()
-    
-    def clear_cache(self):
-        """清除所有缓存。"""
-        self.calculate_adjacency_reward_optimized.cache_clear()
-        self.precomputed_rewards.clear()
-        self.layout_pattern_cache.clear()
-        logger.info("相邻性奖励计算器缓存已清除")
-
-# 兼容性包装函数
-def create_adjacency_calculator(config: RLConfig, placeable_depts: List[str], 
-                               travel_times_matrix, constraint_manager) -> OptimizedAdjacencyRewardCalculator:
-    """
-    创建相邻性奖励计算器的工厂函数。
-    
-    Args:
-        config: 配置对象
-        placeable_depts: 可放置科室列表
-        travel_times_matrix: 行程时间矩阵
-        constraint_manager: 约束管理器
         
-    Returns:
-        OptimizedAdjacencyRewardCalculator: 优化的相邻性奖励计算器实例
-    """
-    return OptimizedAdjacencyRewardCalculator(
-        config=config,
-        placeable_depts=placeable_depts,
-        travel_times_matrix=travel_times_matrix,
-        constraint_manager=constraint_manager
-    )
+        # 评估整体稳定性
+        cvs = [cv for cv in [stability['time_cost_cv'], stability['adjacency_cv'], stability['area_match_cv']] if cv is not None]
+        if cvs:
+            avg_cv = np.mean(cvs)
+            if avg_cv < 0.1:
+                stability['overall_stability'] = 'stable'
+            elif avg_cv < 0.3:
+                stability['overall_stability'] = 'moderate'
+            else:
+                stability['overall_stability'] = 'unstable'
+        
+        return stability
+    
+    def _generate_recommendations(self) -> List[str]:
+        """生成基于监控数据的建议"""
+        recommendations = []
+        
+        if not self.snapshots:
+            return ["需要更多训练数据进行分析"]
+        
+        latest = self.snapshots[-1]
+        
+        # 检查预热状态
+        if not latest.warmup_complete:
+            recommendations.append("基线仍在预热期，建议继续训练直到预热完成")
+        
+        # 检查基线数据完整性
+        if latest.time_cost_baseline is None:
+            recommendations.append("时间成本基线未初始化，可能需要调整EMA参数")
+        
+        if latest.adjacency_baseline is None and self.config.ENABLE_ADJACENCY_REWARD:
+            recommendations.append("相邻性奖励基线未初始化，检查相邻性奖励配置")
+        
+        # 分析稳定性
+        stability = self._analyze_baseline_stability()
+        if stability.get('overall_stability') == 'unstable':
+            recommendations.append("基线变化较大，考虑降低EMA平滑因子alpha或增加预热期")
+        
+        # 检查训练进度
+        if len(self.snapshots) > 1:
+            episode_rate = (latest.episode_count - self.snapshots[0].episode_count) / len(self.snapshots)
+            if episode_rate < 5:
+                recommendations.append("训练进度较慢，考虑增加并行环境数量或调整训练参数")
+        
+        return recommendations if recommendations else ["基线监控正常，继续当前训练配置"]
+    
+    def close(self) -> None:
+        """关闭监控器，保存最终数据"""
+        self.record_snapshot(force=True)  # 强制记录最后一个快照
+        self.save_history()
+        
+        # 生成最终报告
+        final_report = self.generate_summary_report()
+        report_file = self.monitor_dir / 'final_report.json'
+        
+        try:
+            with open(report_file, 'w') as f:
+                json.dump(final_report, f, indent=2)
+            logger.info(f"基线监控最终报告已保存: {report_file}")
+        except Exception as e:
+            logger.error(f"保存最终报告时发生错误: {e}")
+        
+        # 生成最终图表
+        self.plot_baseline_evolution(save_plots=True)
+        
+        logger.info("基线监控器已关闭")
 </file>
 
 <file path="src/rl_optimizer/utils/checkpoint_callback.py">
@@ -2837,6 +1661,957 @@ def get_lr_scheduler(schedule_type: str, initial_lr: float, final_lr: float = 0.
         raise ValueError(
             f"不支持的学习率调度器类型: '{schedule_type}'. "
             f"支持的类型: 'linear', 'constant'"
+        )
+</file>
+
+<file path="src/rl_optimizer/utils/reward_normalizer.py">
+"""
+RewardNormalizer - 奖励归一化器
+
+实现基于动态基线的奖励归一化，将各种奖励组件标准化到合理范围内，
+并支持相对改进奖励机制。
+"""
+
+import numpy as np
+from src.rl_optimizer.utils.setup import setup_logger
+from typing import Dict, Any, Optional, Tuple
+from dataclasses import dataclass
+
+from src.config import RLConfig
+from src.rl_optimizer.utils.shared_state_manager import SharedStateManager
+
+logger = setup_logger(__name__)
+
+
+@dataclass
+class RewardComponents:
+    """奖励组件数据类"""
+    time_cost: float = 0.0
+    adjacency_reward: float = 0.0
+    area_match_reward: float = 0.0
+    skip_penalty: float = 0.0
+    completion_bonus: float = 0.0
+    placement_bonus: float = 0.0
+    
+    def to_dict(self) -> Dict[str, float]:
+        """转换为字典格式"""
+        return {
+            'time_cost': self.time_cost,
+            'adjacency_reward': self.adjacency_reward,
+            'area_match_reward': self.area_match_reward,
+            'skip_penalty': self.skip_penalty,
+            'completion_bonus': self.completion_bonus,
+            'placement_bonus': self.placement_bonus
+        }
+
+
+@dataclass
+class NormalizedRewardInfo:
+    """归一化奖励信息数据类"""
+    normalized_components: RewardComponents
+    total_normalized_reward: float
+    raw_components: RewardComponents
+    baselines_used: Dict[str, Optional[float]]
+    improvement_scores: Dict[str, Optional[float]]
+    is_relative_improvement: bool = False
+
+
+class RewardNormalizer:
+    """
+    奖励归一化器
+    
+    负责将各种奖励组件归一化到统一范围，基于动态基线计算相对改进奖励，
+    并提供统一的权重组合机制。
+    """
+    
+    def __init__(self, config: RLConfig, shared_state_manager: SharedStateManager):
+        """
+        初始化奖励归一化器
+        
+        Args:
+            config: RL配置对象
+            shared_state_manager: 共享状态管理器
+        """
+        self.config = config
+        self.shared_state = shared_state_manager
+        
+        # 验证配置
+        if not config.ENABLE_DYNAMIC_BASELINE:
+            logger.warning("动态基线未启用，将使用固定基线归一化")
+        
+        logger.info("奖励归一化器初始化完成")
+    
+    def normalize_reward_components(self, components: RewardComponents) -> NormalizedRewardInfo:
+        """
+        归一化所有奖励组件
+        
+        Args:
+            components: 原始奖励组件
+            
+        Returns:
+            NormalizedRewardInfo: 归一化后的奖励信息
+        """
+        normalized_components = RewardComponents()
+        baselines_used = {}
+        improvement_scores = {}
+        
+        # 1. 归一化时间成本（越小越好，所以取负值）
+        time_cost_normalized, time_baseline, time_improvement = self._normalize_time_cost(
+            -abs(components.time_cost)  # 确保时间成本为负值
+        )
+        normalized_components.time_cost = time_cost_normalized
+        baselines_used['time_cost'] = time_baseline
+        improvement_scores['time_cost'] = time_improvement
+        
+        # 2. 归一化相邻性奖励（越大越好）
+        adj_normalized, adj_baseline, adj_improvement = self._normalize_adjacency_reward(
+            components.adjacency_reward
+        )
+        normalized_components.adjacency_reward = adj_normalized
+        baselines_used['adjacency_reward'] = adj_baseline
+        improvement_scores['adjacency_reward'] = adj_improvement
+        
+        # 3. 归一化面积匹配奖励（越大越好）
+        area_normalized, area_baseline, area_improvement = self._normalize_area_match_reward(
+            components.area_match_reward
+        )
+        normalized_components.area_match_reward = area_normalized
+        baselines_used['area_match_reward'] = area_baseline
+        improvement_scores['area_match_reward'] = area_improvement
+        
+        # 4. 处理惩罚和奖励项（这些通常是预定义的，不需要基线归一化）
+        normalized_components.skip_penalty = self._clip_value(
+            components.skip_penalty, -5.0, 0.0
+        )
+        normalized_components.completion_bonus = self._clip_value(
+            components.completion_bonus, 0.0, 5.0
+        )
+        normalized_components.placement_bonus = self._clip_value(
+            components.placement_bonus, 0.0, 5.0
+        )
+        
+        # 5. 计算加权总奖励
+        total_normalized_reward = self._compute_weighted_reward(normalized_components, improvement_scores)
+        
+        # 6. 应用最终裁剪
+        if self.config.ENABLE_REWARD_CLIPPING:
+            total_normalized_reward = self._clip_value(
+                total_normalized_reward, 
+                self.config.REWARD_CLIP_RANGE[0],
+                self.config.REWARD_CLIP_RANGE[1]
+            )
+        
+        # 7. 检查是否使用了相对改进
+        is_relative_improvement = any(score is not None for score in improvement_scores.values())
+        
+        return NormalizedRewardInfo(
+            normalized_components=normalized_components,
+            total_normalized_reward=total_normalized_reward,
+            raw_components=components,
+            baselines_used=baselines_used,
+            improvement_scores=improvement_scores,
+            is_relative_improvement=is_relative_improvement
+        )
+    
+    def _normalize_time_cost(self, time_cost: float) -> Tuple[float, Optional[float], Optional[float]]:
+        """
+        归一化时间成本
+        
+        Args:
+            time_cost: 原始时间成本（应为负值）
+            
+        Returns:
+            tuple: (归一化值, 使用的基线, 改进分数)
+        """
+        baseline = self.shared_state.get_time_cost_baseline()
+        
+        if baseline is None or not self.config.ENABLE_DYNAMIC_BASELINE:
+            # 没有基线时，使用固定缩放
+            normalized = time_cost / 10000.0  # 固定缩放因子
+            return self._clip_normalized_value(normalized), baseline, None
+        
+        # 使用动态基线进行相对改进计算
+        if self.config.ENABLE_RELATIVE_IMPROVEMENT_REWARD:
+            # 计算相对改进（时间成本越小越好）
+            improvement_ratio = (baseline + time_cost) / (abs(baseline) + 1e-8)
+            improvement_score = improvement_ratio
+            normalized = self._clip_normalized_value(improvement_score)
+            return normalized, baseline, improvement_ratio
+        else:
+            # 基于基线的标准化
+            time_cost_std = self.shared_state.get_ema_std('time_cost_std')
+            if time_cost_std and time_cost_std > self.config.REWARD_NORMALIZATION_MIN_STD:
+                normalized = (time_cost - baseline) / time_cost_std
+                normalized = self._clip_normalized_value(normalized)
+            else:
+                normalized = self._clip_normalized_value(time_cost / 10000.0)
+            return normalized, baseline, None
+    
+    def _normalize_adjacency_reward(self, adjacency_reward: float) -> Tuple[float, Optional[float], Optional[float]]:
+        """
+        归一化相邻性奖励
+        
+        Args:
+            adjacency_reward: 原始相邻性奖励
+            
+        Returns:
+            tuple: (归一化值, 使用的基线, 改进分数)
+        """
+        baseline = self.shared_state.get_adjacency_baseline()
+        
+        if baseline is None or not self.config.ENABLE_DYNAMIC_BASELINE:
+            # 没有基线时，直接裁剪到合理范围
+            normalized = self._clip_value(adjacency_reward, -1.0, 1.0)
+            return normalized, baseline, 0.0
+        
+        # 使用动态基线
+        if self.config.ENABLE_RELATIVE_IMPROVEMENT_REWARD:
+            # 计算相对改进（相邻性奖励越大越好）
+            improvement_ratio = (adjacency_reward - baseline) / (abs(baseline) + 1e-8)
+            improvement_score = improvement_ratio
+            normalized = self._clip_normalized_value(improvement_score)
+            return normalized, baseline, improvement_ratio
+        else:
+            # 基于基线的标准化
+            adj_std = self.shared_state.get_ema_std('adjacency_reward_std')
+            if adj_std and adj_std > self.config.REWARD_NORMALIZATION_MIN_STD:
+                normalized = (adjacency_reward - baseline) / adj_std
+                normalized = self._clip_normalized_value(normalized)
+            else:
+                normalized = self._clip_value(adjacency_reward, -1.0, 1.0)
+            return normalized, baseline, 0.0
+    
+    def _normalize_area_match_reward(self, area_match_reward: float) -> Tuple[float, Optional[float], Optional[float]]:
+        """
+        归一化面积匹配奖励
+        
+        Args:
+            area_match_reward: 原始面积匹配奖励
+            
+        Returns:
+            tuple: (归一化值, 使用的基线, 改进分数)
+        """
+        baseline = self.shared_state.get_area_match_baseline()
+        
+        if baseline is None or not self.config.ENABLE_DYNAMIC_BASELINE:
+            # 没有基线时，直接裁剪到合理范围
+            normalized = self._clip_value(area_match_reward, -1.0, 1.0)
+            return normalized, baseline, None
+        
+        # 使用动态基线
+        if self.config.ENABLE_RELATIVE_IMPROVEMENT_REWARD:
+            # 计算相对改进（面积匹配奖励越大越好）
+            improvement_ratio = (area_match_reward - baseline) / (abs(baseline) + 1e-8)
+            improvement_score = improvement_ratio
+            normalized = self._clip_normalized_value(improvement_score)
+            return normalized, baseline, improvement_ratio
+        else:
+            # 基于基线的标准化
+            area_std = self.shared_state.get_ema_std('area_match_std')
+            if area_std and area_std > self.config.REWARD_NORMALIZATION_MIN_STD:
+                normalized = (area_match_reward - baseline) / area_std
+                normalized = self._clip_normalized_value(normalized)
+            else:
+                normalized = self._clip_value(area_match_reward, -1.0, 1.0)
+            return normalized, baseline, None
+    
+    def _compute_weighted_reward(self, components: RewardComponents, improvement_scores: Dict[str, Optional[float]]) -> float:
+        """
+        计算加权总奖励
+        
+        Args:
+            components: 归一化后的奖励组件
+            
+        Returns:
+            float: 加权总奖励
+        """
+        
+
+        if any(improvement_scores.values()):
+            total_reward = (
+                improvement_scores['time_cost'] * self.config.NORMALIZED_TIME_WEIGHT +
+                improvement_scores['adjacency_reward'] * self.config.NORMALIZED_ADJACENCY_WEIGHT +
+                improvement_scores['area_match_reward'] * self.config.NORMALIZED_AREA_WEIGHT
+            )
+        
+        else:
+            total_reward = (
+            components.time_cost * self.config.NORMALIZED_TIME_WEIGHT +
+            components.adjacency_reward * self.config.NORMALIZED_ADJACENCY_WEIGHT +
+            components.area_match_reward * self.config.NORMALIZED_AREA_WEIGHT +
+            components.skip_penalty * self.config.NORMALIZED_SKIP_PENALTY_WEIGHT +
+            components.completion_bonus * self.config.NORMALIZED_COMPLETION_BONUS_WEIGHT +
+            components.placement_bonus * self.config.NORMALIZED_PLACEMENT_BONUS_WEIGHT
+            )
+        
+        return total_reward
+    
+    def _clip_normalized_value(self, value: float) -> float:
+        """
+        裁剪归一化值到合理范围
+        
+        Args:
+            value: 待裁剪的值
+            
+        Returns:
+            float: 裁剪后的值
+        """
+        clip_range = self.config.REWARD_NORMALIZATION_CLIP_RANGE
+        return self._clip_value(value, -clip_range, clip_range)
+    
+    def _clip_value(self, value: float, min_val: float, max_val: float) -> float:
+        """
+        裁剪值到指定范围
+        
+        Args:
+            value: 待裁剪的值
+            min_val: 最小值
+            max_val: 最大值
+            
+        Returns:
+            float: 裁剪后的值
+        """
+        return np.clip(value, min_val, max_val)
+    
+    def update_baselines(self, components: RewardComponents) -> None:
+        """
+        更新动态基线
+        
+        Args:
+            components: 当前episode的奖励组件
+        """
+        if not self.config.ENABLE_DYNAMIC_BASELINE:
+            return
+        
+        # 更新时间成本基线（使用绝对值）
+        self.shared_state.update_time_cost_baseline(abs(components.time_cost))
+        
+        # 更新相邻性奖励基线
+        if components.adjacency_reward != 0.0:  # 避免更新零值
+            self.shared_state.update_adjacency_baseline(components.adjacency_reward)
+        
+        # 更新面积匹配基线
+        if components.area_match_reward != 0.0:  # 避免更新零值
+            self.shared_state.update_area_match_baseline(components.area_match_reward)
+        
+        # 更新标准差估计（用于计算方差的EMA）
+        self._update_variance_baselines(components)
+    
+    def _update_variance_baselines(self, components: RewardComponents) -> None:
+        """
+        更新方差基线（用于标准差计算）
+        
+        Args:
+            components: 当前episode的奖励组件
+        """
+        # 获取当前基线
+        time_baseline = self.shared_state.get_time_cost_baseline()
+        adj_baseline = self.shared_state.get_adjacency_baseline()
+        area_baseline = self.shared_state.get_area_match_baseline()
+        
+        # 计算偏差的平方并更新方差EMA
+        if time_baseline is not None:
+            time_deviation_sq = (abs(components.time_cost) - time_baseline) ** 2
+            self.shared_state.update_ema('time_cost_std', time_deviation_sq)
+        
+        if adj_baseline is not None and components.adjacency_reward != 0.0:
+            adj_deviation_sq = (components.adjacency_reward - adj_baseline) ** 2
+            self.shared_state.update_ema('adjacency_reward_std', adj_deviation_sq)
+        
+        if area_baseline is not None and components.area_match_reward != 0.0:
+            area_deviation_sq = (components.area_match_reward - area_baseline) ** 2
+            self.shared_state.update_ema('area_match_std', area_deviation_sq)
+    
+    def get_normalization_stats(self) -> Dict[str, Any]:
+        """
+        获取当前归一化统计信息
+        
+        Returns:
+            dict: 包含基线、标准差等统计信息
+        """
+        stats = {
+            'time_cost_baseline': self.shared_state.get_time_cost_baseline(),
+            'adjacency_baseline': self.shared_state.get_adjacency_baseline(),
+            'area_match_baseline': self.shared_state.get_area_match_baseline(),
+            'time_cost_std': self.shared_state.get_ema_std('time_cost_std'),
+            'adjacency_reward_std': self.shared_state.get_ema_std('adjacency_reward_std'),
+            'area_match_std': self.shared_state.get_ema_std('area_match_std'),
+            'warmup_complete': self.shared_state.is_warmup_complete(),
+            'episode_count': self.shared_state.get_episode_count(),
+            'config': {
+                'enable_dynamic_baseline': self.config.ENABLE_DYNAMIC_BASELINE,
+                'enable_relative_improvement': self.config.ENABLE_RELATIVE_IMPROVEMENT_REWARD,
+                'ema_alpha': self.config.EMA_ALPHA,
+                'warmup_episodes': self.config.BASELINE_WARMUP_EPISODES,
+                'relative_improvement_scale': self.config.RELATIVE_IMPROVEMENT_SCALE
+            }
+        }
+        
+        return stats
+    
+    def log_reward_info(self, reward_info: NormalizedRewardInfo, episode: int) -> None:
+        """
+        记录奖励信息到日志
+        
+        Args:
+            reward_info: 归一化奖励信息
+            episode: 当前episode编号
+        """
+        
+        raw = reward_info.raw_components
+        norm = reward_info.normalized_components
+        
+        logger.debug(f"Episode {episode} 奖励归一化详情:")
+        logger.debug(f"  原始组件: 时间成本={raw.time_cost:.2f}, 相邻性={raw.adjacency_reward:.4f}, "
+                    f"面积匹配={raw.area_match_reward:.4f}")
+        logger.debug(f"  归一化组件: 时间成本={norm.time_cost:.4f}, 相邻性={norm.adjacency_reward:.4f}, "
+                    f"面积匹配={norm.area_match_reward:.4f}")
+        logger.debug(f"  惩罚奖励: 跳过惩罚={norm.skip_penalty:.2f}, 完成奖励={norm.completion_bonus:.2f}")
+        logger.debug(f"  总归一化奖励: {reward_info.total_normalized_reward:.4f}")
+        
+        if reward_info.is_relative_improvement:
+            logger.debug(f"  改进分数: {reward_info.improvement_scores}")
+            logger.debug(f"  使用基线: {reward_info.baselines_used}")
+</file>
+
+<file path="src/rl_optimizer/utils/shared_state_manager.py">
+"""
+SharedStateManager - 跨进程共享状态管理器
+
+用于PPO多进程训练环境中维护全局共享的动态基线状态。
+"""
+
+import multiprocessing as mp
+from multiprocessing import Lock, Manager
+from threading import RLock
+from typing import Dict, Any, Optional, Union
+import time
+from src.rl_optimizer.utils.setup import setup_logger
+from dataclasses import dataclass
+
+logger = setup_logger(__name__)
+
+
+@dataclass
+class EMAState:
+    """指数移动平均状态数据类"""
+    value: float = 0.0
+    count: int = 0
+    last_updated: float = 0.0
+    is_initialized: bool = False
+
+
+class SharedStateManager:
+    """
+    跨进程共享状态管理器
+    
+    实现PPO多进程环境之间的全局状态共享，主要用于维护动态基线的
+    指数移动平均值和相关统计信息。使用multiprocessing.Manager
+    实现真正的跨进程数据共享。
+    """
+
+    _instance = None
+    _lock = RLock()
+    
+    def __new__(cls, *args, **kwargs):
+        """单例模式，确保全局只有一个实例"""
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
+                cls._instance._initialized = False
+            return cls._instance
+    
+    def __init__(self, alpha: float = 0.1, warmup_episodes: int = 100):
+        """
+        初始化共享状态管理器
+        
+        Args:
+            alpha: 指数移动平均的平滑因子 (0 < alpha <= 1)
+            warmup_episodes: 预热期间episode数量，在此期间不更新基线
+        """
+        if self._initialized:
+            return
+            
+        self.alpha = alpha
+        self.warmup_episodes = warmup_episodes
+        
+        # 创建进程管理器和共享数据结构
+        self.manager = Manager()
+        self.shared_dict = self.manager.dict()
+        self.update_lock = self.manager.Lock()
+        
+        # 初始化各种EMA状态
+        self._init_ema_states()
+        
+        # 初始化全局统计信息
+        self.shared_dict['global_episode_count'] = 0
+        self.shared_dict['total_episodes'] = 0
+        self.shared_dict['start_time'] = time.time()
+        
+        self._initialized = True
+        logger.info(f"SharedStateManager初始化完成: alpha={alpha}, warmup_episodes={warmup_episodes}")
+    
+    def _init_ema_states(self):
+        """初始化各种指数移动平均状态"""
+        ema_keys = [
+            'time_cost_baseline',       # 时间成本基线
+            'adjacency_reward_baseline', # 相邻性奖励基线
+            'area_match_baseline',      # 面积匹配基线
+            'total_reward_baseline',    # 总奖励基线
+            'time_cost_std',           # 时间成本标准差
+            'adjacency_reward_std',     # 相邻性奖励标准差
+            'area_match_std',          # 面积匹配标准差
+        ]
+        
+        for key in ema_keys:
+            self.shared_dict[key] = {
+                'value': 0.0,
+                'count': 0,
+                'last_updated': time.time(),
+                'is_initialized': False,
+                'variance': 0.0  # 用于计算标准差
+            }
+    
+    def update_ema(self, key: str, new_value: float, force_update: bool = False) -> None:
+        """
+        更新指定键的指数移动平均值
+        
+        Args:
+            key: 要更新的EMA键名
+            new_value: 新的观测值
+            force_update: 是否强制更新（忽略预热期）
+        """
+        if key not in self.shared_dict:
+            logger.error(f"未知的EMA键: {key}")
+            return
+            
+        with self.update_lock:
+            current_episodes = self.shared_dict['global_episode_count']
+            
+            # 检查是否在预热期内
+            if not force_update and current_episodes < self.warmup_episodes:
+                # 预热期只收集数据，不更新基线
+                ema_data = dict(self.shared_dict[key])
+                ema_data['count'] += 1
+                ema_data['last_updated'] = time.time()
+                self.shared_dict[key] = ema_data
+                return
+            
+            # 获取当前EMA状态
+            ema_data = dict(self.shared_dict[key])
+            
+            if not ema_data['is_initialized']:
+                # 首次初始化
+                ema_data['value'] = new_value
+                ema_data['is_initialized'] = True
+                ema_data['variance'] = 0.0
+                logger.info(f"初始化EMA基线 {key}: {new_value:.6f}")
+            else:
+                # 更新EMA值
+                old_value = ema_data['value']
+                ema_data['value'] = (1 - self.alpha) * old_value + self.alpha * new_value
+                
+                # 更新方差（用于计算标准差）
+                if ema_data['count'] > 0:
+                    delta = new_value - old_value
+                    ema_data['variance'] = (1 - self.alpha) * ema_data['variance'] + self.alpha * delta * delta
+            
+            # 更新统计信息
+            ema_data['count'] += 1
+            ema_data['last_updated'] = time.time()
+            
+            # 写回共享字典
+            self.shared_dict[key] = ema_data
+            
+            std_dev = ema_data['variance'] ** 0.5 if ema_data['variance'] > 0 else 0.0
+            logger.debug(f"更新EMA {key}: 新值={new_value:.6f}, EMA={ema_data['value']:.6f}, 标准差={std_dev:.6f}")
+    
+    def get_ema_value(self, key: str) -> Optional[float]:
+        """
+        获取指定键的EMA值
+        
+        Args:
+            key: EMA键名
+            
+        Returns:
+            float: EMA值，如果未初始化返回None
+        """
+        if key not in self.shared_dict:
+            return None
+            
+        ema_data = self.shared_dict[key]
+        if not ema_data['is_initialized']:
+            return None
+            
+        return ema_data['value']
+    
+    def get_ema_std(self, key: str) -> Optional[float]:
+        """
+        获取指定键的EMA标准差
+        
+        Args:
+            key: EMA键名
+            
+        Returns:
+            float: 标准差值，如果未初始化返回None
+        """
+        if key not in self.shared_dict:
+            return None
+            
+        ema_data = self.shared_dict[key]
+        if not ema_data['is_initialized'] or ema_data['variance'] <= 0:
+            return None
+            
+        return ema_data['variance'] ** 0.5
+    
+    def get_ema_info(self, key: str) -> Optional[Dict[str, Any]]:
+        """
+        获取指定键的完整EMA信息
+        
+        Args:
+            key: EMA键名
+            
+        Returns:
+            dict: 包含value, count, std等完整信息的字典
+        """
+        if key not in self.shared_dict:
+            return None
+            
+        ema_data = dict(self.shared_dict[key])
+        ema_data['std'] = ema_data['variance'] ** 0.5 if ema_data['variance'] > 0 else 0.0
+        return ema_data
+    
+    def is_warmup_complete(self) -> bool:
+        """检查预热期是否完成"""
+        return self.shared_dict['global_episode_count'] >= self.warmup_episodes
+    
+    def increment_episode_count(self) -> int:
+        """增加全局episode计数并返回当前值"""
+        with self.update_lock:
+            self.shared_dict['global_episode_count'] += 1
+            self.shared_dict['total_episodes'] += 1
+            return self.shared_dict['global_episode_count']
+    
+    def get_episode_count(self) -> int:
+        """获取当前的全局episode计数"""
+        return self.shared_dict['global_episode_count']
+    
+    def get_statistics(self) -> Dict[str, Any]:
+        """
+        获取所有共享状态的统计信息
+        
+        Returns:
+            dict: 包含所有EMA状态和全局统计信息
+        """
+        stats = {
+            'global_episode_count': self.shared_dict['global_episode_count'],
+            'total_episodes': self.shared_dict['total_episodes'],
+            'warmup_complete': self.is_warmup_complete(),
+            'uptime_seconds': time.time() - self.shared_dict['start_time'],
+            'ema_states': {}
+        }
+        
+        # 收集所有EMA状态信息
+        for key in self.shared_dict:
+            if isinstance(self.shared_dict[key], dict) and 'value' in self.shared_dict[key]:
+                stats['ema_states'][key] = self.get_ema_info(key)
+        
+        return stats
+    
+    def reset(self):
+        """重置所有状态（主要用于测试）"""
+        with self.update_lock:
+            logger.info("重置SharedStateManager状态")
+            self._init_ema_states()
+            self.shared_dict['global_episode_count'] = 0
+            self.shared_dict['total_episodes'] = 0
+            self.shared_dict['start_time'] = time.time()
+    
+    def update_time_cost_baseline(self, time_cost: float) -> None:
+        """更新时间成本基线的便捷方法"""
+        self.update_ema('time_cost_baseline', time_cost)
+    
+    def update_adjacency_baseline(self, adjacency_reward: float) -> None:
+        """更新相邻性奖励基线的便捷方法"""
+        self.update_ema('adjacency_reward_baseline', adjacency_reward)
+    
+    def update_area_match_baseline(self, area_match_score: float) -> None:
+        """更新面积匹配基线的便捷方法"""
+        self.update_ema('area_match_baseline', area_match_score)
+    
+    def update_total_reward_baseline(self, total_reward: float) -> None:
+        """更新总奖励基线的便捷方法"""
+        self.update_ema('total_reward_baseline', total_reward)
+    
+    def get_time_cost_baseline(self) -> Optional[float]:
+        """获取时间成本基线的便捷方法"""
+        return self.get_ema_value('time_cost_baseline')
+    
+    def get_adjacency_baseline(self) -> Optional[float]:
+        """获取相邻性奖励基线的便捷方法"""
+        return self.get_ema_value('adjacency_reward_baseline')
+    
+    def get_area_match_baseline(self) -> Optional[float]:
+        """获取面积匹配基线的便捷方法"""
+        return self.get_ema_value('area_match_baseline')
+    
+    def get_total_reward_baseline(self) -> Optional[float]:
+        """获取总奖励基线的便捷方法"""
+        return self.get_ema_value('total_reward_baseline')
+
+
+# 全局实例（延迟初始化）
+_global_shared_state_manager = None
+
+
+def get_shared_state_manager(alpha: float = 0.1, warmup_episodes: int = 100) -> SharedStateManager:
+    """
+    获取全局共享状态管理器实例
+    
+    Args:
+        alpha: EMA平滑因子（仅在首次调用时有效）
+        warmup_episodes: 预热期episodes数量（仅在首次调用时有效）
+        
+    Returns:
+        SharedStateManager: 全局实例
+    """
+    global _global_shared_state_manager
+    
+    if _global_shared_state_manager is None:
+        _global_shared_state_manager = SharedStateManager(alpha=alpha, warmup_episodes=warmup_episodes)
+    
+    return _global_shared_state_manager
+
+
+def reset_shared_state_manager():
+    """重置全局共享状态管理器（主要用于测试）"""
+    global _global_shared_state_manager
+    if _global_shared_state_manager is not None:
+        _global_shared_state_manager.reset()
+</file>
+
+<file path="src/rl_optimizer/utils/tensorboard_callback.py">
+# src/rl_optimizer/utils/tensorboard_callback.py
+
+
+from stable_baselines3.common.callbacks import BaseCallback
+
+from src.rl_optimizer.utils.shared_state_manager import get_shared_state_manager
+from src.rl_optimizer.utils.setup import setup_logger
+
+logger = setup_logger(__name__)
+
+
+class TensorboardBaselineCallback(BaseCallback):
+    """
+    自定义回调，用于将baseline指标记录到tensorboard
+    """
+    
+    def __init__(
+        self,
+        log_freq: int = 1000,
+        verbose: int = 1
+    ):
+        """
+        初始化tensorboard baseline回调
+        
+        Args:
+            log_freq (int): 每多少步记录一次指标
+            verbose (int): 日志详细级别
+        """
+        super().__init__(verbose)
+        self.log_freq = log_freq
+        self.shared_state = get_shared_state_manager()
+        
+    def _init_callback(self) -> None:
+        """初始化回调"""
+        pass
+        
+    def _on_step(self) -> bool:
+        """每个训练步后的回调"""
+        if self.n_calls % self.log_freq == 0:
+            self._log_baseline_metrics()
+        return True
+        
+    def _log_baseline_metrics(self) -> None:
+        """记录baseline指标到tensorboard"""
+        try:
+            # 获取各种baseline指标
+            time_cost_baseline = self.shared_state.get_time_cost_baseline()
+            adjacency_baseline = self.shared_state.get_adjacency_baseline()
+            area_match_baseline = self.shared_state.get_area_match_baseline()
+            total_reward_baseline = self.shared_state.get_total_reward_baseline()
+            
+            # 记录到tensorboard
+            if time_cost_baseline is not None:
+                self.logger.record("baseline/time_cost_baseline", time_cost_baseline)
+                
+            if adjacency_baseline is not None:
+                self.logger.record("baseline/adjacency_baseline", adjacency_baseline)
+                
+            if area_match_baseline is not None:
+                self.logger.record("baseline/area_match_baseline", area_match_baseline)
+                
+            if total_reward_baseline is not None:
+                self.logger.record("baseline/total_reward_baseline", total_reward_baseline)
+                
+        except Exception as e:
+            logger.error(f"记录baseline指标时发生错误: {e}", exc_info=True)
+</file>
+
+<file path="src/rl_optimizer/env/adjacency_reward_calculator.py">
+# src/rl_optimizer/env/adjacency_reward_calculator.py
+
+import numpy as np
+import scipy.sparse as sp
+from typing import List, Dict, Tuple, Optional
+from functools import lru_cache
+import time
+
+from src.config import RLConfig
+from src.algorithms.constraint_manager import ConstraintManager
+from src.rl_optimizer.utils.setup import setup_logger
+
+# @dataclass
+# class AdjacencyMetrics:
+#     """相邻性奖励计算的性能指标数据类。"""
+#     total_time: float = 0.0
+#     spatial_time: float = 0.0
+#     functional_time: float = 0.0
+#     connectivity_time: float = 0.0
+#     cache_hits: int = 0
+#     cache_misses: int = 0
+#     computation_count: int = 0
+
+class AdjacencyRewardCalculator:
+    """
+    相邻性奖励计算器。
+    """
+    
+    def __init__(self, config: RLConfig, placeable_depts: List[str], 
+                 travel_times_matrix, constraint_manager: ConstraintManager):
+        self.config = config
+        self.placeable_depts = placeable_depts
+        self.dept_to_idx = {dept: idx for idx, dept in enumerate(placeable_depts)}
+        self.dept_to_idx[None] = -1
+        self.num_depts = len(placeable_depts)
+
+        self.placeable_slots = constraint_manager.placeable_slots
+        self.num_slots = len(self.placeable_slots)
+
+        self.travel_times_matrix = travel_times_matrix
+
+        self.logger = setup_logger(__name__)
+
+        self.functional_preference_matrix = self._precompute_functional_preference_matrix()
+
+        self.slot_adjacency_matrix = self._precompute_slot_adjacency_matrix()
+
+        self.logger.info(f"动态相邻性奖励计算器初始化完成。")
+
+    def _precompute_functional_preference_matrix(self):
+        """
+        预计算功能偏好矩阵。
+        """
+        matrix  = np.zeros((self.num_depts, self.num_depts), dtype=np.float32)
+        for i, dept1 in enumerate(self.placeable_depts):
+            generic1 = dept1.split('_')[0]
+            for j, dept2 in enumerate(self.placeable_depts):
+                if i != j:
+                    generic2 = dept2.split('_')[0]
+                    pref = self.config.MEDICAL_ADJACENCY_PREFERENCES.get(generic1, {}).get(generic2, 0)
+                    if pref == 0:
+                        pref = self.config.MEDICAL_ADJACENCY_PREFERENCES.get(generic2, {}).get(generic1, 0)
+                    matrix[i, j] = pref
+        return matrix
+    
+    def _precompute_slot_adjacency_matrix(self):
+        """
+        预计算槽位之间的空间相邻强度矩阵（使用连续强度值）。
+        返回值: (N_slots, N_slots) 的矩阵，存储槽位间的相邻强度(0到1)。
+        由于当前通行时间矩阵包含科室就诊时间，空间相邻性奖励不建议使用
+        """
+
+        slot_names = self.placeable_slots
+        distance_matrix = self.travel_times_matrix.loc[slot_names, slot_names].values
+
+        uppper_triangle = distance_matrix[np.triu_indices_from(distance_matrix, k=1)]
+        valid_distances = uppper_triangle[uppper_triangle > 0]
+
+        if len(valid_distances) == 0:
+            self.logger.warning("所有槽位间的距离均为零，无法计算空间相邻强度。")
+            return np.zeros((self.num_slots, self.num_slots), dtype=np.float32)
+        
+        threshold = np.percentile(valid_distances, self.config.ADJACENCY_PERCENTILE_THRESHOLD * 100)
+        self.logger.info(f"空间相邻性距离阈值设为 {threshold:.2f}")
+
+        with np.errstate(divide='ignore', invalid='ignore'):
+            strength_matrix = 1.0 - (distance_matrix / threshold)
+
+        strength_matrix[distance_matrix > threshold] = 0
+        strength_matrix[distance_matrix <= 0] = 0
+        np.fill_diagonal(strength_matrix, 0)
+        strength_matrix = np.maximum(strength_matrix, 0)
+
+        self.logger.debug(f"槽位相邻强度矩阵计算完成，平均强度: {np.mean(strength_matrix):.3f}")
+
+        return strength_matrix
+    
+    @lru_cache(maxsize=1000)
+    def calculate_reward(self, layout_tuple: Tuple[Optional[str], ...]) -> float:
+        """
+        计算给定完整布局的相邻性总奖励。
+        
+        Args:
+            layout_tuple: 一个元组，长度为槽位数。每个元素是科室名称或None。
+                          例如: ('儿科_10006', '全科_10004', None, ...)
+        
+        Returns:
+            综合相邻性奖励分数。
+        """
+        if len(layout_tuple) != self.num_slots:
+            self.logger.error(f"布局长度 ({len(layout_tuple)}) 与槽位数 ({self.num_slots}) 不匹配。")
+            return 0.0
+        
+        dept_indices_in_layout = np.array([self.dept_to_idx[dept] for dept in layout_tuple], dtype=np.int32)
+
+        slot_i_indices, slot_j_indices = np.meshgrid(np.arange(self.num_slots), np.arange(self.num_slots), indexing='ij')
+
+        slot_adjacency_values = self.slot_adjacency_matrix[slot_i_indices, slot_j_indices]
+
+        depts_at_i = dept_indices_in_layout[slot_i_indices]
+        depts_at_j = dept_indices_in_layout[slot_j_indices]
+
+        valid_pair_mask = (depts_at_i >= 0) & (depts_at_j >= 0) & (depts_at_i != depts_at_j)
+
+        functional_pref_values = np.zeros_like(depts_at_i, dtype=np.float32)
+        valid_depts_at_i = depts_at_i[valid_pair_mask]
+        valid_depts_at_j = depts_at_j[valid_pair_mask]
+        functional_pref_values[valid_pair_mask] = self.functional_preference_matrix[valid_depts_at_i, valid_depts_at_j]
+
+        pair_scores = functional_pref_values * slot_adjacency_values
+
+        total_score = np.sum(np.triu(pair_scores, k=1))
+
+        num_valid_pairs = np.sum(np.triu(valid_pair_mask, k=1))
+        if num_valid_pairs == 0:
+            return 0.0
+        
+        normalized_score = total_score / num_valid_pairs
+        
+        final_reward = normalized_score * self.config.ADJACENCY_REWARD_BASE
+        
+        self.logger.info(f"动态相邻性奖励计算: 总分={total_score:.3f}, 有效对数={num_valid_pairs}, 归一化分={normalized_score:.3f}, 最终奖励={final_reward:.3f}")
+
+        return {'total_reward': final_reward}
+    
+def create_adjacency_calculator(config: RLConfig, placeable_depts: List[str], 
+                               travel_times_matrix, constraint_manager: ConstraintManager) -> AdjacencyRewardCalculator:
+    return AdjacencyRewardCalculator(
+            config=config,
+            placeable_depts=placeable_depts,
+            travel_times_matrix=travel_times_matrix,
+            constraint_manager=constraint_manager
         )
 </file>
 
@@ -4464,227 +4239,6 @@ class CacheManager:
         "base_weight": 1.0
     }
 ]
-</file>
-
-<file path="src/rl_optimizer/env/cost_calculator.py">
-# src/rl_optimizer/env/cost_calculator.py
-
-import numpy as np
-import pandas as pd
-from scipy.sparse import dok_matrix, csr_matrix
-from typing import List, Dict, Tuple, Any
-from collections import defaultdict, OrderedDict
-import itertools
-
-from src.config import RLConfig
-from src.rl_optimizer.utils.setup import setup_logger, load_pickle, save_pickle
-
-logger = setup_logger(__name__)
-
-class LRUCache:
-    """
-    简单的LRU缓存实现，用于限制缓存大小
-    """
-    def __init__(self, max_size: int = 1000):
-        self.cache = OrderedDict()
-        self.max_size = max_size
-    
-    def get(self, key: tuple) -> Any:
-        """获取缓存值，并将其移到最近使用位置"""
-        if key not in self.cache:
-            return None
-        # 移到最近使用位置
-        self.cache.move_to_end(key)
-        return self.cache[key]
-    
-    def put(self, key: tuple, value: Any):
-        """设置缓存值"""
-        if key in self.cache:
-            # 如果已存在，移到最近使用位置
-            self.cache.move_to_end(key)
-        else:
-            # 如果缓存已满，删除最久未使用的项
-            if len(self.cache) >= self.max_size:
-                self.cache.popitem(last=False)
-            self.cache[key] = value
-    
-    def clear(self):
-        """清空缓存"""
-        self.cache.clear()
-    
-    def size(self) -> int:
-        """返回缓存大小"""
-        return len(self.cache)
-
-
-class CostCalculator:
-    """
-    一个高效的成本计算器，用于评估给定布局下的加权总通行时间。
-    它通过预计算一个稀疏矩阵来实现高性能计算。
-    """
-
-    def __init__(self, 
-                 config: RLConfig, 
-                 resolved_pathways: List[Dict[str, Any]], 
-                 travel_times: pd.DataFrame, 
-                 placeable_slots: List[str],
-                 placeable_departments: List[str]):
-        """
-        初始化成本计算器。
-
-        Args:
-            config (RLConfig): RL优化器的配置对象。
-            resolved_pathways (List[Dict]): 已解析的流线字典列表。
-            travel_times (pd.DataFrame): 纯通行时间矩阵，其行列为原始节点名。
-            placeable_slots (List[str]): 可用物理槽位的原始节点名称列表。
-            placeable_departments (List[str]): 所有需要被布局的科室的完整列表。
-        """
-        self.config = config
-        self.travel_times = travel_times
-        self.max_taravel_time = travel_times.values.max()
-        self.placeable_slots = placeable_slots
-        self.num_slots = len(placeable_slots)
-        
-        self.dept_list = sorted(placeable_departments)
-        self.pair_to_col, self.num_dept_pairs = self._create_dept_pair_mapping()
-        
-        self.M, self.W, self.pathway_to_process_id = self._build_cost_matrices(resolved_pathways)
-        
-        # 初始化LRU缓存，限制缓存大小以防止内存泄漏
-        cache_size = getattr(config, 'COST_CACHE_SIZE', 1000)
-        self._cost_cache = LRUCache(max_size=cache_size)
-        self._time_vector_cache = LRUCache(max_size=cache_size // 2)
-        
-        logger.info(f"成本计算器初始化完成，LRU缓存大小: {cache_size}")
-
-    def _create_dept_pair_mapping(self) -> Tuple[Dict[Tuple[str, str], int], int]:
-        """创建科室对到列索引的映射。"""
-        dept_pairs = list(itertools.permutations(self.dept_list, 2))
-        return {pair: i for i, pair in enumerate(dept_pairs)}, len(dept_pairs)
-    
-    def _build_cost_matrices(self, pathways: List[Dict[str, Any]]) -> Tuple[csr_matrix, np.ndarray, List[str]]:
-        """构建成本矩阵。"""
-        num_pathways = len(pathways)
-        pathway_to_process_id = [p['process_id'] for p in pathways]
-        
-        M_dok = dok_matrix((num_pathways, self.num_dept_pairs), dtype=np.float32)
-        W_arr = np.zeros(num_pathways, dtype=np.float32)
-
-        for i, p_data in enumerate(pathways):
-            path = p_data['path']
-            W_arr[i] = p_data['weight']
-            for j in range(len(path) - 1):
-                pair = (path[j], path[j+1])
-                if pair in self.pair_to_col:
-                    M_dok[i, self.pair_to_col[pair]] += 1
-        
-        return M_dok.tocsr(), W_arr, pathway_to_process_id
-    
-    def calculate_total_cost(self, layout: List[str]) -> float:
-        """
-        给定一个布局，高效计算总加权通行时间（使用LRU缓存优化）。
-
-        Args:
-            layout (List[str]): 一个表示当前布局的科室名称列表。
-                               其索引对应于 self.placeable_nodes 的索引。
-
-        Returns:
-            float: 计算出的总加权成本。
-        """
-        # 创建布局的元组作为缓存键
-        layout_key = tuple(layout)
-        
-        # 检查缓存
-        cached_cost = self._cost_cache.get(layout_key)
-        if cached_cost is not None:
-            return cached_cost
-        
-        # 计算成本
-        time_vector = self._get_time_vector(layout)
-        time_per_pathway = self.M.dot(time_vector)
-        total_cost = time_per_pathway.dot(self.W)
-        total_cost = float(total_cost)
-        
-        # 存入缓存
-        self._cost_cache.put(layout_key, total_cost)
-        
-        return total_cost
-    
-    def calculate_per_process_cost(self, layout: List[str]) -> Dict[str, float]:
-        """
-        评估每个就医流程模板的单独通行时间（未加权）。
-        """
-        time_vector = self._get_time_vector(layout)
-        time_per_pathway = self.M.dot(time_vector)
-        
-        process_costs = defaultdict(float)
-        # 遍历所有流线，将它们的时间累加到对应的流程模板上
-        for i, process_id in enumerate(self.pathway_to_process_id):
-            process_costs[process_id] += time_per_pathway[i]
-            
-        return dict(process_costs)
-    
-    def _get_time_vector(self, layout: List[str]) -> np.ndarray:
-        """
-        内部辅助函数，根据布局计算所有科室对的通行时间向量（使用LRU缓存优化）。
-        
-        Args:
-            layout: 科室名称列表。可以是：
-                   1. 完整布局（长度=槽位数，包含None）
-                   2. 仅已放置科室的列表（不包含None）
-        """
-        # 创建布局的元组作为缓存键
-        layout_key = tuple(layout)
-        
-        # 检查缓存
-        cached_vector = self._time_vector_cache.get(layout_key)
-        if cached_vector is not None:
-            return cached_vector
-        
-        time_vector = np.zeros(self.num_dept_pairs, dtype=np.float32)
-
-        # 判断layout是完整布局还是仅已放置科室
-        if len(layout) == self.num_slots:
-            # 完整布局：索引对应槽位
-            dept_to_slot_node = {dept: self.placeable_slots[i] for i, dept in enumerate(layout) if dept is not None}
-        else:
-            # 仅已放置科室：需要为每个科室分配一个虚拟槽位
-            # 使用科室名本身作为节点名（简化处理）
-            dept_to_slot_node = {dept: dept for dept in layout if dept is not None}
-
-        # 遍历所有需要计算时间的科室对
-        for pair, col_idx in self.pair_to_col.items():
-            dept_from, dept_to = pair
-            
-            # 查找科室所在的原始节点名
-            node_from = dept_to_slot_node.get(dept_from)
-            node_to = dept_to_slot_node.get(dept_to)
-            
-            try:
-                time_vector[col_idx] = self.travel_times.loc[node_from, node_to]
-            except KeyError as e:
-                # 错误处理：如果找不到节点对，使用默认值
-                default_penalty = self.max_taravel_time
-                logger.warning(f"找不到节点对 {node_from}->{node_to} 的行程时间，使用最大通行值{default_penalty}")
-                time_vector[col_idx] = default_penalty
-        
-        # 存入缓存
-        self._time_vector_cache.put(layout_key, time_vector)
-        
-        return time_vector
-    
-    def clear_cache(self):
-        """清空所有缓存"""
-        self._cost_cache.clear()
-        self._time_vector_cache.clear()
-        logger.info("成本计算器缓存已清空")
-    
-    def get_cache_stats(self) -> Dict[str, int]:
-        """获取缓存统计信息"""
-        return {
-            'cost_cache_size': self._cost_cache.size(),
-            'time_vector_cache_size': self._time_vector_cache.size()
-        }
 </file>
 
 <file path="src/rl_optimizer/env/vec_env_wrapper.py">
@@ -6573,6 +6127,227 @@ class GraphManager:
         "骨科_20009": 1.0
     }
 }
+</file>
+
+<file path="src/rl_optimizer/env/cost_calculator.py">
+# src/rl_optimizer/env/cost_calculator.py
+
+import numpy as np
+import pandas as pd
+from scipy.sparse import dok_matrix, csr_matrix
+from typing import List, Dict, Tuple, Any
+from collections import defaultdict, OrderedDict
+import itertools
+
+from src.config import RLConfig
+from src.rl_optimizer.utils.setup import setup_logger, load_pickle, save_pickle
+
+logger = setup_logger(__name__)
+
+class LRUCache:
+    """
+    简单的LRU缓存实现，用于限制缓存大小
+    """
+    def __init__(self, max_size: int = 1000):
+        self.cache = OrderedDict()
+        self.max_size = max_size
+    
+    def get(self, key: tuple) -> Any:
+        """获取缓存值，并将其移到最近使用位置"""
+        if key not in self.cache:
+            return None
+        # 移到最近使用位置
+        self.cache.move_to_end(key)
+        return self.cache[key]
+    
+    def put(self, key: tuple, value: Any):
+        """设置缓存值"""
+        if key in self.cache:
+            # 如果已存在，移到最近使用位置
+            self.cache.move_to_end(key)
+        else:
+            # 如果缓存已满，删除最久未使用的项
+            if len(self.cache) >= self.max_size:
+                self.cache.popitem(last=False)
+            self.cache[key] = value
+    
+    def clear(self):
+        """清空缓存"""
+        self.cache.clear()
+    
+    def size(self) -> int:
+        """返回缓存大小"""
+        return len(self.cache)
+
+
+class CostCalculator:
+    """
+    一个高效的成本计算器，用于评估给定布局下的加权总通行时间。
+    它通过预计算一个稀疏矩阵来实现高性能计算。
+    """
+
+    def __init__(self, 
+                 config: RLConfig, 
+                 resolved_pathways: List[Dict[str, Any]], 
+                 travel_times: pd.DataFrame, 
+                 placeable_slots: List[str],
+                 placeable_departments: List[str]):
+        """
+        初始化成本计算器。
+
+        Args:
+            config (RLConfig): RL优化器的配置对象。
+            resolved_pathways (List[Dict]): 已解析的流线字典列表。
+            travel_times (pd.DataFrame): 纯通行时间矩阵，其行列为原始节点名。
+            placeable_slots (List[str]): 可用物理槽位的原始节点名称列表。
+            placeable_departments (List[str]): 所有需要被布局的科室的完整列表。
+        """
+        self.config = config
+        self.travel_times = travel_times
+        self.max_taravel_time = travel_times.values.max()
+        self.placeable_slots = placeable_slots
+        self.num_slots = len(placeable_slots)
+        
+        self.dept_list = sorted(placeable_departments)
+        self.pair_to_col, self.num_dept_pairs = self._create_dept_pair_mapping()
+        
+        self.M, self.W, self.pathway_to_process_id = self._build_cost_matrices(resolved_pathways)
+        
+        # 初始化LRU缓存，限制缓存大小以防止内存泄漏
+        cache_size = getattr(config, 'COST_CACHE_SIZE', 1000)
+        self._cost_cache = LRUCache(max_size=cache_size)
+        self._time_vector_cache = LRUCache(max_size=cache_size // 2)
+        
+        logger.info(f"成本计算器初始化完成，LRU缓存大小: {cache_size}")
+
+    def _create_dept_pair_mapping(self) -> Tuple[Dict[Tuple[str, str], int], int]:
+        """创建科室对到列索引的映射。"""
+        dept_pairs = list(itertools.permutations(self.dept_list, 2))
+        return {pair: i for i, pair in enumerate(dept_pairs)}, len(dept_pairs)
+    
+    def _build_cost_matrices(self, pathways: List[Dict[str, Any]]) -> Tuple[csr_matrix, np.ndarray, List[str]]:
+        """构建成本矩阵。"""
+        num_pathways = len(pathways)
+        pathway_to_process_id = [p['process_id'] for p in pathways]
+        
+        M_dok = dok_matrix((num_pathways, self.num_dept_pairs), dtype=np.float32)
+        W_arr = np.zeros(num_pathways, dtype=np.float32)
+
+        for i, p_data in enumerate(pathways):
+            path = p_data['path']
+            W_arr[i] = p_data['weight']
+            for j in range(len(path) - 1):
+                pair = (path[j], path[j+1])
+                if pair in self.pair_to_col:
+                    M_dok[i, self.pair_to_col[pair]] += 1
+        
+        return M_dok.tocsr(), W_arr, pathway_to_process_id
+    
+    def calculate_total_cost(self, layout: List[str]) -> float:
+        """
+        给定一个布局，高效计算总加权通行时间（使用LRU缓存优化）。
+
+        Args:
+            layout (List[str]): 一个表示当前布局的科室名称列表。
+                               其索引对应于 self.placeable_nodes 的索引。
+
+        Returns:
+            float: 计算出的总加权成本。
+        """
+        # 创建布局的元组作为缓存键
+        layout_key = tuple(layout)
+        
+        # 检查缓存
+        cached_cost = self._cost_cache.get(layout_key)
+        if cached_cost is not None:
+            return cached_cost
+        
+        # 计算成本
+        time_vector = self._get_time_vector(layout)
+        time_per_pathway = self.M.dot(time_vector)
+        total_cost = time_per_pathway.dot(self.W)
+        total_cost = float(total_cost)
+        
+        # 存入缓存
+        self._cost_cache.put(layout_key, total_cost)
+        
+        return total_cost
+    
+    def calculate_per_process_cost(self, layout: List[str]) -> Dict[str, float]:
+        """
+        评估每个就医流程模板的单独通行时间（未加权）。
+        """
+        time_vector = self._get_time_vector(layout)
+        time_per_pathway = self.M.dot(time_vector)
+        
+        process_costs = defaultdict(float)
+        # 遍历所有流线，将它们的时间累加到对应的流程模板上
+        for i, process_id in enumerate(self.pathway_to_process_id):
+            process_costs[process_id] += time_per_pathway[i]
+            
+        return dict(process_costs)
+    
+    def _get_time_vector(self, layout: List[str]) -> np.ndarray:
+        """
+        内部辅助函数，根据布局计算所有科室对的通行时间向量（使用LRU缓存优化）。
+        
+        Args:
+            layout: 科室名称列表。可以是：
+                   1. 完整布局（长度=槽位数，包含None）
+                   2. 仅已放置科室的列表（不包含None）
+        """
+        # 创建布局的元组作为缓存键
+        layout_key = tuple(layout)
+        
+        # 检查缓存
+        cached_vector = self._time_vector_cache.get(layout_key)
+        if cached_vector is not None:
+            return cached_vector
+        
+        time_vector = np.zeros(self.num_dept_pairs, dtype=np.float32)
+
+        # 判断layout是完整布局还是仅已放置科室
+        if len(layout) == self.num_slots:
+            # 完整布局：索引对应槽位
+            dept_to_slot_node = {dept: self.placeable_slots[i] for i, dept in enumerate(layout) if dept is not None}
+        else:
+            # 仅已放置科室：需要为每个科室分配一个虚拟槽位
+            # 使用科室名本身作为节点名（简化处理）
+            dept_to_slot_node = {dept: dept for dept in layout if dept is not None}
+
+        # 遍历所有需要计算时间的科室对
+        for pair, col_idx in self.pair_to_col.items():
+            dept_from, dept_to = pair
+            
+            # 查找科室所在的原始节点名
+            node_from = dept_to_slot_node.get(dept_from)
+            node_to = dept_to_slot_node.get(dept_to)
+            
+            try:
+                time_vector[col_idx] = self.travel_times.loc[node_from, node_to]
+            except KeyError as e:
+                # 错误处理：如果找不到节点对，使用默认值
+                default_penalty = self.max_taravel_time
+                logger.debug(f"找不到节点对 {node_from}->{node_to} 的行程时间，使用最大通行值{default_penalty}")
+                time_vector[col_idx] = default_penalty
+        
+        # 存入缓存
+        self._time_vector_cache.put(layout_key, time_vector)
+        
+        return time_vector
+    
+    def clear_cache(self):
+        """清空所有缓存"""
+        self._cost_cache.clear()
+        self._time_vector_cache.clear()
+        logger.info("成本计算器缓存已清空")
+    
+    def get_cache_stats(self) -> Dict[str, int]:
+        """获取缓存统计信息"""
+        return {
+            'cost_cache_size': self._cost_cache.size(),
+            'time_vector_cache_size': self._time_vector_cache.size()
+        }
 </file>
 
 <file path="src/algorithms/genetic_algorithm.py">
@@ -9928,333 +9703,6 @@ class ConnectionNodeCreator(BaseNodeCreator):
                             self.graph_manager.connect_nodes_by_ids(conn_node.id, target_node.id)
 </file>
 
-<file path="src/rl_optimizer/agent/ppo_agent.py">
-# src/rl_optimizer/agent/ppo_agent.py
-
-import torch
-from pathlib import Path
-from stable_baselines3.common.vec_env import VecNormalize
-from stable_baselines3.common.env_util import make_vec_env
-from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback as EvalCallback
-from sb3_contrib import MaskablePPO
-from sb3_contrib.common.wrappers import ActionMasker
-from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
-from typing import Dict, Any, List
-import numpy as np
-import time
-
-from src.config import RLConfig
-from src.rl_optimizer.data.cache_manager import CacheManager
-from src.rl_optimizer.env.cost_calculator import CostCalculator
-from src.rl_optimizer.env.layout_env import LayoutEnv
-from src.rl_optimizer.model.policy_network import LayoutTransformer
-from src.rl_optimizer.utils.setup import setup_logger, save_json
-from src.rl_optimizer.utils.lr_scheduler import get_lr_scheduler
-from src.rl_optimizer.utils.checkpoint_callback import CheckpointCallback
-
-logger = setup_logger(__name__)
-
-def get_action_mask_from_info(infos: List[Dict]) -> np.ndarray:
-    """
-    一个辅助函数，用于从矢量化环境的info字典列表中提取动作掩码。
-    这是为了适配 `stable-baselines3` 的 `ActionMasker` 包装器。
-
-    Args:
-        infos (List[Dict]): 来自矢量化环境的info字典列表。
-
-    Returns:
-        np.ndarray: 合法的动作掩码堆叠成的数组。
-    """
-    return np.array([info.get("action_mask", []) for info in infos])
-
-class PPOAgent:
-    """
-    PPO智能体，负责编排整个强化学习训练和评估流程。
-
-    它使用stable-baselines3和sb3-contrib库来高效地实现MaskablePPO算法，
-    该算法能够处理带有动作掩码的复杂决策问题。
-    """
-
-    def __init__(self, config: RLConfig, cache_manager: CacheManager, cost_calculator: CostCalculator):
-        """
-        初始化PPO智能体。
-
-        Args:
-            config (RLConfig): RL优化器的配置对象。
-            cache_manager (CacheManager): 已初始化的数据缓存管理器。
-            cost_calculator (CostCalculator): 已初始化的成本计算器。
-        """
-        self.config = config
-        self.cm = cache_manager
-        self.cc = cost_calculator
-
-        # 将所有需要传递给环境的参数打包成一个字典
-        self.env_kwargs = {
-            "config": self.config,
-            "cache_manager": self.cm,
-            "cost_calculator": self.cc
-        }
-
-    def _check_for_resume(self) -> tuple[str, int]:
-        """
-        检查是否需要从checkpoint恢复训练。
-        
-        Returns:
-            tuple: (模型路径, 已完成的训练步数)，如果不需要恢复则返回 (None, 0)
-        """
-        if not self.config.RESUME_TRAINING:
-            return None, 0
-            
-        if self.config.PRETRAINED_MODEL_PATH:
-            # 使用指定的预训练模型路径
-            model_path = Path(self.config.PRETRAINED_MODEL_PATH)
-            if not model_path.exists():
-                logger.warning(f"指定的预训练模型不存在: {model_path}")
-                return None, 0
-        else:
-            # 自动查找最新的checkpoint
-            checkpoint_callback = CheckpointCallback(
-                save_freq=1,  # 临时值，仅用于查找checkpoint
-                save_path=self.config.LOG_PATH
-            )
-            model_path = checkpoint_callback.get_latest_checkpoint()
-            if not model_path:
-                logger.info("未找到可用的checkpoint，将开始全新训练")
-                return None, 0
-                
-        # 尝试加载checkpoint元数据获取训练进度
-        metadata = CheckpointCallback.load_checkpoint_metadata(model_path)
-        completed_steps = 0
-        if metadata:
-            completed_steps = metadata.get("training_progress", {}).get("num_timesteps", 0)
-            logger.info(f"从checkpoint恢复训练，已完成步数: {completed_steps}")
-        else:
-            logger.warning("无法加载checkpoint元数据，从步数0开始")
-            
-        return str(model_path), completed_steps
-        
-    def _load_pretrained_model(self, model_path: str, vec_env) -> MaskablePPO:
-        """
-        加载预训练模型并准备继续训练。
-        
-        Args:
-            model_path (str): 模型文件路径
-            vec_env: 矢量化环境
-            
-        Returns:
-            MaskablePPO: 加载的模型实例
-        """
-        logger.info(f"正在加载预训练模型: {model_path}")
-        
-        try:
-            # 加载模型
-            model = MaskablePPO.load(
-                model_path,
-                env=vec_env,
-                device='cuda' if torch.cuda.is_available() else 'cpu'
-            )
-            
-            # 重新设置学习率调度器（如果需要）
-            if hasattr(model, 'lr_schedule'):
-                lr_scheduler = get_lr_scheduler(
-                    schedule_type=self.config.LEARNING_RATE_SCHEDULE_TYPE,
-                    initial_lr=self.config.LEARNING_RATE_INITIAL,
-                    final_lr=self.config.LEARNING_RATE_FINAL
-                )
-                model.lr_schedule = lr_scheduler
-                logger.info("学习率调度器已重新设置")
-                
-            logger.info("预训练模型加载成功")
-            return model
-            
-        except Exception as e:
-            logger.error(f"加载预训练模型失败: {e}")
-            raise
-
-    def train(self):
-        """
-        执行PPO智能体的完整训练流程，包括环境创建、模型初始化、训练过程、评估回调和模型保存。
-        
-        支持断点续训：如果配置了RESUME_TRAINING=True，将自动检查并加载最新的checkpoint继续训练。
-        训练过程中会自动创建并行矢量化环境，配置自定义特征提取器和网络结构，定期评估并保存最佳模型，最终保存完整训练后的模型至指定目录。支持手动中断训练并安全保存当前模型进度。
-        """
-        logger.info("开始配置和启动PPO训练流程...")
-        timestamp = time.strftime("%Y%m%d-%H%M%S")
-        log_dir = self.config.LOG_PATH / f"ppo_layout_{timestamp}"
-        result_dir = self.config.RESULT_PATH / f"ppo_layout_{timestamp}"
-
-        # 检查是否需要从checkpoint恢复
-        resume_model_path, completed_steps = self._check_for_resume()
-        if resume_model_path:
-            logger.info(f"将从checkpoint恢复训练: {resume_model_path}")
-            # 如果是恢复训练，使用原有的日志目录结构
-            checkpoint_path = Path(resume_model_path)
-            if "ppo_layout_" in checkpoint_path.parent.name:
-                log_dir = checkpoint_path.parent
-                result_dir = self.config.RESULT_PATH / checkpoint_path.parent.name
-        
-        remaining_steps = max(0, self.config.TOTAL_TIMESTEPS - completed_steps)
-        if remaining_steps == 0:
-            logger.info("训练已完成，无需继续训练")
-            return
-
-        # --- 1. 创建并行化的、支持掩码的矢量化环境 ---
-        logger.info(f"正在创建 {self.config.NUM_ENVS} 个并行环境...")
-
-        # 构建单个带掩码的环境
-        vec_env = make_vec_env(
-            lambda: ActionMasker(LayoutEnv(**self.env_kwargs), LayoutEnv._action_mask_fn),
-            n_envs=self.config.NUM_ENVS
-        )
-
-        logger.info("矢量化环境创建成功。")
-
-        # --- 2. 配置PPO模型 ---
-        model = None
-        if resume_model_path:
-            # 加载预训练模型
-            model = self._load_pretrained_model(resume_model_path, vec_env)
-            logger.info(f"剩余训练步数: {remaining_steps}")
-        else:
-            # 创建新模型
-            logger.info("创建全新的PPO模型...")
-            # 创建学习率调度器
-            lr_scheduler = get_lr_scheduler(
-                schedule_type=self.config.LEARNING_RATE_SCHEDULE_TYPE,
-                initial_lr=self.config.LEARNING_RATE_INITIAL,
-                final_lr=self.config.LEARNING_RATE_FINAL
-            )
-            logger.info(f"使用学习率调度器: {self.config.LEARNING_RATE_SCHEDULE_TYPE}")
-            logger.info(f"初始学习率: {self.config.LEARNING_RATE_INITIAL}, 最终学习率: {self.config.LEARNING_RATE_FINAL}")
-            
-            # 定义策略网络的关键字参数，指定自定义的特征提取器
-            policy_kwargs = {
-                "features_extractor_class": LayoutTransformer,
-                "features_extractor_kwargs": {
-                    "config": self.config,
-                    "features_dim": self.config.FEATURES_DIM
-                },
-                # 定义Actor和Critic网络的隐藏层结构
-                "net_arch": [256, 256] 
-            }
-
-            logger.info("正在初始化MaskablePPO模型...")
-            model = MaskablePPO(
-                MaskableActorCriticPolicy,
-                vec_env,
-                policy_kwargs=policy_kwargs,
-                learning_rate=lr_scheduler,  # 使用学习率调度器
-                n_steps=self.config.NUM_STEPS,
-                batch_size=self.config.BATCH_SIZE,
-                n_epochs=self.config.NUM_EPOCHS,
-                gamma=self.config.GAMMA,
-                gae_lambda=self.config.GAE_LAMBDA,
-                clip_range=self.config.CLIP_RANGE,
-                ent_coef=self.config.ENT_COEF,
-                verbose=1,
-                tensorboard_log=str(log_dir / 'tensorboard_logs'),
-                device='cuda' if torch.cuda.is_available() else 'cpu'
-            )
-            logger.info(f"模型初始化成功，将在 {model.device.type} 设备上进行训练。")
-
-        # --- 3. 配置回调函数 ---
-        callbacks = []
-        
-        # 评估回调
-        eval_env = ActionMasker(LayoutEnv(**self.env_kwargs), LayoutEnv._action_mask_fn)
-        eval_callback = EvalCallback(
-            eval_env,
-            best_model_save_path=str(result_dir / 'best_model'),
-            log_path=str(log_dir / 'eval_logs'),
-            eval_freq=max(self.config.NUM_STEPS * 5, 2048),
-            deterministic=True,
-            render=False,
-            n_eval_episodes=20 # 评估更多回合以获得更稳定的结果
-        )
-        callbacks.append(eval_callback)
-        
-        # Checkpoint回调
-        if self.config.SAVE_TRAINING_STATE:
-            checkpoint_callback = CheckpointCallback(
-                save_freq=self.config.CHECKPOINT_FREQUENCY,
-                save_path=str(log_dir / 'checkpoints'),
-                name_prefix="checkpoint",
-                verbose=1
-            )
-            callbacks.append(checkpoint_callback)
-            logger.info(f"启用checkpoint保存，频率: 每{self.config.CHECKPOINT_FREQUENCY}步")
-
-        # --- 4. 启动训练 ---
-        logger.info(f"开始训练，剩余时间步数: {remaining_steps}...")
-        logger.info(f"日志和模型将保存在: {log_dir}")
-        try:
-            model.learn(
-                total_timesteps=remaining_steps,
-                callback=callbacks,
-                progress_bar=True,
-                reset_num_timesteps=not bool(resume_model_path)  # 如果是恢复训练则不重置计数器
-            )
-        except KeyboardInterrupt:
-            logger.warning("训练被手动中断。")
-        finally:
-            # --- 5. 保存最终模型 ---
-            final_model_path = log_dir / 'final_model.zip'
-            model.save(final_model_path)
-            logger.info(f"训练结束，最终模型已保存至: {final_model_path}")
-            vec_env.close()
-
-    def evaluate(self, model_path: str) -> Dict[str, Any]:
-        """
-        加载一个已训练好的模型，进行确定性评估并返回最优布局方案。
-
-        Args:
-            model_path (str): 已保存模型的路径 (.zip 文件)。
-
-        Returns:
-            Dict[str, Any]: 包含最优布局、总成本和各流程成本的结果字典。
-        """
-        logger.info(f"正在加载模型进行评估: {model_path}...")
-        try:
-            model = MaskablePPO.load(model_path, device='cpu')
-        except FileNotFoundError:
-            logger.error(f"模型文件未找到: {model_path}")
-            return {}
-        
-        eval_env = LayoutEnv(**self.env_kwargs)
-
-        obs, info = eval_env.reset()
-        terminated = False
-
-        while not terminated:
-            action_mask = eval_env.get_action_mask()
-            action, _states = model.predict(obs, action_masks=action_mask, deterministic=True)
-            obs, reward, terminated, _, info = eval_env.step(int(action))
-
-        final_layout_str = eval_env._get_final_layout_str()
-        total_cost = self.cc.calculate_total_cost(final_layout_str)
-        per_process_cost = self.cc.calculate_per_process_cost(final_layout_str)
-
-        # 构建最终的布局映射：槽位 -> 科室
-        final_layout_map = {
-            slot: dept for slot, dept in zip(eval_env.placeable_slots, final_layout_str)
-            if dept is not None
-        }
-
-        results = {
-            "best_layout": final_layout_map,
-            "total_weighted_cost": total_cost,
-            "per_process_unweighted_cost": per_process_cost,
-            "final_reward_from_env": reward
-        }
-
-        result_path = self.config.LOG_PATH / 'best_layout_result.json'
-        save_json(results, result_path)
-        logger.info(f"评估完成！最优布局已保存至: {result_path}")
-        logger.info(f"最优布局的总加权成本为: {total_cost:.2f}")
-
-        return results
-</file>
-
 <file path="src/plotting/plotter.py">
 """
 Defines plotter classes for visualizing network graphs using Matplotlib and Plotly.
@@ -10874,6 +10322,90 @@ class PlotlyPlotter(BasePlotter):
             fig.show()
 </file>
 
+<file path="src/network/node.py">
+"""简化的节点类，用于网络图构建"""
+
+from typing import Tuple, Optional, Dict, Any
+from src.rl_optimizer.utils.setup import setup_logger
+
+logger = setup_logger(__name__)
+
+
+class Node:
+    """
+    表示网络图中的一个节点
+    
+    存储节点的基本信息，包括位置、类型、名称等属性
+    """
+    
+    def __init__(self, 
+                 node_id: int,
+                 x: float = 0.0, 
+                 y: float = 0.0, 
+                 z: float = 0.0,
+                 node_type: str = "",
+                 name: Optional[str] = None,
+                 time: float = 1.0,
+                 color: Optional[Tuple[int, int, int]] = None,
+                 e_name: Optional[str] = None,
+                 code: Optional[str] = None,
+                 **kwargs):
+        """
+        初始化节点
+        
+        Args:
+            node_id: 节点唯一标识符
+            x, y, z: 节点的三维坐标
+            node_type: 节点类型（如房间、走廊、门等）
+            name: 节点名称
+            time: 节点通行时间
+            color: 节点颜色（RGB元组）
+            **kwargs: 其他属性
+        """
+        self.id = node_id
+        self.x = float(x)
+        self.y = float(y)
+        self.z = float(z)
+        self.node_type = node_type
+        self.name = name if name is not None else f"{node_type}_{node_id}"
+        self.time = float(time)
+        self.color = color
+        self.e_name = e_name
+        self.code = code
+
+        # 存储其他属性
+        for key, value in kwargs.items():
+            setattr(self, key, value)
+    
+    @property
+    def position(self) -> Tuple[float, float, float]:
+        """获取节点位置坐标"""
+        return (self.x, self.y, self.z)
+    
+    def __str__(self) -> str:
+        """节点的字符串表示"""
+        return f"Node(id={self.id}, type={self.node_type}, name={self.name}, pos=({self.x:.1f}, {self.y:.1f}, {self.z:.1f}))"
+    
+    def __repr__(self) -> str:
+        """节点的详细字符串表示"""
+        return self.__str__()
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """将节点转换为字典格式"""
+        return {
+            'id': self.id,
+            'x': self.x,
+            'y': self.y,
+            'z': self.z,
+            'type': self.node_type,
+            'name': self.name,
+            'time': self.time,
+            'color': self.color,
+            'e_name': self.e_name,
+            'code': self.code
+        }
+</file>
+
 <file path="src/algorithms/ppo_optimizer.py">
 """
 PPO优化器 - 基于强化学习的布局优化算法
@@ -10884,13 +10416,13 @@ import time
 import numpy as np
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-from stable_baselines3.common.vec_env import VecNormalize
 from stable_baselines3.common.env_util import make_vec_env
 from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback as EvalCallback
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
 from sb3_contrib.common.maskable.evaluation import evaluate_policy
+from stable_baselines3.common.monitor import Monitor
 
 from src.algorithms.base_optimizer import BaseOptimizer, OptimizationResult
 from src.algorithms.constraint_manager import ConstraintManager
@@ -10903,6 +10435,7 @@ from src.rl_optimizer.utils.lr_scheduler import get_lr_scheduler
 from src.rl_optimizer.utils.checkpoint_callback import CheckpointCallback
 from src.rl_optimizer.data.cache_manager import CacheManager
 from src.rl_optimizer.utils.shared_state_manager import get_shared_state_manager
+from src.rl_optimizer.utils.tensorboard_callback import TensorboardBaselineCallback
 from src.config import RLConfig
 
 logger = setup_logger(__name__)
@@ -11309,6 +10842,12 @@ class PPOOptimizer(BaseOptimizer):
         # 设置回调
         callbacks = []
         
+        # Tensorboard回调
+        tensorboard_callback = TensorboardBaselineCallback(
+        log_freq=1000,  # 每1000步记录一次
+        verbose=1
+        )
+        callbacks.append(tensorboard_callback)
         
         # Checkpoint回调
         checkpoint_callback = CheckpointCallback(
@@ -11320,7 +10859,11 @@ class PPOOptimizer(BaseOptimizer):
         
         # 评估回调
         eval_vec_env = make_vec_env(
-            lambda: ActionMasker(LayoutEnv(**self.env_kwargs), LayoutEnv._action_mask_fn),
+            lambda: Monitor(
+                ActionMasker(LayoutEnv(**self.env_kwargs), LayoutEnv._action_mask_fn),
+                allow_early_resets=True,
+                info_keywords=("time_cost",)
+            ),
             n_envs=1
         )
         eval_env = EpisodeInfoVecEnvWrapper(eval_vec_env)
@@ -11503,90 +11046,6 @@ class PPOOptimizer(BaseOptimizer):
         return metrics
 </file>
 
-<file path="src/network/node.py">
-"""简化的节点类，用于网络图构建"""
-
-from typing import Tuple, Optional, Dict, Any
-from src.rl_optimizer.utils.setup import setup_logger
-
-logger = setup_logger(__name__)
-
-
-class Node:
-    """
-    表示网络图中的一个节点
-    
-    存储节点的基本信息，包括位置、类型、名称等属性
-    """
-    
-    def __init__(self, 
-                 node_id: int,
-                 x: float = 0.0, 
-                 y: float = 0.0, 
-                 z: float = 0.0,
-                 node_type: str = "",
-                 name: Optional[str] = None,
-                 time: float = 1.0,
-                 color: Optional[Tuple[int, int, int]] = None,
-                 e_name: Optional[str] = None,
-                 code: Optional[str] = None,
-                 **kwargs):
-        """
-        初始化节点
-        
-        Args:
-            node_id: 节点唯一标识符
-            x, y, z: 节点的三维坐标
-            node_type: 节点类型（如房间、走廊、门等）
-            name: 节点名称
-            time: 节点通行时间
-            color: 节点颜色（RGB元组）
-            **kwargs: 其他属性
-        """
-        self.id = node_id
-        self.x = float(x)
-        self.y = float(y)
-        self.z = float(z)
-        self.node_type = node_type
-        self.name = name if name is not None else f"{node_type}_{node_id}"
-        self.time = float(time)
-        self.color = color
-        self.e_name = e_name
-        self.code = code
-
-        # 存储其他属性
-        for key, value in kwargs.items():
-            setattr(self, key, value)
-    
-    @property
-    def position(self) -> Tuple[float, float, float]:
-        """获取节点位置坐标"""
-        return (self.x, self.y, self.z)
-    
-    def __str__(self) -> str:
-        """节点的字符串表示"""
-        return f"Node(id={self.id}, type={self.node_type}, name={self.name}, pos=({self.x:.1f}, {self.y:.1f}, {self.z:.1f}))"
-    
-    def __repr__(self) -> str:
-        """节点的详细字符串表示"""
-        return self.__str__()
-    
-    def to_dict(self) -> Dict[str, Any]:
-        """将节点转换为字典格式"""
-        return {
-            'id': self.id,
-            'x': self.x,
-            'y': self.y,
-            'z': self.z,
-            'type': self.node_type,
-            'name': self.name,
-            'time': self.time,
-            'color': self.color,
-            'e_name': self.e_name,
-            'code': self.code
-        }
-</file>
-
 <file path="src/rl_optimizer/env/layout_env.py">
 # src/rl_optimizer/env/layout_env.py
 
@@ -11643,6 +11102,7 @@ class LayoutEnv(gym.Env):
         self.cm = cache_manager
         self.cc = cost_calculator
         self.constraint_manager = constraint_manager
+        self.current_reward_info = None
 
         self._initialize_nodes_and_slots()
         self._define_spaces()
@@ -11943,8 +11403,6 @@ class LayoutEnv(gym.Env):
         else:
             # 检查科室是否已被放置
             if self.placed_mask[action]:
-                # 这是一个安全检查。理论上动作掩码会阻止这种情况。
-                # 如果发生，说明上游逻辑有误，应给予重罚并终止。
                 logger.error(f"严重错误：智能体选择了已被放置的科室！动作={action}, 科室={self.placeable_depts[action]}")
                 logger.error(f"当前步骤: {self.current_step}, placed_mask: {self.placed_mask}")
                 logger.error(f"当前动作掩码: {self.get_action_mask()}")
@@ -12002,12 +11460,6 @@ class LayoutEnv(gym.Env):
                 reward = immediate_reward  # 只有即时奖励
         
         info = self._get_info(terminated)
-        
-        # 调试日志：检查episode结束时的info内容
-        if terminated and True:  # INFO级别
-            logger.debug(f"Episode结束，info内容: {info}")
-            if 'episode' in info:
-                logger.debug(f"Episode数据: {info['episode']}")
 
         return self._get_obs(), reward, terminated, False, info
     
@@ -12047,55 +11499,23 @@ class LayoutEnv(gym.Env):
             num_empty_slots = len(self.skipped_slots)
             num_placed_depts = len(placed_depts)
             
-            # 计算时间成本（只基于已放置的科室）
-            if num_placed_depts > 0:
-                raw_time_cost = self.cc.calculate_total_cost(placed_depts)
-                time_reward = -raw_time_cost / self.config.REWARD_SCALE_FACTOR
-            else:
-                raw_time_cost = 0.0
-                time_reward = -1000.0
-            
-            # 计算空槽位惩罚
-            empty_penalty = -num_empty_slots * self.config.REWARD_EMPTY_SLOT_PENALTY
-            
-            # 调试日志：确认传递的是原始值
-            # loguru直接使用debug，会根据级别自动过滤
-            logger.debug(f"Episode结束 - 原始时间成本: {raw_time_cost:.2f}, "
-                        f"放置科室数: {num_placed_depts}, 空槽位数: {num_empty_slots}")
-            
             # Episode结束时添加详细信息
             info['episode'] = {
-                'time_cost': raw_time_cost,  # 原始时间成本
-                'time_reward': time_reward,  # 时间奖励部分
-                'empty_penalty': empty_penalty,  # 空槽位惩罚
-                'placement_bonus': num_placed_depts * self.config.REWARD_PLACEMENT_BONUS,  # 成功放置的累积奖励
+                'time_cost': self.current_reward_info.raw_components.time_cost,  # 原始时间成本
+                'placement_bonus': self.current_reward_info.raw_components.placement_bonus,  # 成功放置的累积奖励
                 'final_reward': self.cached_final_reward if hasattr(self, 'cached_final_reward') else 0.0,  # 使用缓存的最终奖励
                 'num_placed_depts': num_placed_depts,  # 放置的科室数
                 'num_empty_slots': num_empty_slots,  # 空槽位数
                 'layout': final_layout_depts.copy(),  # 完整布局（包括None）
                 'placed_layout': placed_depts.copy(),  # 只包含已放置的科室
-                'r': time_reward + empty_penalty + num_placed_depts * self.config.REWARD_PLACEMENT_BONUS,  # 总奖励
+                'r': self.cached_final_reward if hasattr(self, 'cached_final_reward') else 0.0, # 总奖励
                 'l': self.current_step  # episode长度
             }
+
+            info['time_cost'] = self.current_reward_info.raw_components.time_cost
             
-            # 如果启用了详细日志，还可以添加更多信息
-            # loguru直接使用debug，会根据级别自动过滤
             if num_placed_depts > 0:
                 info['episode']['per_process_costs'] = self.cc.calculate_per_process_cost(placed_depts)
-            
-            # 添加面积匹配统计信息
-            area_match_stats = self._calculate_area_match_statistics()
-            info['episode']['area_match_avg'] = area_match_stats['avg_match_score']
-            info['episode']['area_match_min'] = area_match_stats['min_match_score']
-            info['episode']['area_match_max'] = area_match_stats['max_match_score']
-            
-            # 添加相邻性奖励统计信息
-            if self.config.ENABLE_ADJACENCY_REWARD and num_placed_depts >= 2:
-                adjacency_stats = self._calculate_adjacency_statistics(placed_depts)
-                info['episode']['adjacency_spatial'] = adjacency_stats['spatial_reward']
-                info['episode']['adjacency_functional'] = adjacency_stats['functional_reward'] 
-                info['episode']['adjacency_connectivity'] = adjacency_stats['connectivity_reward']
-                info['episode']['adjacency_total'] = adjacency_stats['total_reward']
             
             # 添加动态基线统计信息
             if self.config.ENABLE_DYNAMIC_BASELINE and self.reward_normalizer is not None:
@@ -12161,8 +11581,7 @@ class LayoutEnv(gym.Env):
         在回合结束时，计算最终奖励。
         
         支持两种模式：
-        1. 传统模式：使用固定缩放因子
-        2. 动态基线模式：使用归一化奖励和相对改进
+        1. 动态基线模式：使用归一化奖励和相对改进
         """
         # 构建最终布局（包括空槽位）
         final_layout_depts = []
@@ -12191,11 +11610,8 @@ class LayoutEnv(gym.Env):
         # 1. 计算原始奖励组件
         raw_components = self._compute_raw_reward_components(placed_depts, final_layout_depts, num_empty_slots, num_placed_depts)
         
-        # 2. 选择奖励计算模式
-        if self.config.ENABLE_DYNAMIC_BASELINE and self.reward_normalizer is not None:
-            return self._compute_normalized_reward(raw_components)
-        else:
-            return self._compute_traditional_reward(raw_components)
+        # 2. 使用归一化奖励计算模式
+        return self._compute_normalized_reward(raw_components)
     
     def _compute_raw_reward_components(self, placed_depts: List[str], final_layout_depts: List[Optional[str]], 
                                       num_empty_slots: int, num_placed_depts: int) -> RewardComponents:
@@ -12214,7 +11630,7 @@ class LayoutEnv(gym.Env):
             components.time_cost = raw_time_cost
         else:
             components.time_cost = 1e10  # 极大惩罚值
-        
+            
         # 2. 计算相邻性奖励
         if self.config.ENABLE_ADJACENCY_REWARD and num_placed_depts >= 2:
             components.adjacency_reward = self._calculate_adjacency_reward(layout_tuple)
@@ -12223,7 +11639,7 @@ class LayoutEnv(gym.Env):
         
         # 3. 计算面积匹配奖励
         area_match_stats = self._calculate_area_match_statistics()
-        components.area_match_reward = area_match_stats.get('avg_match_score', 0.0) * 10.0  # 缩放到合理范围
+        components.area_match_reward = area_match_stats.get('avg_match_score', 0.0)
         
         # 4. 计算惩罚和奖励
         components.skip_penalty = -num_empty_slots * self.config.REWARD_EMPTY_SLOT_PENALTY
@@ -12265,7 +11681,8 @@ class LayoutEnv(gym.Env):
         
         # 详细调试日志
         self.reward_normalizer.log_reward_info(reward_info, current_episode)
-        
+
+        self.current_reward_info = reward_info
         return reward_info.total_normalized_reward
     
     def _compute_traditional_reward(self, raw_components: RewardComponents) -> float:
@@ -12354,16 +11771,12 @@ class LayoutEnv(gym.Env):
         
         return total_reward
     
-    @lru_cache(maxsize=500)
     def _calculate_adjacency_reward(self, layout_tuple: Tuple[str, ...]) -> float:
         """
         计算当前布局的多维度相邻性奖励。
         
         相邻性奖励包含三个维度：
-        1. 空间相邻性：基于距离分位数的空间邻近关系
-        2. 功能相邻性：基于医疗流程的功能协作关系  
-        3. 连通性相邻性：基于图连通性的可达性关系
-        
+        1. 功能相邻性：基于医疗流程的功能协作关系  
         Args:
             layout_tuple: 当前布局的元组形式（用于LRU缓存）
             
@@ -12372,38 +11785,22 @@ class LayoutEnv(gym.Env):
         """
         if not self.config.ENABLE_ADJACENCY_REWARD:
             return 0.0
+
+        if np.sum(np.array(layout_tuple) != None) < 2:
+            return 0.0
         
-        # 过滤掉None值
-        placed_depts = [dept for dept in layout_tuple if dept is not None]
-        
-        if len(placed_depts) < 2:
-            return 0.0  # 少于两个科室无法计算相邻性
-        
-        # 选择使用优化计算器还是传统方法
-        if hasattr(self, 'use_optimized_adjacency') and self.use_optimized_adjacency:
-            # 使用优化的相邻性奖励计算器
-            try:
-                rewards_dict = self.adjacency_calculator.calculate_adjacency_reward_optimized(
-                    tuple(placed_depts)
-                )
-                total_reward = rewards_dict.get('total_reward', 0.0)
-                
-                # 调试日志
-                # loguru直接使用debug，会根据级别自动过滤
-                logger.debug(f"优化相邻性奖励详情: 空间={rewards_dict.get('spatial_reward', 0.0):.3f}, "
-                            f"功能={rewards_dict.get('functional_reward', 0.0):.3f}, "
-                            f"连通性={rewards_dict.get('connectivity_reward', 0.0):.3f}, "
-                            f"总计={total_reward:.3f}")
-                
-                return total_reward
-                
-            except Exception as e:
-                logger.error(f"优化相邻性计算器执行失败，降级到传统方法：{e}")
-                # 降级到传统方法
-                return self._calculate_legacy_adjacency_reward(placed_depts)
-        else:
-            # 使用传统的相邻性计算方法
-            return self._calculate_legacy_adjacency_reward(placed_depts)
+        # 使用优化的相邻性奖励计算器
+        try:
+            rewards_dict = self.adjacency_calculator.calculate_reward(
+                layout_tuple
+            )
+            total_reward = rewards_dict.get('total_reward', 0.0)
+            
+            return total_reward
+            
+        except Exception as e:
+            logger.error(f"优化相邻性计算器执行失败：{e}, 返回0奖励")
+            return 0.0
     
     def _calculate_legacy_adjacency_reward(self, placed_depts: List[str]) -> float:
         """
@@ -13073,7 +12470,7 @@ class LayoutEnv(gym.Env):
         if hasattr(self, 'use_optimized_adjacency') and self.use_optimized_adjacency:
             # 使用优化的相邻性奖励计算器
             try:
-                rewards_dict = self.adjacency_calculator.calculate_adjacency_reward_optimized(
+                rewards_dict = self.adjacency_calculator.calculate_reward(
                     tuple(placed_depts)
                 )
                 return {
@@ -14186,11 +13583,11 @@ class RLConfig:
         # --- 软约束奖励权重 ---
         self.REWARD_TIME_WEIGHT: float = 1.0
         self.REWARD_ADJACENCY_WEIGHT: float = 0.1
-        self.REWARD_PLACEMENT_BONUS: float = 1.0  # 成功放置一个科室的即时奖励
-        self.REWARD_EMPTY_SLOT_PENALTY: float = 5.0  # 每个空槽位的最终惩罚
+        self.REWARD_PLACEMENT_BONUS: float = 0.1  # 成功放置一个科室的即时奖励
+        self.REWARD_EMPTY_SLOT_PENALTY: float = 0.5  # 每个空槽位的最终惩罚
         self.REWARD_SCALE_FACTOR: float = 40000.0  # 奖励缩放因子, 仅对加权总时间成本有效
-        self.REWARD_SKIP_PENALTY: float = -2.0  # 跳过惩罚
-        self.REWARD_COMPLETION_BONUS: float = 100.0  # 完成奖励
+        self.REWARD_SKIP_PENALTY: float = -0.2  # 跳过惩罚
+        self.REWARD_COMPLETION_BONUS: float = 1.0  # 完成奖励
 
         # --- 势函数奖励配置 ---
         self.ENABLE_POTENTIAL_REWARD: bool = False  # 是否启用势函数奖励
@@ -14243,26 +13640,26 @@ class RLConfig:
         self.MEDICAL_ADJACENCY_PREFERENCES: Dict[str, Dict[str, float]] = {
             # 正向偏好 (值为正数)
             "静配中心": {
-                "ICU": 0.0,      # 静配中心与ICU物流相关
+                "ICU": 0.8,      # 静配中心与ICU物流相关
             },
             "中心供应室": {
-                "内镜中心": 0.0,        # 中心供应室与内镜中心物流相关
+                "内镜中心": 0.8,        # 中心供应室与内镜中心物流相关
             },
             "采血处": {
-                "检验中心": 0.0,    # 采血处与检验中心物流相关
+                "检验中心": 0.8,    # 采血处与检验中心物流相关
             },
             "手术室": {
-                "ICU": 0.0,          # 手术室与ICU强相关
-                "门诊手术室": 0.0
+                "ICU": 0.8,          # 手术室与ICU强相关
+                "门诊手术室": 0.6
             },
             "ICU": {
-                "NICU": 0.0          # ICU与NICU强相关
+                "NICU": 0.8          # ICU与NICU强相关
             },
             "产房": {
-                "NICU": 0.0          # 产房与NICU强相关
+                "NICU": 0.8          # 产房与NICU强相关
             },
             "检验中心": {
-                "病理科": 0.0,    # 检验中心与病理科物流相关
+                "病理科": 0.8,    # 检验中心与病理科物流相关
             }
         }
 
@@ -14279,7 +13676,7 @@ class RLConfig:
         # --- 动态基线奖励归一化配置 ---
         self.ENABLE_DYNAMIC_BASELINE: bool = True  # 启用动态基线奖励归一化
         self.EMA_ALPHA: float = 0.1  # 指数移动平均平滑因子 (0 < alpha <= 1)
-        self.BASELINE_WARMUP_EPISODES: int = 200  # 基线预热期episode数量
+        self.BASELINE_WARMUP_EPISODES: int = 10  # 基线预热期episode数量
         self.BASELINE_UPDATE_FREQUENCY: int = 10  # 基线更新频率（每N个episode更新一次）
         
         # 动态基线归一化权重（归一化后各组件的权重）
@@ -14287,10 +13684,11 @@ class RLConfig:
         self.NORMALIZED_ADJACENCY_WEIGHT: float = 0.5  # 相邻性奖励归一化权重
         self.NORMALIZED_AREA_WEIGHT: float = 0.3  # 面积匹配归一化权重
         self.NORMALIZED_SKIP_PENALTY_WEIGHT: float = 0.3  # 跳过惩罚归一化权重
+        self.NORMALIZED_PLACEMENT_BONUS_WEIGHT: float = 0.1  # 放置奖励归一化权重
         self.NORMALIZED_COMPLETION_BONUS_WEIGHT: float = 0.1  # 完成奖励归一化权重
         
         # 奖励归一化参数
-        self.REWARD_NORMALIZATION_CLIP_RANGE: float = 3.0  # 归一化时的裁剪范围（几个标准差）
+        self.REWARD_NORMALIZATION_CLIP_RANGE: float = 1.0  # 归一化时的裁剪范围（几个标准差）
         self.REWARD_NORMALIZATION_MIN_STD: float = 1e-8  # 最小标准差，防止除零错误
         self.ENABLE_REWARD_CLIPPING: bool = True  # 启用奖励裁剪
         self.REWARD_CLIP_RANGE: Tuple[float, float] = (-10.0, 10.0)  # 最终奖励裁剪范围

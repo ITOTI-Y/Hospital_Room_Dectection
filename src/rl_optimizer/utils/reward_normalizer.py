@@ -195,7 +195,7 @@ class RewardNormalizer:
         if baseline is None or not self.config.ENABLE_DYNAMIC_BASELINE:
             # 没有基线时，直接裁剪到合理范围
             normalized = self._clip_value(adjacency_reward, -1.0, 1.0)
-            return normalized, baseline, None
+            return normalized, baseline, 0.0
         
         # 使用动态基线
         if self.config.ENABLE_RELATIVE_IMPROVEMENT_REWARD:
@@ -212,7 +212,7 @@ class RewardNormalizer:
                 normalized = self._clip_normalized_value(normalized)
             else:
                 normalized = self._clip_value(adjacency_reward, -1.0, 1.0)
-            return normalized, baseline, None
+            return normalized, baseline, 0.0
     
     def _normalize_area_match_reward(self, area_match_reward: float) -> Tuple[float, Optional[float], Optional[float]]:
         """

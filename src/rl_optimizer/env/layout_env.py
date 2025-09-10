@@ -53,6 +53,7 @@ class LayoutEnv(gym.Env):
         self.cm = cache_manager
         self.cc = cost_calculator
         self.constraint_manager = constraint_manager
+        self.current_reward_info = None
 
         self._initialize_nodes_and_slots()
         self._define_spaces()
@@ -353,8 +354,6 @@ class LayoutEnv(gym.Env):
         else:
             # 检查科室是否已被放置
             if self.placed_mask[action]:
-                # 这是一个安全检查。理论上动作掩码会阻止这种情况。
-                # 如果发生，说明上游逻辑有误，应给予重罚并终止。
                 logger.error(f"严重错误：智能体选择了已被放置的科室！动作={action}, 科室={self.placeable_depts[action]}")
                 logger.error(f"当前步骤: {self.current_step}, placed_mask: {self.placed_mask}")
                 logger.error(f"当前动作掩码: {self.get_action_mask()}")
@@ -412,12 +411,6 @@ class LayoutEnv(gym.Env):
                 reward = immediate_reward  # 只有即时奖励
         
         info = self._get_info(terminated)
-        
-        # 调试日志：检查episode结束时的info内容
-        if terminated:  # INFO级别
-            logger.debug(f"Episode结束，info内容: {info}")
-            if 'episode' in info:
-                logger.debug(f"Episode数据: {info['episode']}")
 
         return self._get_obs(), reward, terminated, False, info
     
@@ -457,16 +450,10 @@ class LayoutEnv(gym.Env):
             num_empty_slots = len(self.skipped_slots)
             num_placed_depts = len(placed_depts)
             
-            # 计算时间成本（只基于已放置的科室）
-            if num_placed_depts > 0:
-                raw_time_cost = self.cc.calculate_total_cost(placed_depts)
-            else:
-                raw_time_cost = np.inf
-            
             # Episode结束时添加详细信息
             info['episode'] = {
-                'time_cost': raw_time_cost,  # 原始时间成本
-                'placement_bonus': num_placed_depts * self.config.REWARD_PLACEMENT_BONUS,  # 成功放置的累积奖励
+                'time_cost': self.current_reward_info.raw_components.time_cost,  # 原始时间成本
+                'placement_bonus': self.current_reward_info.raw_components.placement_bonus,  # 成功放置的累积奖励
                 'final_reward': self.cached_final_reward if hasattr(self, 'cached_final_reward') else 0.0,  # 使用缓存的最终奖励
                 'num_placed_depts': num_placed_depts,  # 放置的科室数
                 'num_empty_slots': num_empty_slots,  # 空槽位数
@@ -475,23 +462,11 @@ class LayoutEnv(gym.Env):
                 'r': self.cached_final_reward if hasattr(self, 'cached_final_reward') else 0.0, # 总奖励
                 'l': self.current_step  # episode长度
             }
+
+            info['time_cost'] = self.current_reward_info.raw_components.time_cost
             
             if num_placed_depts > 0:
                 info['episode']['per_process_costs'] = self.cc.calculate_per_process_cost(placed_depts)
-            
-            # 添加面积匹配统计信息
-            # area_match_stats = self._calculate_area_match_statistics()
-            # info['episode']['area_match_avg'] = area_match_stats['avg_match_score']
-            # info['episode']['area_match_min'] = area_match_stats['min_match_score']
-            # info['episode']['area_match_max'] = area_match_stats['max_match_score']
-            
-            # # 添加相邻性奖励统计信息
-            # if self.config.ENABLE_ADJACENCY_REWARD and num_placed_depts >= 2:
-            #     adjacency_stats = self._calculate_adjacency_statistics(placed_depts)
-            #     info['episode']['adjacency_spatial'] = adjacency_stats['spatial_reward']
-            #     info['episode']['adjacency_functional'] = adjacency_stats['functional_reward'] 
-            #     info['episode']['adjacency_connectivity'] = adjacency_stats['connectivity_reward']
-            #     info['episode']['adjacency_total'] = adjacency_stats['total_reward']
             
             # 添加动态基线统计信息
             if self.config.ENABLE_DYNAMIC_BASELINE and self.reward_normalizer is not None:
@@ -557,8 +532,7 @@ class LayoutEnv(gym.Env):
         在回合结束时，计算最终奖励。
         
         支持两种模式：
-        1. 传统模式：使用固定缩放因子
-        2. 动态基线模式：使用归一化奖励和相对改进
+        1. 动态基线模式：使用归一化奖励和相对改进
         """
         # 构建最终布局（包括空槽位）
         final_layout_depts = []
@@ -658,7 +632,8 @@ class LayoutEnv(gym.Env):
         
         # 详细调试日志
         self.reward_normalizer.log_reward_info(reward_info, current_episode)
-        
+
+        self.current_reward_info = reward_info
         return reward_info.total_normalized_reward
     
     def _compute_traditional_reward(self, raw_components: RewardComponents) -> float:

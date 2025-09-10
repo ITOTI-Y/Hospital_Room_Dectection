@@ -7,13 +7,13 @@ import time
 import numpy as np
 from pathlib import Path
 from typing import List, Optional, Dict, Any
-from stable_baselines3.common.vec_env import VecNormalize
 from stable_baselines3.common.env_util import make_vec_env
 from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback as EvalCallback
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
 from sb3_contrib.common.maskable.evaluation import evaluate_policy
+from stable_baselines3.common.monitor import Monitor
 
 from src.algorithms.base_optimizer import BaseOptimizer, OptimizationResult
 from src.algorithms.constraint_manager import ConstraintManager
@@ -450,7 +450,11 @@ class PPOOptimizer(BaseOptimizer):
         
         # 评估回调
         eval_vec_env = make_vec_env(
-            lambda: ActionMasker(LayoutEnv(**self.env_kwargs), LayoutEnv._action_mask_fn),
+            lambda: Monitor(
+                ActionMasker(LayoutEnv(**self.env_kwargs), LayoutEnv._action_mask_fn),
+                allow_early_resets=True,
+                info_keywords=("time_cost",)
+            ),
             n_envs=1
         )
         eval_env = EpisodeInfoVecEnvWrapper(eval_vec_env)
