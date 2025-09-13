@@ -284,8 +284,8 @@ class RLConfig:
         self.GA_CONSTRAINT_REPAIR_STRATEGY: str = 'greedy_area_matching'  # 默认约束修复策略
         self.GA_ADAPTIVE_PARAMETERS: bool = True  # 启用自适应参数调整
         self.GA_MAX_REPAIR_ATTEMPTS: int = 5  # 约束修复最大尝试次数
-        self.GA_DIVERSITY_THRESHOLD_LOW: float = 0.05  # TODO:多样性极低阈值
-        self.GA_DIVERSITY_THRESHOLD_MEDIUM: float = 0.15  # TODO:多样性较低阈值
+        self.GA_DIVERSITY_THRESHOLD_LOW: float = 0.05  # 多样性极低阈值
+        self.GA_DIVERSITY_THRESHOLD_MEDIUM: float = 0.15  # 多样性较低阈值
         
         # --- 并发控制 ---
         self.MAX_PARALLEL_ALGORITHMS: int = 3

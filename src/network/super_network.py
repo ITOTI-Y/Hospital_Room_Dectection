@@ -254,7 +254,7 @@ class SuperNetwork:
             ))
             current_id_start += self.config.ESTIMATED_MAX_NODES_PER_FLOOR
 
-        logging.info(
+        logger.info(
             f"Starting parallel processing of {len(tasks_for_pool)} floors using {self.num_processes} processes...")
 
         results = []
@@ -264,7 +264,7 @@ class SuperNetwork:
             with multiprocessing.Pool(processes=self.num_processes) as pool:
                 results = pool.map(_process_floor_worker, tasks_for_pool)
         else:  # Run sequentially for single process or single task
-            logging.info("Running floor processing sequentially...")
+            logger.info("Running floor processing sequentially...")
             for task in tasks_for_pool:
                 results.append(_process_floor_worker(task))
 

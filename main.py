@@ -26,7 +26,6 @@ from src.rl_optimizer.utils.setup import setup_logger
 logger = setup_logger(__name__)
 
 
-
 class HospitalLayoutOptimizer:
     """医院布局优化系统主类"""
     

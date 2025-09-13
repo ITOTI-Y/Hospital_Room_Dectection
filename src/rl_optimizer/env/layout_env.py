@@ -1484,10 +1484,10 @@ class LayoutEnv(gym.Env):
     def render(self, mode="human"):
         """(可选) 渲染环境状态，用于调试。"""
         if mode == "human":
-            print(f"--- Step: {self.current_step} ---")
+            logger.info(f"--- Step: {self.current_step} ---")
             current_slot_idx = self.shuffled_slot_indices[self.current_step]
             current_slot = self.placeable_slots[current_slot_idx]
-            print(f"Current Slot to Fill: {current_slot} (Area: {self.slot_areas[current_slot_idx]:.2f})")
+            logger.info(f"Current Slot to Fill: {current_slot} (Area: {self.slot_areas[current_slot_idx]:.2f})")
             
             layout_str = []
             for i in range(self.num_slots):
@@ -1496,7 +1496,7 @@ class LayoutEnv(gym.Env):
                     layout_str.append(f"{self.placeable_slots[i]}: {self.placeable_depts[dept_id-1]}")
                 else:
                     layout_str.append(f"{self.placeable_slots[i]}: EMPTY")
-            print("Current Layout:\n" + "\n".join(layout_str))
+            logger.info("Current Layout:\n" + "\n".join(layout_str))
 
     @staticmethod
     def _action_mask_fn(env: 'LayoutEnv') -> np.ndarray:
