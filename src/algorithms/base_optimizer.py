@@ -1,13 +1,11 @@
-"""
-基础优化器抽象类 - 定义所有优化算法的统一接口
-"""
+"""基础优化器抽象类 - 定义所有优化算法的统一接口."""
 
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any, Tuple, Optional
 import time
-from src.rl_optimizer.utils.setup import setup_logger
 from dataclasses import dataclass
 
+from src.rl_optimizer.utils.setup import setup_logger
 from src.rl_optimizer.env.cost_calculator import CostCalculator
 
 @dataclass

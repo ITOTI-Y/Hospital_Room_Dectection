@@ -1,6 +1,4 @@
-"""
-PPO优化器 - 基于强化学习的布局优化算法
-"""
+"""PPO优化器 - 基于强化学习的布局优化算法."""
 
 import time
 from pathlib import Path
@@ -14,7 +12,6 @@ from sb3_contrib.common.maskable.callbacks import MaskableEvalCallback as EvalCa
 from sb3_contrib import MaskablePPO
 from sb3_contrib.common.wrappers import ActionMasker
 from sb3_contrib.common.maskable.policies import MaskableActorCriticPolicy
-from sb3_contrib.common.maskable.evaluation import evaluate_policy
 
 from src.algorithms.base_optimizer import BaseOptimizer, OptimizationResult
 from src.algorithms.constraint_manager import ConstraintManager

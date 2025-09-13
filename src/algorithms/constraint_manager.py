@@ -1,6 +1,4 @@
-"""
-约束管理器 - 统一处理布局优化中的各种约束条件
-"""
+"""约束管理器 - 统一处理布局优化中的各种约束条件."""
 
 from src.rl_optimizer.utils.setup import setup_logger
 import random

@@ -1,11 +1,9 @@
-"""
-网络生成器 - 整合医院网络生成功能
-"""
+"""网络生成器 - 整合医院网络生成功能."""
 
-from src.rl_optimizer.utils.setup import setup_logger
-import pathlib
+from pathlib import Path
 from typing import Dict, List, Optional
 
+from src.rl_optimizer.utils.setup import setup_logger
 from src.config import NetworkConfig, COLOR_MAP
 from src.network.super_network import SuperNetwork
 from src.plotting.plotter import PlotlyPlotter
@@ -56,7 +54,7 @@ class NetworkGenerator:
         logger.info("=== 开始生成多层医院网络 ===")
         
         # 检查图像目录
-        label_dir = pathlib.Path(image_dir)
+        label_dir = Path(image_dir)
         if not label_dir.is_dir():
             logger.error(f"标注图像目录不存在: {label_dir}")
             return False

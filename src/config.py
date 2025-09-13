@@ -137,6 +137,11 @@ class NetworkConfig:
         self.DEFAULT_OUTSIDE_PROCESSING_IN_SUPERNETWORK: bool = False # Default for processing outside nodes per floor in SuperNetwork
         self.GROUND_FLOOR_NUMBER_FOR_OUTSIDE: Optional[int] = None # Or 0, or None to rely on auto-detection
 
+        # 垂直连接相关配置
+        self.Z_LEVEL_DIFF_THRESHOLD: float = 1.0  # Z层级差异阈值，判断是否为不同楼层
+        self.MIN_VERTICAL_TOLERANCE: int = 10  # 最小垂直连接容差值
+        self.VERTICAL_TOLERANCE_FACTOR: float = 0.5  # 垂直容差计算因子（基于平均最小距离）
+
         # Morphology Kernel
         self.MORPHOLOGY_KERNEL_SIZE: Tuple[int, int] = (5, 5)
         self.CONNECTION_DILATION_KERNEL_SIZE: Tuple[int, int] = (3,3)
