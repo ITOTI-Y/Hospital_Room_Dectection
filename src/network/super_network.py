@@ -5,7 +5,7 @@ individual Network instances, potentially in parallel.
 
 import multiprocessing
 import os  # For os.cpu_count()
-import pathlib
+from pathlib import Path
 import networkx as nx
 import numpy as np
 from src.rl_optimizer.utils.setup import setup_logger
@@ -22,14 +22,15 @@ logger = setup_logger(__name__)
 # Worker function for multiprocessing - must be defined at the top-level or picklable
 
 
-def _process_floor_worker(task_args: Tuple[pathlib.Path, float, int, Dict[str, Any], Dict[Tuple[int, int, int], Dict[str, Any]], bool]) \
-        -> Tuple[Optional[nx.Graph], Optional[int], Optional[int], int, pathlib.Path, float]:
-    """
-    Worker function to process a single floor's network generation.
+def _process_floor_worker(
+    task_args: Tuple[Path, float, int, Dict[str, Any],
+                     Dict[Tuple[int, int, int], Dict[str, Any]], bool]
+) -> Tuple[Optional[nx.Graph], Optional[int], Optional[int], int, Path, float]:
+    """Worker function to process a single floor's network generation.
 
     Args:
         task_args: A tuple containing:
-            - image_path (pathlib.Path): Path to the floor image.
+            - image_path (Path): Path to the floor image.
             - z_level (float): Z-coordinate for this floor.
             - id_start_value (int): Starting node ID for this floor.
             - config_dict (Dict): Dictionary representation of NetworkConfig.
@@ -42,7 +43,7 @@ def _process_floor_worker(task_args: Tuple[pathlib.Path, float, int, Dict[str, A
             - width (Optional[int]): Image width, or None on error.
             - height (Optional[int]): Image height, or None on error.
             - next_id_val_from_worker (int): The next available ID from this worker's GraphManager.
-            - image_path (pathlib.Path): Original image path (for result matching).
+            - image_path (Path): Original image path (for result matching).
             - z_level (float): Original z_level (for result matching).
     """
     image_path, z_level, id_start_value, config_dict, color_map_data, process_outside_nodes = task_args
@@ -119,45 +120,73 @@ class SuperNetwork:
         self.num_processes: int = num_processes if num_processes is not None else (
             os.cpu_count() or 1)
 
-        _floor_height = default_floor_height if default_floor_height is not None else config.DEFAULT_FLOOR_HEIGHT
+        floor_height = default_floor_height if default_floor_height is not None else config.DEFAULT_FLOOR_HEIGHT
         self.floor_manager = FloorManager(
-            base_floor_default=base_floor, default_floor_height=_floor_height)
+            base_floor_default=base_floor, default_floor_height=floor_height)
 
         self.vertical_connection_tolerance: int = vertical_connection_tolerance \
             if vertical_connection_tolerance is not None else config.DEFAULT_VERTICAL_CONNECTION_TOLERANCE
 
         self.floor_z_map: Dict[int, float] = {}  # floor_number -> z_coordinate
-        self.path_to_floor_map: Dict[pathlib.Path,
-                                     int] = {}  # image_path -> floor_number
+        self.path_to_floor_map: Dict[Path, int] = {}  # image_path -> floor_number
 
         self.width: Optional[int] = None
         self.height: Optional[int] = None
 
-    def _prepare_floor_data(self, image_file_paths: List[pathlib.Path],
-                           z_levels_override: Optional[List[float]] = None) \
-            -> List[Tuple[pathlib.Path, float, bool]]:
+    def _should_process_outside_nodes(self, floor_num: int, designated_ground_floor_num: Optional[int]) -> bool:
+        """Determines if outside nodes should be processed for a specific floor.
+
+        Args:
+            floor_num: The floor number to check.
+            designated_ground_floor_num: The designated ground floor number.
+
+        Returns:
+            True if outside nodes should be processed for this floor, False otherwise.
         """
-        Determines floor numbers and Z-levels for each image path.
+        # Process outside nodes ONLY if the current floor is the designated ground floor
+        # AND if there's at least one "OUTSIDE_TYPE" defined in config.
+        if designated_ground_floor_num is None or floor_num != designated_ground_floor_num:
+            return False
+
+        if not self.config.OUTSIDE_TYPES:
+            return False
+
+        # Override via config if a global "always process outside" is set
+        if self.config.DEFAULT_OUTSIDE_PROCESSING_IN_SUPERNETWORK:
+            return True
+
+        return True
+
+    def _prepare_floor_data(
+        self,
+        image_file_paths: List[Path],
+        z_levels_override: Optional[List[float]] = None
+    ) -> List[Tuple[Path, float, bool]]:
+        """Determines floor numbers and Z-levels for each image path.
+
         Also determines if outside nodes should be processed for that floor.
         Outside nodes are processed ONLY for the designated ground/first floor.
+
+        Args:
+            image_file_paths: List of Path objects for floor images.
+            z_levels_override: Optional list of Z-levels to override automatic calculation.
 
         Returns:
             A list of tuples: (image_path, z_level, process_outside_nodes_flag)
         """
-        image_paths_as_pathlib = [pathlib.Path(p) for p in image_file_paths]
+        image_paths_as_pathlib = [Path(p) for p in image_file_paths]
         
         self.path_to_floor_map, floor_to_path_map = self.floor_manager.auto_assign_floors(image_paths_as_pathlib)
         
         if z_levels_override and len(z_levels_override) == len(image_paths_as_pathlib):
             sorted_paths_by_floor = sorted(self.path_to_floor_map.keys(), key=lambda p: self.path_to_floor_map[p])
-            temp_path_to_z = {path: z for path, z in zip(sorted_paths_by_floor, z_levels_override)} # Make sure this aligns correctly
-            self.floor_z_map = {self.path_to_floor_map[p]: temp_path_to_z.get(p) for p in self.path_to_floor_map.keys() if temp_path_to_z.get(p) is not None}
+            path_to_z_mapping = {path: z for path, z in zip(sorted_paths_by_floor, z_levels_override)}
+            self.floor_z_map = {self.path_to_floor_map[p]: path_to_z_mapping.get(p) for p in self.path_to_floor_map.keys() if path_to_z_mapping.get(p) is not None}
 
         else:
             self.floor_z_map = self.floor_manager.calculate_z_levels(floor_to_path_map)
 
         if not self.floor_z_map:
-            # logger.error("Could not determine Z-levels for floors.") # Ensure logger is available
             raise ValueError("Could not determine Z-levels for floors.")
 
         floor_tasks_data = []
@@ -177,34 +206,14 @@ class SuperNetwork:
                     designated_ground_floor_num = 1
             elif positive_or_zero_floors:
                 designated_ground_floor_num = positive_or_zero_floors[0]
-        
-        # logger.info(f"Designated ground floor for outside nodes: {designated_ground_floor_num}")
-
         for p_path, floor_num in self.path_to_floor_map.items():
             z_level = self.floor_z_map.get(floor_num)
             if z_level is None:
-                # logger.warning(f"Z-level for floor {floor_num} (path {p_path}) not found. Skipping task.")
                 continue
 
-            # Process outside nodes ONLY if the current floor is the designated ground floor
-            # AND if there's at least one "OUTSIDE_TYPE" defined in config.
-            process_outside = False
-            if designated_ground_floor_num is not None and floor_num == designated_ground_floor_num \
-               and self.config.OUTSIDE_TYPES:
-                process_outside = True
-            
-            # Override via config if a global "always process outside" is set (though less likely now)
-            if self.config.DEFAULT_OUTSIDE_PROCESSING_IN_SUPERNETWORK: # This flag might be re-purposed or removed
-                # If this flag is true, it might override the ground-floor-only logic.
-                # For "only on ground floor", this should typically be false.
-                # Let's assume the ground_floor_num logic is primary.
-                # So, if DEFAULT_OUTSIDE_PROCESSING_IN_SUPERNETWORK is true, it processes for all.
-                # If false (typical for this new requirement), then only for designated_ground_floor_num.
-                if self.config.DEFAULT_OUTSIDE_PROCESSING_IN_SUPERNETWORK:
-                    process_outside = True 
-                # else: it remains as determined by ground_floor_num logic
+            # Determine if outside nodes should be processed for this floor
+            process_outside = self._should_process_outside_nodes(floor_num, designated_ground_floor_num)
 
-            # logger.debug(f"Floor task: Path={p_path.name}, FloorNum={floor_num}, Z={z_level:.2f}, ProcessOutside={process_outside}")
             floor_tasks_data.append((p_path, z_level, process_outside))
         
         floor_tasks_data.sort(key=lambda item: item[1]) # Sort by Z-level
@@ -232,7 +241,7 @@ class SuperNetwork:
             The combined multi-floor NetworkX graph.
         """
         self.super_graph.clear()  # Clear previous graph if any
-        image_paths_pl = [pathlib.Path(p) for p in image_file_paths]
+        image_paths_pl = [Path(p) for p in image_file_paths]
 
         floor_run_data = self._prepare_floor_data(
             image_paths_pl, z_levels_override)
@@ -272,20 +281,20 @@ class SuperNetwork:
         # To store (graph, width, height) for valid results
         processed_graphs_data = []
 
-        for graph_result, width_res, height_res, _next_id, res_path, res_z in results:
-            if graph_result is None or width_res is None or height_res is None:
+        for graph_result, width_result, height_result, _, result_path, result_z in results:
+            if graph_result is None or width_result is None or height_result is None:
                 logger.warning(
-                    f"Warning: Failed to process floor image {res_path.name} (z={res_z}). Skipping.")
+                    f"Warning: Failed to process floor image {result_path.name} (z={result_z}). Skipping.")
                 continue
 
             if first_floor_processed:
-                self.width = width_res
-                self.height = height_res
+                self.width = width_result
+                self.height = height_result
                 first_floor_processed = False
-            elif self.width != width_res or self.height != height_res:
+            elif self.width != width_result or self.height != height_result:
                 raise ValueError(
-                    f"Image dimensions mismatch for {res_path.name}. "
-                    f"Expected ({self.width},{self.height}), got ({width_res},{height_res}). "
+                    f"Image dimensions mismatch for {result_path.name}. "
+                    f"Expected ({self.width},{self.height}), got ({width_result},{height_result}). "
                     "All floor images must have the same dimensions."
                 )
 
@@ -348,19 +357,24 @@ class SuperNetwork:
             avg_min_distance = np.mean(nearest_distances)
             # Tolerance could be a factor of this average minimum distance
             # Example: 50% of avg min distance
-            calculated_tolerance = int(avg_min_distance * 0.5)
+            calculated_tolerance = int(avg_min_distance * self.config.VERTICAL_TOLERANCE_FACTOR)
             logger.info(
                 f"Auto-calculated vertical tolerance: {calculated_tolerance} (based on avg_min_dist: {avg_min_distance:.2f})")
-            return max(10, calculated_tolerance)  # Ensure a minimum tolerance
+            return max(self.config.MIN_VERTICAL_TOLERANCE, calculated_tolerance)  # Ensure a minimum tolerance
         except Exception as e:
             logger.error(
                 f"Error in auto-calculating tolerance: {e}. Using default.")
             return self.config.DEFAULT_VERTICAL_CONNECTION_TOLERANCE
 
     def _connect_floors(self) -> None:
-        """
+        """Connects vertical transport nodes between different floors.
+
         Connects vertical transport nodes (e.g., stairs, elevators) between
         different floors if they are of the same type and spatially close in XY.
+
+        The method groups vertical nodes by type, uses KDTree for efficient
+        spatial proximity search, and creates edges between nodes on different
+        floors that are within the vertical connection tolerance.
         """
         # 获取所有垂直节点
         all_vertical_nodes_in_graph = []
@@ -422,9 +436,8 @@ class SuperNetwork:
 
                     neighbor_node = nodes_of_this_type[neighbor_idx]
 
-                    # Crucial check: Ensure they are on different floors (Z-levels differ significantly)
-                    # Z-levels are too close (same floor)
-                    if abs(current_node.z - neighbor_node.z) < 1.0:
+                    # Ensure they are on different floors (Z-levels differ significantly)
+                    if abs(current_node.z - neighbor_node.z) < self.config.Z_LEVEL_DIFF_THRESHOLD:  # Z-levels are too close (same floor)
                         continue
 
                     # Connect if not already connected (使用节点ID)

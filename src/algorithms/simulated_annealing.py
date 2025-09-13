@@ -1,13 +1,11 @@
-"""
-模拟退火优化器 - 基于模拟退火算法的布局优化
-"""
+"""模拟退火优化器 - 基于模拟退火算法的布局优化."""
 
 import math
 import random
 import copy
-from src.rl_optimizer.utils.setup import setup_logger
 from typing import List, Optional, Dict, Any
 
+from src.rl_optimizer.utils.setup import setup_logger
 from src.algorithms.base_optimizer import BaseOptimizer, OptimizationResult
 from src.algorithms.constraint_manager import ConstraintManager
 from src.rl_optimizer.env.cost_calculator import CostCalculator

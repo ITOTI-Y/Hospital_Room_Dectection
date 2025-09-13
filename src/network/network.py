@@ -11,7 +11,7 @@ from scipy.spatial import KDTree
 from src.config import NetworkConfig
 from .graph_manager import GraphManager
 from .node import Node
-from src.image_processing.processor import ImageProcessor
+from src.utils.processor import ImageProcessor
 from .node_creators import (  # 节点创建器模块
     BaseNodeCreator,
     RoomNodeCreator,
