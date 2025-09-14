@@ -44,8 +44,6 @@ def generate_network(
     """
     从楼层图像生成医院网络。
     """
-    log_dir = Path("./logs")
-    log_dir.mkdir(parents=True, exist_ok=True)
 
     logger.info("=== 医院网络生成系统启动 ===")
 
