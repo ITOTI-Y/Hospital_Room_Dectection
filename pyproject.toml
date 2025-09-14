@@ -1,0 +1,44 @@
+[project]
+name = "hospital-room-dectection"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "hf-xet>=1.1.0",
+    "joblib>=1.4.2",
+    "loguru>=0.7.3",
+    "matplotlib>=3.9.2",
+    "napari>=0.5.5",
+    "opencv-python>=4.10.0.84",
+    "pandas>=2.2.3",
+    "plotly>=6.0.0",
+    "pyflakes>=3.4.0",
+    "pyyaml>=6.0.2",
+    "ruff>=0.13.0",
+    "sb3-contrib>=2.6.0",
+    "scikit-learn>=1.5.1",
+    "seaborn>=0.13.2",
+    "sentence-transformers>=4.1.0",
+    "snakeviz>=2.2.2",
+    "stable-baselines3[extra]>=2.6.0",
+    "torch>=2.6.0",
+    "torchvision>=0.22.0",
+    "typer>=0.15.1",
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu126"
+url = "https://download.pytorch.org/whl/cu118"
+explicit = true
+
+[tool.uv.sources]
+torchvision = [
+    { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torch = [
+    { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchaudio = [
+    { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]

@@ -1,0 +1,12 @@
+# Defines centralized paths for the project to avoid hardcoding.
+# Paths are relative to the project root directory.
+
+# Source data directories
+data_dir: "data"
+label_dir: "{data_dir}/label"
+
+# Output directories
+results_dir: "results"
+network_dir: "{results_dir}/network"
+model_dir: "{results_dir}/model"
+debug_dir: "debug"

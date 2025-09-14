@@ -1,0 +1,53 @@
+# Configuration for PlotlyPlotter
+
+# General settings
+image_mirror: true
+show_pedestrian_labels: false
+node_opacity: 0.8
+
+# Node sizes by category
+node_sizes:
+  default: 2
+  PATH: 2
+  CONNECTOR: 3
+  SLOT: 7
+  FIXED: 7
+  STRUCTURE: 1
+
+# Edge styles by type
+edge_styles:
+  horizontal:
+    color: "#1f77b4"
+    width: 1.5
+    name: "Horizontal"
+  vertical:
+    color: "rgba(151,152,155,0.7)"
+    width: 2.25
+    name: "Vertical"
+  door:
+    color: "#2ca02c"
+    width: 1.8
+    name: "Door"
+  special:
+    color: "#d62728"
+    width: 2.0
+    name: "Special"
+
+# Scene and layout settings
+scene:
+  aspect_ratio:
+    x: 1.0
+    y: 1.0
+    z: 2.0
+  camera:
+    eye:
+      x: 1.25
+      y: 1.25
+      z: 1.25
+
+# Plotly export settings
+plotly_config:
+  toImageButtonOptions:
+    format: 'png'
+    filename: 'Network'
+    scale: 3
