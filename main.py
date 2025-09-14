@@ -9,7 +9,7 @@ import typer
 from typing_extensions import Annotated
 
 # 导入核心模块
-from src.core.network_generator import NetworkGenerator
+from src.network_generator import NetworkGenerator
 from src.utils.setup import setup_logger
 
 logger = setup_logger(__name__)

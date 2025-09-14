@@ -161,7 +161,6 @@ cython_debug/
 logs/
 models/*.pth
 debug/
-archive/
 results/comparison/
 results/plots/
 results/reports/
