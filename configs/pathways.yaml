@@ -1,0 +1,88 @@
+
+training_generation:
+  # 1. 科室池: 定义可互换的科室分组
+  department_pools:
+    DiagnosticImaging: ["放射科", "超声科"]
+    LabWork: ["采血处", "检验中心"]
+    PrimaryCare: ["全科", "体检科"]
+    InternalMedicine: ["呼吸科", "肾内科", "心血管内科", "神经科", "消化内科", "肿瘤科"]
+    SurgicalDepts: ["甲状腺外科", "肝胆胰外科", "泌尿外科", "烧伤整形科", "骨科"]
+    GynAndPeds: ["妇科", "产科", "儿科", "产前诊断门诊", "生殖医学科"]
+
+  # 2. 流程片段: 定义可复用的常见子流程
+  sequence_fragments:
+    StandardCheckup:
+      - { type: pool, pool_name: LabWork, probability: 0.9 }
+      - { type: pool, pool_name: DiagnosticImaging, probability: 0.6 }
+    SurgicalPreOp: # 外科术前检查
+      - { type: fixed, name: "采血处" }
+      - { type: fixed, name: "放射科" }
+      - { type: fixed, name: "心血管内科" } # 通常需要心电图
+
+  # 3. 核心元规则: 定义就医流程的“原型”
+  meta_rules:
+    # 原型一: 常规内科门诊
+    - id: ROUTINE_INTERNAL_MEDICINE
+      description: "常规内科门诊流程"
+      base_weight: 0.4
+      start_nodes: ["门"]
+      end_nodes: ["药房", "门"]
+      structure:
+        - { type: primary_department, from_pool: InternalMedicine }
+        - { type: optional, probability: 0.8, step: { type: fragment, fragment_name: "StandardCheckup" } }
+        - { type: repeat, target: primary_department }
+
+    # 原型二: 外科咨询流程
+    - id: SURGICAL_CONSULTATION
+      description: "外科咨询流程"
+      base_weight: 0.2
+      start_nodes: ["门"]
+      end_nodes: ["门"]
+      structure:
+        - { type: primary_department, from_pool: SurgicalDepts }
+        - { type: optional, probability: 0.9, step: { type: fragment, fragment_name: "SurgicalPreOp" } }
+        - { type: optional, probability: 0.3, step: { type: fixed, name: "病理科" } }
+        - { type: repeat, target: primary_department }
+
+    # 原型三: 妇产儿科流程
+    - id: GYN_PEDS_VISIT
+      description: "妇产儿科流程"
+      base_weight: 0.2
+      start_nodes: ["门"]
+      end_nodes: ["药房", "门"]
+      structure:
+        - { type: primary_department, from_pool: GynAndPeds }
+        - { type: optional, probability: 0.7, step: { type: fixed, name: "超声科" } }
+        - { type: optional, probability: 0.5, step: { type: fixed, name: "采血处" } }
+        - { type: repeat, target: primary_department }
+
+    # 原型四: 特殊检查流程 (如内镜)
+    - id: SPECIAL_EXAM_VISIT
+      description: "特殊检查流程"
+      base_weight: 0.1
+      start_nodes: ["门"]
+      end_nodes: ["药房", "门"]
+      structure:
+        - { type: primary_department, from_pool: ["消化内科", "肝胆胰外科"] } # 这里保持列表是正确的，因为它是一个临时的、未命名的池
+        - { type: fixed, name: "内镜中心" }
+        - { type: repeat, target: primary_department }
+
+    # 原型五: 简单复诊/开药
+    - id: SIMPLE_FOLLOW_UP
+      description: "简单复诊流程"
+      base_weight: 0.1
+      start_nodes: ["门"]
+      end_nodes: ["药房"]
+      structure:
+        - { type: primary_department, from_pool: PrimaryCare }
+
+# ===================================================================
+# Part 2: Fixed Scenarios for Evaluation (Evaluation Phase)
+# ===================================================================
+evaluation_scenarios:
+  smart:
+    description: "智慧医院流程评估场景"
+    file_path: "data/process_smart.json"
+  traditional:
+    description: "传统医院流程评估场景"
+    file_path: "data/process_traditional.json"

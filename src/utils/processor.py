@@ -1,5 +1,6 @@
 """Handles image loading, preprocessing, and basic morphological operations."""
 
+from pathlib import Path
 import cv2
 from src.utils.setup import setup_logger
 import numpy as np
@@ -34,7 +35,7 @@ class ImageProcessor:
         }
         self.geometry_config = graph_config.get_geometry_config()
 
-    def load_and_prepare_image(self, image_path: str) -> np.ndarray:
+    def load_and_prepare_image(self, image_path: Path) -> np.ndarray:
         """
         Loads an image, rotates it, and stores its dimensions.
 
@@ -51,11 +52,7 @@ class ImageProcessor:
             IOError: If the image cannot be opened or read.
         """
         try:
-            img = Image.open(image_path).convert("RGB")  # Ensure RGB
-            # Rotation should be part of a general geometry config if needed
-            # image_rotate = self.geometry_config.get('image_rotate', 0)
-            # if image_rotate != 0:
-            #     img = img.rotate(image_rotate)
+            img = Image.open(image_path).convert("RGB")
         except FileNotFoundError:
             raise FileNotFoundError(f"Image file not found: {image_path}")
         except IOError:
@@ -66,7 +63,7 @@ class ImageProcessor:
             raise ValueError(f"Failed to convert image to numpy array: {image_path}")
 
         self._image_height, self._image_width = self._current_image_data.shape[:2]
-        return self._current_image_data.copy()  # 返回副本避免意外修改
+        return self._current_image_data.copy()
 
     def get_image_dimensions(self) -> Tuple[int, int]:
         """

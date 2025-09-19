@@ -49,7 +49,7 @@ def _process_floor_worker(
     try:
         network_builder = Network(id_generator_start_value=id_start_value)
         graph, width, height, next_id = network_builder.run(
-            image_path=str(image_path),
+            image_path=image_path,
             z_level=z_level,
             process_outside_nodes=process_outside_nodes,
             floor_num=floor_num,
@@ -118,12 +118,11 @@ class SuperNetwork:
         z_levels_override: Optional[List[float]] = None,
     ) -> List[Tuple[Path, float, bool, int]]:
         """Determines floor numbers and Z-levels for each image path."""
-        image_paths_pl = [Path(p) for p in image_file_paths]
         self.path_to_floor_map, floor_to_path_map = (
-            self.floor_manager.auto_assign_floors(image_paths_pl)
+            self.floor_manager.auto_assign_floors(image_file_paths)
         )
 
-        if z_levels_override and len(z_levels_override) == len(image_paths_pl):
+        if z_levels_override and len(z_levels_override) == len(image_file_paths):
             sorted_paths = sorted(
                 self.path_to_floor_map.keys(), key=lambda p: self.path_to_floor_map[p]
             )
@@ -171,14 +170,14 @@ class SuperNetwork:
 
     def run(
         self,
-        image_file_paths: List[str],
+        image_file_paths: List[Path],
         z_levels_override: Optional[List[float]] = None,
         force_vertical_tolerance: Optional[int] = None,
     ) -> nx.Graph:
         """Builds the multi-floor network."""
         self.super_graph.clear()
         floor_run_data = self._prepare_floor_data(
-            [Path(p) for p in image_file_paths], z_levels_override
+            [p for p in image_file_paths], z_levels_override
         )
         if not floor_run_data:
             logger.warning("No floor data to process.")
@@ -187,9 +186,10 @@ class SuperNetwork:
         max_nodes = self.s_config.get("estimated_max_nodes_per_floor", 10000)
         tasks = [
             (p, z, i * max_nodes + 1, outside, floor_num)
-            for i, (p, z, outside, floor_num) in enumerate(floor_run_data)
+            for i, (p, z, outside, floor_num) in enumerate(floor_run_data, start=1)
         ]
 
+        self.num_processes = min(self.num_processes, len(tasks))
         logger.info(
             f"Processing {len(tasks)} floors using {self.num_processes} processes..."
         )

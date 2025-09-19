@@ -11,7 +11,7 @@
             "request": "launch",
             "program": "/home/pan/code/Hospital_Room_Dectection/main.py",
             "console": "integratedTerminal",
-            "args": "--mode network"
+            // "args": "--mode network"
         }
     ]
 }

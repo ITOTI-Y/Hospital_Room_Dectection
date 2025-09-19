@@ -25,9 +25,12 @@ def export_slots_to_csv(
         logger.warning("Graph is empty. Cannot export slots.")
         return
 
-    slot_nodes: List[Dict[str, Any]] = [
-        data for _, data in graph.nodes(data=True) if data.get("category") == "SLOT"
-    ]
+    slot_nodes: List[Dict[str, Any]] = []
+    for node_id, data in graph.nodes(data=True):
+        if data.get("category") == "SLOT":
+            node_data = data.copy()
+            node_data["id"] = node_id
+            slot_nodes.append(node_data)
 
     if not slot_nodes:
         logger.warning("No nodes with category 'SLOT' found in the graph.")

@@ -1,4 +1,3 @@
-# Defines centralized paths for the project to avoid hardcoding.
 # Paths are relative to the project root directory.
 
 # Source data directories
@@ -10,3 +9,8 @@ results_dir: "results"
 network_dir: "{results_dir}/network"
 model_dir: "{results_dir}/model"
 debug_dir: "debug"
+
+# Specific file paths
+travel_times_csv: "{network_dir}/hospital_travel_times.csv"
+slots_csv: "{network_dir}/slots.csv"
+vis_html: "{network_dir}/hospital_network_3d.html"

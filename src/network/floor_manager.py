@@ -84,10 +84,6 @@ class FloorManager:
             floor = self.detect_floor_from_filename(p_path)
             if floor is not None:
                 if floor in path_to_floor_map.values():
-                    # Handle duplicate floor detection if necessary (e.g., error or rename)
-                    # For now, we might overwrite or just take the first one.
-                    # Let's assume for now floor numbers detected are unique or take the first.
-                    # A more robust solution would collect all paths per floor number.
                     logger.warning(
                         f"Warning: Duplicate floor number {floor} detected. Check filenames."
                     )
@@ -97,17 +93,12 @@ class FloorManager:
 
         path_to_floor_map.update(detected_floors)
 
-        # Assign floors to undetected paths sequentially
         if undetected_paths:
-            # Sort undetected paths to ensure consistent assignment order
-            # (e.g., alphabetically or by modification time if relevant)
             undetected_paths.sort()
 
-            # Determine starting floor for sequential assignment
             if detected_floors:
-                # Start from one above the highest detected floor, or one below the lowest if all are negative
                 all_detected_nos = list(detected_floors.values())
-                if all(f < 0 for f in all_detected_nos):  # if all are basement floors
+                if all(f < 0 for f in all_detected_nos):
                     start_floor = (
                         min(all_detected_nos) - 1
                         if min(all_detected_nos) - 1 not in all_detected_nos
@@ -116,9 +107,8 @@ class FloorManager:
                 else:
                     start_floor = max(all_detected_nos) + 1
 
-                # Ensure start_floor is not already taken
                 while start_floor in path_to_floor_map.values():
-                    start_floor += 1  # simple increment, could be smarter
+                    start_floor += 1
             else:
                 start_floor = self.base_floor_default
 
@@ -130,21 +120,15 @@ class FloorManager:
                     current_assigned_floor += 1
                 path_to_floor_map[p_path] = current_assigned_floor
 
-        # Create the reverse map (floor_to_path_map)
-        # This assumes one unique image per floor for this specific map.
-        # If multiple images could correspond to the same floor, this needs adjustment.
         floor_to_path_map: Dict[int, pathlib.Path] = {
             v: k for k, v in path_to_floor_map.items()
         }
 
-        # Verify uniqueness for floor_to_path_map
         if len(floor_to_path_map) != len(path_to_floor_map):
             logger.warning(
                 "Non-unique floor numbers assigned or detected, "
                 "floor_to_path_map may not represent all images."
             )
-            # Potentially rebuild floor_to_path_map to store List[pathlib.Path] per floor
-            # For now, this structure is kept simple as per original design.
 
         return path_to_floor_map, floor_to_path_map
 
@@ -170,9 +154,6 @@ class FloorManager:
         if 0 not in sorted_floor_numbers:
             revision_num = 1
 
-        # Simple Z level calculation: floor_number * default_floor_height
-        # This assumes a consistent floor height and that floor numbers represent relative positions.
-        # For example, Floor 0 is at Z=0, Floor 1 at Z=10, Floor -1 at Z=-10.
         z_levels: Dict[int, float] = {
             floor_num: float(
                 (floor_num - revision_num) * self.default_floor_height

@@ -249,7 +249,7 @@ class PlotlyPlotter(BasePlotter):
             nodes_by_name[name]["z"].append(z)
             nodes_by_name[name]["ids"].append(node_id)
 
-            hover_label = f"ID: {node_id}<br>Name: {name}<br>CName: {data.get('cname', 'N/A')}<br>Pos: ({x:.1f}, {y:.1f}, {z:.1f})"
+            hover_label = f"ID: {node_id}<br>Name: {name}<br>CName: {data.get('cname', 'N/A')}<br>Code: {data.get('code', 'N/A')}<br>Pos: ({x:.1f}, {y:.1f}, {z:.1f})"
             if name == "Door":
                 door_type = data.get('door_type', 'N/A')
                 hover_label += f"<br>Door Type: {door_type}"
@@ -337,9 +337,6 @@ class PlotlyPlotter(BasePlotter):
             scene=dict(
                 xaxis=dict(
                     title="X",
-                    # autorange="reversed"
-                    # if self.plotter_config.get("image_mirror")
-                    # else True,
                 ),
                 yaxis=dict(title="Y"),
                 zaxis=dict(title="Z (Floor)"),
