@@ -246,11 +246,10 @@ class NetworkGenerator:
             logger.error("Error occurred while exporting SLOT nodes")
 
         if self.super_graph:
-            nx.write_gml(
-                self.super_graph,
-                path_manager.get_path("network_dir", create_if_not_exist=True)
-                / "hospital_network.gml",
-            )
+            import pickle
+            graph_path = path_manager.get_path("network_dir", create_if_not_exist=True)
+            with open(graph_path / "hospital_network.pkl", "wb") as f:
+                pickle.dump(self.super_graph, f)
 
         logger.info("Complete network generation process completed successfully")
         network_info = self.get_network_info()
