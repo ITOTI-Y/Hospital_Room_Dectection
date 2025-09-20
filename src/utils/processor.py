@@ -2,7 +2,7 @@
 
 from pathlib import Path
 import cv2
-from src.utils.setup import setup_logger
+from src.utils.logger import setup_logger
 import numpy as np
 from PIL import Image
 from scipy.spatial import KDTree

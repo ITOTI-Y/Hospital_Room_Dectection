@@ -1,8 +1,8 @@
 from pathlib import Path
-from typing import Dict, Optional, Any, Tuple
+from typing import Dict, Optional, Any
 import networkx as nx
 
-from src.utils.setup import setup_logger
+from src.utils.logger import setup_logger
 from src.config import path_manager
 from src.network.super_network import SuperNetwork
 from src.plotting.plotter import PlotlyPlotter

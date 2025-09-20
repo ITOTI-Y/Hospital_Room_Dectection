@@ -5,7 +5,7 @@ Manages floor detection from filenames and Z-level calculations for SuperNetwork
 import re
 import pathlib
 from typing import List, Dict, Tuple, Optional
-from src.utils.setup import setup_logger
+from src.utils.logger import setup_logger
 
 logger = setup_logger(__name__)
 

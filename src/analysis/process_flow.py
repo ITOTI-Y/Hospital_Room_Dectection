@@ -1,5 +1,5 @@
 import pandas as pd
-from src.utils.setup import setup_logger
+from src.utils.logger import setup_logger
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Set, Any, Mapping
 from itertools import product

@@ -4,14 +4,17 @@ from typing import Optional
 from typing_extensions import Annotated
 
 from src.network_generator import NetworkGenerator
-from src.utils.setup import setup_logger
+from src.optimize_manager import OptimizeManager
+from src.utils.logger import setup_logger
+from src.config import config_loader
 
+config = config_loader.ConfigLoader()
 logger = setup_logger(__name__)
 app = typer.Typer()
 
 
 @app.command()
-def generate_network(
+def network(
     image_dir: Annotated[
         Optional[Path],
         typer.Option(
@@ -59,6 +62,10 @@ def generate_network(
         logger.error(f"System execution error: {e}", exc_info=True)
         raise typer.Exit(code=1)
 
+@app.command()
+def train():
+    optimize_manager = OptimizeManager(config)
+    optimize_manager.run()
 
 if __name__ == "__main__":
     app()

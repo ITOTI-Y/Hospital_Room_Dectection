@@ -1,4 +1,4 @@
-# src/rl_optimizer/utils/setup.py
+# src/utils/logger.py
 
 import sys
 from typing import Any, Optional

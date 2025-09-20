@@ -5,8 +5,8 @@ geometry:
   pedestrian_speed: 1.2           # 行人平均步行速度 (米/秒)
   grid_size: 40                   # mesh节点生成的基础网格大小
   morphology_kernel_size: [5, 5]  # 形态学操作的默认核大小
-  area_threshold: 60              # 被视为节点的连通区域最小面积阈值
-  mesh_node_connectivity_k: 9     # k-nearest neighbors for mesh node connection
+  area_threshold: 60              # 节点连通区域最小面积阈值
+  mesh_node_connectivity_k: 9     # 网格节点连接的k-nearest neighbors
   connection_dilation_kernel_size: [3, 3] # 连接节点（门）的膨胀核大小
 
 special_ids:

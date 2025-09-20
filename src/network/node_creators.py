@@ -4,7 +4,7 @@ from __future__ import annotations
 import abc
 import cv2
 import numpy as np
-from src.utils.setup import setup_logger
+from src.utils.logger import setup_logger
 from scipy.spatial import KDTree
 from typing import Dict, Tuple, Any, Optional, Iterable, TYPE_CHECKING
 

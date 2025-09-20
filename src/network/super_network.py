@@ -11,7 +11,7 @@ from pathlib import Path
 import networkx as nx
 import numpy as np
 from joblib import Parallel, delayed
-from src.utils.setup import setup_logger
+from src.utils.logger import setup_logger
 from typing import List, Dict, Tuple, Optional, Any
 from scipy.spatial import KDTree
 

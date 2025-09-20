@@ -2,15 +2,16 @@
 
 # Source data directories
 data_dir: "data"
-label_dir: "{data_dir}/label"
+label_dir: "${data_dir}/label"
 
 # Output directories
 results_dir: "results"
-network_dir: "{results_dir}/network"
-model_dir: "{results_dir}/model"
+network_dir: "${results_dir}/network"
+model_dir: "${results_dir}/model"
 debug_dir: "debug"
 
 # Specific file paths
-travel_times_csv: "{network_dir}/hospital_travel_times.csv"
-slots_csv: "{network_dir}/slots.csv"
-vis_html: "{network_dir}/hospital_network_3d.html"
+travel_times_csv: "${network_dir}/hospital_travel_times.csv"
+slots_csv: "${network_dir}/slots.csv"
+vis_html: "${network_dir}/hospital_network_3d.html"
+graph_pkl: "${network_dir}/hospital_network.pkl"

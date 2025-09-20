@@ -80,6 +80,7 @@ def calculate_room_travel_times(
     csv_file_path = output_dir / output_filename
     try:
         df.to_csv(csv_file_path, float_format="%.2f")
+        logger.info(f"Travel times matrix saved to {csv_file_path}")
     except IOError as e:
         logger.error(f"Failed to write travel times CSV to {csv_file_path}: {e}")
 

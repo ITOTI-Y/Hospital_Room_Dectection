@@ -4,7 +4,7 @@ Defines plotter classes for visualizing network graphs using Matplotlib and Plot
 
 import abc
 import pathlib
-from src.utils.setup import setup_logger
+from src.utils.logger import setup_logger
 import networkx as nx
 import numpy as np
 import plotly.graph_objects as go

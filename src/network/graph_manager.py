@@ -3,7 +3,7 @@
 import itertools
 import networkx as nx
 import numpy as np
-from src.utils.setup import setup_logger
+from src.utils.logger import setup_logger
 from typing import Dict, Optional, Iterator, List, Tuple, Any
 
 from src.config import graph_config

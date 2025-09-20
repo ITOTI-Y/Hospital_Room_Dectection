@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 import numpy as np
 import networkx as nx
-from src.utils.setup import setup_logger
+from src.utils.logger import setup_logger
 from typing import Tuple, List, Optional, Dict, TYPE_CHECKING, Sequence
 from scipy.spatial import KDTree
 import cv2
