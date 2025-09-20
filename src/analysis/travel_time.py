@@ -6,7 +6,7 @@ import pathlib
 import networkx as nx
 import logging
 import pandas as pd
-from typing import Dict, Union
+from typing import Dict, Hashable, Any
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +15,7 @@ def calculate_room_travel_times(
     graph: nx.Graph,
     output_dir: pathlib.Path,
     output_filename: str = "hospital_travel_times.csv",
-) -> Dict[str, Dict[str, Union[float, str]]]:
+) -> Dict[Hashable, Any]:
     """
     Calculates shortest travel times between all pairs of service locations.
 
@@ -40,7 +40,7 @@ def calculate_room_travel_times(
     location_nodes = {
         node_id: data
         for node_id, data in graph.nodes(data=True)
-        if data.get("category") in ["SLOT", "FIXED"]
+        if data.get("category") in ["SLOT", "FIXED"] or data.get("door_type") == "EXTERIOR"
     }
 
     if not location_nodes:

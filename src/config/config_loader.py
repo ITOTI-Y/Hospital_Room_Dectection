@@ -1,21 +1,24 @@
 from omegaconf import OmegaConf
 from pathlib import Path
-from typing import Dict, Any
+from typing import Any
 
 class ConfigLoader:
+
+    agent: Any
+    constraints: Any
+    graph_config: Any
+    paths: Any
+    pathways: Any
+    plotter: Any
 
     _instance = None
     def __new__(cls):
         if cls._instance is None:
             cls._instance = super().__new__(cls)
-            cls._instance.configs = cls._load_configs()
+            cls._instance._load_configs()
         return cls._instance
-
-    def __init__(self):
-        pass
     
-    @classmethod
-    def _load_configs(self) -> Dict[str, Any]:
+    def _load_configs(self) -> None:
         config_dir = Path(__file__).parent.parent.parent / "configs"
         
         for config_path in config_dir.glob("*.yaml"):
@@ -24,4 +27,4 @@ class ConfigLoader:
             setattr(self, config_name, config_data)
 
     def __getattr__(self, name):
-        return None
+        raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'.")

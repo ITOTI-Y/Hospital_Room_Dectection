@@ -1,14 +1,12 @@
-import numpy as np
 import random
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Tuple
 from src.utils.logger import setup_logger
 from src.config.config_loader import ConfigLoader
 
 class PathwayGenerator:
 
-    process_id: int = 1
-
     def __init__(self, config: ConfigLoader):
+        self.process_id = 1
         self.paths = config.paths
         self.pools = config.pathways.training_generation.department_pools
         self.fragments = config.pathways.training_generation.sequence_fragments
@@ -18,7 +16,7 @@ class PathwayGenerator:
         self.logger.info("PathwayGenerator initialized")
 
 
-    def generate_all(self) -> List[Dict[str, Any]]:
+    def generate_all(self) -> Dict[str, Dict[str, Any]]:
         pathways = {}
         count = 0
         while count < self.pathways_number:
@@ -30,7 +28,7 @@ class PathwayGenerator:
         return pathways
 
 
-    def generate(self) -> Dict[str, Any]:
+    def generate(self) -> Tuple[str, Dict[str, Any]]:
         rule_weights = [rule.base_weight for rule in self.meta_rules]
         chosen_rule = random.choices(self.meta_rules, weights=rule_weights, k=1)[0]
 
@@ -62,7 +60,7 @@ class PathwayGenerator:
 
         return full_sequence_str, final_pathway
 
-    def _parse_step(self, step: Dict[str, Any], context: Dict[str, Any], generated_sequence: List[str]):
+    def _parse_step(self, step: Any, context: Dict[str, Any], generated_sequence: List[str]):
         step_type = step.type
 
         if step_type == "primary_department":

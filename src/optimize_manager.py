@@ -1,4 +1,4 @@
-from src.pipeline import PathwayGenerator
+from src.pipeline import PathwayGenerator, CostManager
 from src.config.config_loader import ConfigLoader
 
 class OptimizeManager:
@@ -6,7 +6,8 @@ class OptimizeManager:
         self.config = config
         self.kwargs = kwargs
         self.pathway_generator = PathwayGenerator(self.config)
+        self.cost_manager = CostManager(self.config)
 
     def run(self):
         self.pathways = self.pathway_generator.generate_all()
-        pass
+        self.cost_manager.initialize(pathways=self.pathways)

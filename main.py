@@ -39,7 +39,7 @@ def network(
     ] = "slots.csv",
 ):
 
-    generator = NetworkGenerator()
+    generator = NetworkGenerator(config)
 
     try:
         success = generator.run_complete_generation(

@@ -3,7 +3,7 @@ from typing import Dict, Optional, Any
 import networkx as nx
 
 from src.utils.logger import setup_logger
-from src.config import path_manager
+from src.config.config_loader import ConfigLoader
 from src.network.super_network import SuperNetwork
 from src.plotting.plotter import PlotlyPlotter
 from src.analysis.travel_time import calculate_room_travel_times
@@ -18,16 +18,18 @@ class NetworkGenerator:
     including network generation, visualization, travel time calculation, and SLOT export.
     """
 
-    def __init__(self):
+    def __init__(self, config:ConfigLoader ):
         """
         Initializes the NetworkGenerator.
         """
+        self.config = config
+        self.paths = config.paths
         self.super_network: Optional[SuperNetwork] = None
         self.super_graph: Optional[nx.Graph] = None
 
         logger.info("NetworkGenerator initialized.")
-        logger.info(f"Results will be saved to: {path_manager.get_path('network_dir')}")
-        logger.info(f"Debug images will be saved to: {path_manager.get_path('debug_dir')}")
+        logger.info(f"Results will be saved to: {self.paths.network_dir}")
+        logger.info(f"Debug images will be saved to: {self.paths.debug_dir}")
 
     def generate_network(
         self,
@@ -49,7 +51,7 @@ class NetworkGenerator:
         logger.info("Starting multi floor network generation...")
 
         if image_dir is None:
-            image_dir = path_manager.get_path("label_dir")
+            image_dir = Path(self.paths.label_dir)
 
         if not image_dir.is_dir():
             logger.error(f"Floor annotation images directory does not exist: {image_dir}")
@@ -105,9 +107,8 @@ class NetworkGenerator:
         try:
             plotter = PlotlyPlotter()
 
-            network_path = path_manager.get_path(
-                "network_dir", create_if_not_exist=True
-            )
+            network_path = Path(self.paths.network_dir)
+            network_path.mkdir(parents=True, exist_ok=True)
             plot_output_path = network_path / output_filename
             plotter.plot(
                 graph=self.super_graph,
@@ -143,9 +144,8 @@ class NetworkGenerator:
         try:
             logger.info("Calculating travel times between rooms...")
 
-            network_path = path_manager.get_path(
-                "network_dir", create_if_not_exist=True
-            )
+            network_path = Path(self.paths.network_dir)
+            network_path.mkdir(parents=True, exist_ok=True)
             calculate_room_travel_times(
                 graph=self.super_graph,
                 output_dir=network_path,
@@ -176,9 +176,8 @@ class NetworkGenerator:
 
         try:
             logger.info("Exporting SLOT nodes...")
-            network_path = path_manager.get_path(
-                "network_dir", create_if_not_exist=True
-            )
+            network_path = Path(self.paths.network_dir)
+            network_path.mkdir(parents=True, exist_ok=True)
             export_slots_to_csv(
                 graph=self.super_graph,
                 output_dir=network_path,
@@ -247,7 +246,8 @@ class NetworkGenerator:
 
         if self.super_graph:
             import pickle
-            graph_path = path_manager.get_path("network_dir", create_if_not_exist=True)
+            graph_path = Path(self.paths.network_dir)
+            graph_path.mkdir(parents=True, exist_ok=True)
             with open(graph_path / "hospital_network.pkl", "wb") as f:
                 pickle.dump(self.super_graph, f)
 
