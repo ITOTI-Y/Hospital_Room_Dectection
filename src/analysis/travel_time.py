@@ -76,20 +76,10 @@ def calculate_room_travel_times(
     df = pd.DataFrame.from_dict(df_data, orient="index")
     df.index.name = "Source/Target"
 
-    # areas = pd.Series(
-    #     {
-    #         name: location_nodes[name_to_id[name]].get("area", 0)
-    #         for name in location_names
-    #     },
-    #     name="Area",
-    # )
-    # df = pd.concat([df, areas.to_frame().T])
-
     output_dir.mkdir(parents=True, exist_ok=True)
     csv_file_path = output_dir / output_filename
     try:
         df.to_csv(csv_file_path, float_format="%.2f")
-        logger.info(f"Travel times and areas saved to {csv_file_path}")
     except IOError as e:
         logger.error(f"Failed to write travel times CSV to {csv_file_path}: {e}")
 
