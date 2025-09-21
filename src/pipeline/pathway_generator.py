@@ -17,7 +17,7 @@ class PathwayGenerator:
 
 
     def generate_all(self) -> Dict[str, Dict[str, Any]]:
-        pathways = {}
+        pathways: Dict[str, Dict[str, Any]] = {}
         count = 0
         while count < self.pathways_number:
             full_sequence_str, final_pathway = self.generate()

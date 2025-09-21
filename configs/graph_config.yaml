@@ -287,7 +287,7 @@ node_definitions:
     service_time: 0
     category: "SLOT"
   DentalClinic2:
-    cname: "口腔科二区"
+    cname: "口腔二区"
     rgb: [232, 137, 248]
     code: "D25"
     service_time: 4964

@@ -247,6 +247,7 @@ class NetworkGenerator:
         if self.super_graph:
             import pickle
             graph_path = Path(self.paths.network_dir)
+            logger.info(f"Saving generated network graph to {graph_path / 'hospital_network.pkl'}")
             graph_path.mkdir(parents=True, exist_ok=True)
             with open(graph_path / "hospital_network.pkl", "wb") as f:
                 pickle.dump(self.super_graph, f)

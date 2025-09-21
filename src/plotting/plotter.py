@@ -376,6 +376,5 @@ class PlotlyPlotter(BasePlotter):
             p = pathlib.Path(output_path)
             p.parent.mkdir(parents=True, exist_ok=True)
             fig.write_html(str(p), config=self.plotter_config.get("plotly_config"))
-            logger.info(f"Plotly graph saved to {p}")
         else:
             fig.show()
