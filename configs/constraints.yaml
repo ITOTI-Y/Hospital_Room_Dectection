@@ -1,14 +1,13 @@
 # Hospital Department Layout Constraints Configuration
 area_compatibility_tolerance: 0.15
-fixed_departments:
-  - "急诊科"
-  - "挂号收费"
 
 adjacency_preferences:
-  - depts: ["产科", "NICU"]
-    weight: 1.5
-  - depts: ["手术室", "ICU"]
-    weight: 2.0
+  - depts: ["静配中心", "ICU"]
+    weight: 1.0
+  - depts: ["中心供应室", "内镜中心"]
+    weight: 1.0
+  - depts: ["采血处", "检验中心"]
+    weight: 1.0
 
-hard_constraint_penalty: -1000.0
+hard_constraint_penalty: -100.0
 adjacency_reward_factor: 10.0

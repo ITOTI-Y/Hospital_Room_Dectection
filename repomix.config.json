@@ -20,7 +20,7 @@
       "sortByChangesMaxCommits": 100
     }
   },
-  "include": ["src/","configs/","main.py","result/hospital_travel_times.csv","result/slots.csv" ],
+  "include": ["src/","configs/","main.py","results/network/hospital_travel_times.csv","results/network/slots.csv" ],
   "ignore": {
     "useGitignore": true,
     "useDefaultPatterns": true,

@@ -10,15 +10,16 @@ class OptimizeManager:
         self.config = config
         self.kwargs = kwargs
         self.pathway_generator = PathwayGenerator(self.config)
-        self.cost_manager = CostManager(self.config)
+        self.cost_manager = CostManager(self.config, is_shuffle=False)
 
     def run(self):
         self.pathways = self.pathway_generator.generate_all()
         self.cost_manager.initialize(pathways=self.pathways)
         cost_engine = self.cost_manager.create_cost_engine()
 
-        for i in range(1000):
+        cost_engine.current_adjacency_cost
+        for i in range(5000):
             dept1, dept2 = random.sample(list(cost_engine.layout), 2)
             if cost_engine.swap(dept1, dept2):
                 self.logger.info(f"Swap {dept1} and {dept2}, new cost: {cost_engine.current_travel_cost}")
-        pass
+        cost_engine.current_adjacency_cost

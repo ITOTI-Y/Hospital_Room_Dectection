@@ -3,17 +3,19 @@ import numpy as np
 import copy
 from typing import Dict, Any, Tuple, List, cast, Optional
 from collections import defaultdict
-from itertools import product, combinations_with_replacement
+from itertools import product, combinations_with_replacement, combinations
 
 from src.config.config_loader import ConfigLoader
 from src.utils.logger import setup_logger
 
 class CostManager:
-    def __init__(self, config: ConfigLoader):
+    def __init__(self, config: ConfigLoader, is_shuffle: bool = False):
         self.logger = setup_logger(__name__)
         self.config = config
         
         self.pathways: Dict[str, Dict[str, Any]] = {}
+        self.max_travel_time: float = 0.0
+        self.min_travel_time: float = float('inf')
         self.travel_times: pd.DataFrame = pd.DataFrame(dtype=float)
         self.name_to_name_id: Dict[str, List[str]] = defaultdict(list)
         self.id_to_name_id: Dict[int, str] = {}
@@ -23,10 +25,12 @@ class CostManager:
         self.id_to_area: Dict[int, float] = {}
         self.node_def: Dict[str, Any] = {}
         self.cname_to_name: Dict[str, str] = {}
+        self.adjacency_preferences: Dict[Tuple[str, str], float] = {}
 
-        self._load_travel_times()
+        self._load_travel_times(is_shuffle)
         self._load_slots_information()
         self._load_node_definitions()
+        self._load_adjacency_preferences()
 
         self.initial_layout: Dict[str, str] = {}
         self.pair_weights: Dict[Tuple[str, str], float] = defaultdict(float)
@@ -35,30 +39,20 @@ class CostManager:
         self.origin_service_cost: float = 0.0
         self.area_dict: Dict[Tuple[int,int], bool] = {}
 
-        self._precompute_pair_weights()
-        self._precompute_service_time_cost()
-        self._precompute_travel_time_cost()
-        self._precompute_area_dict()
+        self.shared_data = {}
 
-        self.shared_data = {
-            "travel_times": self.travel_times,
-            "pair_weights": self.pair_weights,
-            "pair_times": self.pair_times,
-            "service_weights": self.service_weights,
-            "node_def": self.node_def,
-            "name_id_to_id": self.name_id_to_id,
-            "area_dict": self.area_dict,
-            "initial_layout": self.initial_layout,
-            "origin_service_cost": self.origin_service_cost
-        }
-
-    def _load_travel_times(self) -> None:
+    def _load_travel_times(self, is_shuffle: bool) -> None:
         df = pd.read_csv(self.config.paths.travel_times_csv, index_col=0)
+        if is_shuffle:
+            df.columns = np.random.permutation(df.columns)
+            df.index = df.columns
         for name_id in df.index:
             name, id_num = name_id.rsplit('_', 1)
             self.name_to_name_id[name].append(name_id)
             self.id_to_name_id[int(id_num)] = name_id
             self.name_id_to_id[name_id] = int(id_num)
+        self.max_travel_time = df.values.max()
+        self.min_travel_time = df.values[df.values > 0].min()
         self.travel_times = df.copy()
 
     def _load_slots_information(self) -> None:
@@ -72,6 +66,16 @@ class CostManager:
     def _load_node_definitions(self) -> None:
         self.node_def = self.config.graph_config.node_definitions
         self.cname_to_name = {v['cname']: k for k, v in self.node_def.items()}
+
+    def _load_adjacency_preferences(self) -> None:
+        if adjacency_preferences := self.config.constraints.adjacency_preferences:
+            for pref in adjacency_preferences:
+                depts: List[str] = []
+                dept_names = [self.cname_to_name[i] for i in pref.depts]
+                for i in dept_names:
+                    depts.extend(self.name_to_name_id[i])
+                weight = float(pref.weight)
+                self.adjacency_preferences.update({(dept1, dept2): weight for dept1, dept2 in combinations(depts, 2)})
 
     def _precompute_initial_layout(self) -> None:
         for _, row in self.slots[['name', 'id']].iterrows():
@@ -165,6 +169,8 @@ class CostManager:
         self._precompute_travel_time_cost()
         self._precompute_area_dict()
         self.shared_data = {
+            "max_travel_time": self.max_travel_time,
+            "min_travel_time": self.min_travel_time,
             "travel_times": self.travel_times,
             "pair_weights": self.pair_weights,
             "pair_times": self.pair_times,
@@ -173,7 +179,8 @@ class CostManager:
             "name_id_to_id": self.name_id_to_id,
             "area_dict": self.area_dict,
             "initial_layout": self.initial_layout,
-            "origin_service_cost": self.origin_service_cost
+            "origin_service_cost": self.origin_service_cost,
+            "adjacency_preferences": self.adjacency_preferences,
         }
 
     def create_cost_engine(self) -> 'CostEngine':
@@ -182,6 +189,8 @@ class CostManager:
 class CostEngine():
     def __init__(self, shared_data: Dict[str, Any]):
         self.logger = setup_logger(__name__)
+        self.max_travel_time = shared_data["max_travel_time"]
+        self.min_travel_time = shared_data["min_travel_time"]
         self.travel_times = shared_data["travel_times"]
         self.pair_weights = shared_data["pair_weights"]
         self.pair_times = shared_data["pair_times"]
@@ -189,6 +198,7 @@ class CostEngine():
         self.area_dict = shared_data["area_dict"]
         self.origin_service_cost = shared_data["origin_service_cost"]
         self.initial_layout = shared_data["initial_layout"]
+        self.adjacency_preferences = shared_data["adjacency_preferences"]
 
         self._layout = copy.deepcopy(self.initial_layout)
 
@@ -237,6 +247,27 @@ class CostEngine():
     def current_total_cost(self) -> float:
         return self.origin_service_cost + self.current_travel_cost
     
+    @property
+    def current_adjacency_cost(self) -> float:
+        adjacency_cost = 0.0
+        for (dept1, dept2), weight in self.adjacency_preferences.items():
+            time = self.dept_to_dept_cost(dept1, dept2)
+            adjacency_cost += time / self.max_travel_time * weight
+        return adjacency_cost
+    
+    def dept_to_dept_cost(self, dept1: str, dept2: str) -> Optional[float]:
+        id1 = self.name_id_to_id[dept1]
+        id2 = self.name_id_to_id[dept2]
+        mask = self.np_times[:, :2] == np.array([id1, id2])
+        if np.any(np.all(mask, axis=1)):
+            time = self.np_times[np.all(mask, axis=1), 2][0]
+            return time
+        else:
+            mask = self.np_times[:, :2] == np.array([id2, id1])
+            if np.any(np.all(mask, axis=1)):
+                time = self.np_times[np.all(mask, axis=1), 2][0]
+                return time
+
     def reset(self) -> None:
         self._layout = copy.deepcopy(self.initial_layout)
         self._precompute_np_times()
@@ -246,18 +277,20 @@ class CostEngine():
         slot1 = self._layout[dept1]
         slot2 = self._layout[dept2]
 
-        id1 = self.name_id_to_id.get(slot1, -1)
-        id2 = self.name_id_to_id.get(slot2, -1)
+        s_id1 = self.name_id_to_id.get(slot1, -1)
+        s_id2 = self.name_id_to_id.get(slot2, -1)
+        d_id1 = self.name_id_to_id.get(dept1, -1)
+        d_id2 = self.name_id_to_id.get(dept2, -1)
 
-        if self.area_dict.get((id1, id2), False) is False:
+        if self.area_dict.get((s_id1, s_id2), False) is False:
             self.logger.debug(f"Swap between {dept1} and {dept2} violates area compatibility constraint. Swap reverted.")
             return None
 
-        mask_id1 = self.np_times[:, :2] == id1
-        mask_id2 = self.np_times[:, :2] == id2
+        mask_id1 = self.np_times[:, :2] == d_id1
+        mask_id2 = self.np_times[:, :2] == d_id2
 
-        self.np_times[:, :2][mask_id1] = id2
-        self.np_times[:, :2][mask_id2] = id1
+        self.np_times[:, :2][mask_id1] = d_id2
+        self.np_times[:, :2][mask_id2] = d_id1
 
         self._sort_np_matrices()
 
