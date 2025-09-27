@@ -17,9 +17,14 @@ class OptimizeManager:
         self.cost_manager.initialize(pathways=self.pathways)
         cost_engine = self.cost_manager.create_cost_engine()
 
-        cost_engine.current_adjacency_cost
-        for i in range(5000):
+        original_cost = cost_engine.current_travel_cost
+        current_cost = cost_engine.current_travel_cost
+        optimize_layout = None
+        for i in range(50000):
             dept1, dept2 = random.sample(list(cost_engine.layout), 2)
             if cost_engine.swap(dept1, dept2):
                 self.logger.info(f"Swap {dept1} and {dept2}, new cost: {cost_engine.current_travel_cost}")
-        cost_engine.current_adjacency_cost
+                if cost_engine.current_travel_cost < current_cost:
+                    current_cost = cost_engine.current_travel_cost
+                    optimize_layout = cost_engine.layout.copy()
+        pass

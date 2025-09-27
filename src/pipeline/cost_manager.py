@@ -158,7 +158,7 @@ class CostManager:
         for id1, id2 in combinations_with_replacement(self.id_to_area.keys(), 2):
             area1 = self.id_to_area[id1]
             area2 = self.id_to_area[id2]
-            is_compatible = abs(area1 - area2) <= tolerance * min(area1, area2)
+            is_compatible = (abs(area1 - area2) / max(area1, area2)) <= tolerance
             self.area_dict[(id1, id2)] = is_compatible
 
     def initialize(self, pathways: Dict[str, Dict[str, Any]] = {}) -> None:
@@ -181,6 +181,7 @@ class CostManager:
             "initial_layout": self.initial_layout,
             "origin_service_cost": self.origin_service_cost,
             "adjacency_preferences": self.adjacency_preferences,
+            "id_to_area": self.id_to_area
         }
 
     def create_cost_engine(self) -> 'CostEngine':
@@ -199,8 +200,10 @@ class CostEngine():
         self.origin_service_cost = shared_data["origin_service_cost"]
         self.initial_layout = shared_data["initial_layout"]
         self.adjacency_preferences = shared_data["adjacency_preferences"]
+        self.id_to_area = shared_data["id_to_area"]
 
         self._layout = copy.deepcopy(self.initial_layout)
+        self._slot_layout = {v: k for k, v in self._layout.items()}
 
         self.np_times: np.ndarray = np.array([])
         self.np_weights: np.ndarray = np.array([])
@@ -229,6 +232,8 @@ class CostEngine():
         self.np_weights = np.array(weight_list)
 
     def _sort_np_matrices(self):
+        self.np_times[:, :2] = np.sort(self.np_times[:, :2], axis=1)
+        self.np_weights[:, :2] = np.sort(self.np_weights[:, :2], axis=1)
         sorted_indices = np.lexsort((self.np_times[:, 1], self.np_times[:, 0]))
         self.np_times = self.np_times[sorted_indices]
         sorted_indices = np.lexsort((self.np_weights[:, 1], self.np_weights[:, 0]))
@@ -237,6 +242,10 @@ class CostEngine():
     @property
     def layout(self) -> Dict[str, str]:
         return self._layout
+    
+    @property
+    def slot_layout(self) -> Dict[str, str]:
+        return self._slot_layout
 
     @property
     def current_travel_cost(self) -> float:
@@ -254,6 +263,7 @@ class CostEngine():
             time = self.dept_to_dept_cost(dept1, dept2)
             adjacency_cost += time / self.max_travel_time * weight
         return adjacency_cost
+    
     
     def dept_to_dept_cost(self, dept1: str, dept2: str) -> Optional[float]:
         id1 = self.name_id_to_id[dept1]
@@ -277,12 +287,11 @@ class CostEngine():
         slot1 = self._layout[dept1]
         slot2 = self._layout[dept2]
 
-        s_id1 = self.name_id_to_id.get(slot1, -1)
-        s_id2 = self.name_id_to_id.get(slot2, -1)
         d_id1 = self.name_id_to_id.get(dept1, -1)
         d_id2 = self.name_id_to_id.get(dept2, -1)
 
-        if self.area_dict.get((s_id1, s_id2), False) is False:
+        is_swapable:bool = (self.area_dict.get((d_id1, d_id2), False) or self.area_dict.get((d_id2, d_id1), False))
+        if not is_swapable:
             self.logger.debug(f"Swap between {dept1} and {dept2} violates area compatibility constraint. Swap reverted.")
             return None
 
@@ -293,8 +302,11 @@ class CostEngine():
         self.np_times[:, :2][mask_id2] = d_id1
 
         self._sort_np_matrices()
-
+        
         self._layout[dept1] = slot2
         self._layout[dept2] = slot1
+
+        self._slot_layout[slot1] = dept2
+        self._slot_layout[slot2] = dept1
 
         return self.current_travel_cost

@@ -60,7 +60,6 @@ src/
   config/
     __init__.py
     config_loader.py
-    config.py
     graph_config.py
     path_manager.py
   network/
@@ -92,23 +91,6 @@ This section contains the contents of the repository's files.
 <file path="configs/agent.yaml">
 learning_rate: 0.0003
 gamma: 0.99
-</file>
-
-<file path="configs/constraints.yaml">
-# Hospital Department Layout Constraints Configuration
-area_compatibility_tolerance: 0.15
-fixed_departments:
-  - "急诊科"
-  - "挂号收费"
-
-adjacency_preferences:
-  - depts: ["产科", "NICU"]
-    weight: 1.5
-  - depts: ["手术室", "ICU"]
-    weight: 2.0
-
-hard_constraint_penalty: -1000.0
-adjacency_reward_factor: 10.0
 </file>
 
 <file path="configs/plotter.yaml">
@@ -174,132 +156,6 @@ plotly_config:
 from .travel_time import calculate_room_travel_times
 
 __all__ = ["calculate_room_travel_times"]
-</file>
-
-<file path="src/config/config.py">
-"""Configuration module for the optimization project."""
-
-import pathlib
-from typing import List
-
-
-class RLConfig:
-    """Stores configuration parameters for RL and other optimization algorithms."""
-
-    def __init__(self):
-        """Initializes all configuration parameters."""
-        # Path configurations
-        self.ROOT_PATH: pathlib.Path = pathlib.Path(__file__).parent.parent
-        self.RL_OPTIMIZER_PATH: pathlib.Path = self.ROOT_PATH / "src" / "rl_optimizer"
-        self.DATA_PATH: pathlib.Path = self.RL_OPTIMIZER_PATH / "data"
-        self.CACHE_PATH: pathlib.Path = self.DATA_PATH / "cache"
-        self.LOG_PATH: pathlib.Path = self.ROOT_PATH / "logs"
-        self.RESULT_PATH: pathlib.Path = self.ROOT_PATH / "results"
-
-        # Input files
-        self.TRAVEL_TIMES_CSV: pathlib.Path = (
-            self.RESULT_PATH / "network" / "hospital_travel_times.csv"
-        )
-        self.PROCESS_TEMPLATES_JSON: pathlib.Path = (
-            self.DATA_PATH / "process_templates_traditional.json"
-        )
-
-        # Auto-generated/cached intermediate files
-        self.NODE_VARIANTS_JSON: pathlib.Path = self.CACHE_PATH / "node_variants.json"
-        self.TRAFFIC_DISTRIBUTION_JSON: pathlib.Path = (
-            self.CACHE_PATH / "traffic_distribution.json"
-        )
-        self.RESOLVED_PATHWAYS_PKL: pathlib.Path = (
-            self.CACHE_PATH / "resolved_pathways.pkl"
-        )
-        self.COST_MATRIX_CACHE: pathlib.Path = (
-            self.CACHE_PATH / "cost_precomputation.npz"
-        )
-
-        # Constraint configurations
-        self.AREA_SCALING_FACTOR: float = 0.1
-        self.EMPTY_SLOT_PENALTY_FACTOR: float = 10000.0
-        self.ALLOW_PARTIAL_LAYOUT: bool = True
-        self.MANDATORY_ADJACENCY: List[List[str]] = []
-        self.FIXED_NODE_TYPES: List[str] = [
-            "门",
-            "楼梯",
-            "电梯",
-            "扶梯",
-            "走廊",
-            "墙",
-            "栏杆",
-            "室外",
-            "绿化",
-            "中庭",
-            "空房间",
-            "急诊科",
-            "挂号收费",
-        ]
-
-        # --- Heuristic Algorithm Defaults ---
-        # Simulated Annealing
-        self.SA_DEFAULT_INITIAL_TEMP: float = 1000.0
-        self.SA_DEFAULT_FINAL_TEMP: float = 0.1
-        self.SA_DEFAULT_COOLING_RATE: float = 0.95
-        self.SA_DEFAULT_TEMPERATURE_LENGTH: int = 100
-        self.SA_DEFAULT_MAX_ITERATIONS: int = 10000
-        self.SA_MAX_REPAIR_ATTEMPTS: int = 10
-
-        # Genetic Algorithm
-        self.GA_DEFAULT_POPULATION_SIZE: int = 300
-        self.GA_DEFAULT_ELITE_SIZE: int = 20
-        self.GA_DEFAULT_MUTATION_RATE: float = 0.15
-        self.GA_DEFAULT_CROSSOVER_RATE: float = 0.85
-        self.GA_DEFAULT_TOURNAMENT_SIZE: int = 5
-        self.GA_DEFAULT_MAX_AGE: int = 100
-        self.GA_DEFAULT_CONVERGENCE_THRESHOLD: int = 300
-        self.GA_DEFAULT_MAX_ITERATIONS: int = 10000
-        self.GA_MAX_REPAIR_ATTEMPTS: int = 5
-
-        # --- PPO & RL Configurations ---
-        # Transformer model
-        self.EMBEDDING_DIM: int = 128
-        self.FEATURES_DIM: int = 128
-        self.TRANSFORMER_HEADS: int = 4
-        self.TRANSFORMER_LAYERS: int = 4
-        self.TRANSFORMER_DROPOUT: float = 0.1
-
-        # Policy network
-        self.POLICY_NET_ARCH: int = 128
-        self.POLICY_NET_LAYERS: int = 2
-        self.VALUE_NET_ARCH: int = 128
-        self.VALUE_NET_LAYERS: int = 2
-
-        # Learning rate scheduler
-        self.LEARNING_RATE_SCHEDULE_TYPE: str = "linear"
-        self.LEARNING_RATE_INITIAL: float = 1e-4
-        self.LEARNING_RATE_FINAL: float = 1e-8
-        self.LEARNING_RATE: float = 1e-4
-
-        # PPO training hyperparameters
-        self.NUM_ENVS: int = 8
-        self.N_STEPS: int = 512
-        self.TOTAL_TIMESTEPS: int = 5_000_000
-        self.GAMMA: float = 0.99
-        self.GAE_LAMBDA: float = 0.95
-        self.CLIP_RANGE: float = 0.2
-        self.ENT_COEF: float = 0.05
-        self.VF_COEF: float = 0.5
-        self.MAX_GRAD_NORM: float = 0.5
-        self.BATCH_SIZE: int = 64
-        self.N_EPOCHS: int = 10
-
-        # Checkpoint and evaluation
-        self.EVAL_FREQUENCY: int = 10000
-        self.RESUME_TRAINING: bool = False
-        self.PRETRAINED_MODEL_PATH: str = "data/model"
-        self.CHECKPOINT_FREQUENCY: int = 50000
-        self.SAVE_TRAINING_STATE: bool = True
-
-        # Ensure critical paths exist
-        self.CACHE_PATH.mkdir(parents=True, exist_ok=True)
-        self.LOG_PATH.mkdir(parents=True, exist_ok=True)
 </file>
 
 <file path="src/config/graph_config.py">
@@ -562,13 +418,6 @@ from .plotter import BasePlotter, PlotlyPlotter  # MatplotlibPlotter can be adde
 __all__ = ["BasePlotter", "PlotlyPlotter"]
 </file>
 
-<file path="src/rl/environment.py">
-import gymnasium as gym
-import numpy as np
-import networkx as nx
-from gymnasium import spaces
-</file>
-
 <file path="src/utils/logger.py">
 # src/utils/logger.py
 
@@ -691,6 +540,22 @@ def load_pickle(path: pathlib.Path) -> Any:
     """从pickle文件加载Python对象。"""
     with open(path, "rb") as f:
         return pickle.load(f)
+</file>
+
+<file path="configs/constraints.yaml">
+# Hospital Department Layout Constraints Configuration
+area_compatibility_tolerance: 0.15
+
+adjacency_preferences:
+  - depts: ["静配中心", "ICU"]
+    weight: 1.0
+  - depts: ["中心供应室", "内镜中心"]
+    weight: 1.0
+  - depts: ["采血处", "检验中心"]
+    weight: 1.0
+
+hard_constraint_penalty: -100.0
+adjacency_reward_factor: 10.0
 </file>
 
 <file path="src/analysis/slots_exporter.py">
@@ -1352,6 +1217,13 @@ from .pathway_generator import PathwayGenerator
 from .cost_manager import CostManager
 
 __all__ = ["PathwayGenerator", "CostManager"]
+</file>
+
+<file path="src/rl/environment.py">
+import gymnasium as gym
+import numpy as np
+import networkx as nx
+from gymnasium import spaces
 </file>
 
 <file path="configs/graph_config.yaml">
@@ -2627,279 +2499,6 @@ class SuperNetwork:
         )
 </file>
 
-<file path="src/pipeline/cost_manager.py">
-import pandas as pd
-import numpy as np
-import copy
-from typing import Dict, Any, Tuple, List, cast, Optional
-from collections import defaultdict
-from itertools import product, combinations_with_replacement
-
-from src.config.config_loader import ConfigLoader
-from src.utils.logger import setup_logger
-
-class CostManager:
-    def __init__(self, config: ConfigLoader, is_shuffle: bool = False):
-        self.logger = setup_logger(__name__)
-        self.config = config
-        
-        self.pathways: Dict[str, Dict[str, Any]] = {}
-        self.travel_times: pd.DataFrame = pd.DataFrame(dtype=float)
-        self.name_to_name_id: Dict[str, List[str]] = defaultdict(list)
-        self.id_to_name_id: Dict[int, str] = {}
-        self.slots: pd.DataFrame = pd.DataFrame()
-        self.name_id_to_id: Dict[str, int] = {}
-        self.name_id_to_area: Dict[str, float] = {}
-        self.id_to_area: Dict[int, float] = {}
-        self.node_def: Dict[str, Any] = {}
-        self.cname_to_name: Dict[str, str] = {}
-
-        self._load_travel_times(is_shuffle)
-        self._load_slots_information()
-        self._load_node_definitions()
-
-        self.initial_layout: Dict[str, str] = {}
-        self.pair_weights: Dict[Tuple[str, str], float] = defaultdict(float)
-        self.pair_times: Dict[Tuple[str, str], float] = defaultdict(float)
-        self.service_weights: Dict[str, float] = defaultdict(float)
-        self.origin_service_cost: float = 0.0
-        self.area_dict: Dict[Tuple[int,int], bool] = {}
-
-        self._precompute_pair_weights()
-        self._precompute_service_time_cost()
-        self._precompute_travel_time_cost()
-        self._precompute_area_dict()
-
-        self.shared_data = {
-            "travel_times": self.travel_times,
-            "pair_weights": self.pair_weights,
-            "pair_times": self.pair_times,
-            "service_weights": self.service_weights,
-            "node_def": self.node_def,
-            "name_id_to_id": self.name_id_to_id,
-            "area_dict": self.area_dict,
-            "initial_layout": self.initial_layout,
-            "origin_service_cost": self.origin_service_cost
-        }
-
-    def _load_travel_times(self, is_shuffle: bool) -> None:
-        df = pd.read_csv(self.config.paths.travel_times_csv, index_col=0)
-        if is_shuffle:
-            df.columns = np.random.permutation(df.columns)
-            df.index = df.columns
-        for name_id in df.index:
-            name, id_num = name_id.rsplit('_', 1)
-            self.name_to_name_id[name].append(name_id)
-            self.id_to_name_id[int(id_num)] = name_id
-            self.name_id_to_id[name_id] = int(id_num)
-        self.travel_times = df.copy()
-
-    def _load_slots_information(self) -> None:
-        df = pd.read_csv(self.config.paths.slots_csv)
-        for _, row in df[['name', 'id', 'area']].iterrows():
-            name_id = row['name'] + '_' + str(row['id'])
-            self.name_id_to_area[name_id] = float(row['area'])
-            self.id_to_area[int(row['id'])] = float(row['area'])
-        self.slots = df.copy()
-
-    def _load_node_definitions(self) -> None:
-        self.node_def = self.config.graph_config.node_definitions
-        self.cname_to_name = {v['cname']: k for k, v in self.node_def.items()}
-
-    def _precompute_initial_layout(self) -> None:
-        for _, row in self.slots[['name', 'id']].iterrows():
-            name = row['name'] + '_' + str(row['id'])
-            self.initial_layout[name] = name
-
-    def _precompute_pair_weights(self):
-
-        for dept1 in self.travel_times.index:
-            for dept2 in self.travel_times.columns:
-                if dept1 == dept2:
-                    continue
-                elif (dept2, dept1) in self.pair_weights:
-                    continue
-                self.pair_weights[(dept1, dept2)] = 0.0
-
-        for pathway in self.pathways.values():
-            sequence: List[str] = pathway.get('core_sequence', [])
-            weight = pathway.get('weight', 1.0)
-            start_nodes: List[str] = pathway.get('start_nodes', [])
-            end_nodes: List[str] = pathway.get('end_nodes', [])
-
-            for i, dept in enumerate(sequence):
-                dept = self.cname_to_name.get(dept, dept)
-                self.service_weights[dept] += weight
-                if i > 0:
-                    prev_dept = self.cname_to_name.get(sequence[i - 1], sequence[i - 1])
-                    pairs = list(product(self.name_to_name_id.get(prev_dept, [prev_dept]), self.name_to_name_id.get(dept, [dept])))
-                    for pair in pairs:
-                        reversed_pair = (pair[1], pair[0])
-                        if reversed_pair in self.pair_weights:
-                            self.pair_weights[reversed_pair] += weight / len(pairs)
-                            continue
-                        self.pair_weights[pair] += weight / len(pairs)
-
-            for start_node in start_nodes:
-                start_node = self.cname_to_name.get(start_node, start_node)
-                dept = self.cname_to_name.get(sequence[0], sequence[0])
-                pairs: List[Tuple[str, str]] = list(product(self.name_to_name_id.get(start_node, [start_node]), self.name_to_name_id.get(dept, [dept])))
-                for pair in pairs:
-                    reversed_pair = (pair[1], pair[0])
-                    if reversed_pair in self.pair_weights:
-                        self.pair_weights[reversed_pair] += weight / len(pairs)
-                        continue
-                    self.pair_weights[pair] += weight / len(pairs)
-
-            for i, end_node in enumerate(end_nodes):
-                end_node = self.cname_to_name.get(end_node, end_node)
-                if i == 0:
-                    dept = self.cname_to_name.get(sequence[-1], sequence[-1])
-                    pairs = list(product(self.name_to_name_id.get(dept, [dept]), self.name_to_name_id.get(end_node, [end_node])))
-                else:
-                    dept = self.cname_to_name.get(end_nodes[i - 1], end_nodes[i - 1])
-                    pairs = list(product(self.name_to_name_id.get(dept, [dept]), self.name_to_name_id.get(end_node, [end_node])))
-                for pair in pairs:
-                    reversed_pair = (pair[1], pair[0])
-                    if reversed_pair in self.pair_weights:
-                        self.pair_weights[reversed_pair] += weight / len(pairs)
-                        continue
-                    self.pair_weights[pair] += weight / len(pairs)
-        self.logger.info(f"Total {len(self.pair_weights)} pairs computed.")
-
-    def _precompute_service_time_cost(self) -> None:
-
-        service_cost = 0.0
-        for dept in self.service_weights:
-            service_time = self.node_def.get(dept, {}).get('service_time', 0)
-            service_cost += service_time * self.service_weights[dept]
-        self.origin_service_cost = service_cost
-
-    def _precompute_travel_time_cost(self) -> None:
-        for (dept1, dept2), _ in self.pair_weights.items():
-            slot1 = self.initial_layout.get(dept1, dept1)
-            slot2 = self.initial_layout.get(dept2, dept2)
-            time = cast(float, self.travel_times.loc[slot1, slot2])
-            self.pair_times[(dept1, dept2)] += time
-    
-    def _precompute_area_dict(self):
-        tolerance = cast(float, self.config.constraints.area_compatibility_tolerance)
-        for id1, id2 in combinations_with_replacement(self.id_to_area.keys(), 2):
-            area1 = self.id_to_area[id1]
-            area2 = self.id_to_area[id2]
-            is_compatible = abs(area1 - area2) <= tolerance * min(area1, area2)
-            self.area_dict[(id1, id2)] = is_compatible
-
-    def initialize(self, pathways: Dict[str, Dict[str, Any]] = {}) -> None:
-        self.pathways = pathways
-        self._precompute_initial_layout()
-        self._precompute_pair_weights()
-        self._precompute_service_time_cost()
-        self._precompute_travel_time_cost()
-        self._precompute_area_dict()
-        self.shared_data = {
-            "travel_times": self.travel_times,
-            "pair_weights": self.pair_weights,
-            "pair_times": self.pair_times,
-            "service_weights": self.service_weights,
-            "node_def": self.node_def,
-            "name_id_to_id": self.name_id_to_id,
-            "area_dict": self.area_dict,
-            "initial_layout": self.initial_layout,
-            "origin_service_cost": self.origin_service_cost
-        }
-
-    def create_cost_engine(self) -> 'CostEngine':
-        return CostEngine(self.shared_data)
-
-class CostEngine():
-    def __init__(self, shared_data: Dict[str, Any]):
-        self.logger = setup_logger(__name__)
-        self.travel_times = shared_data["travel_times"]
-        self.pair_weights = shared_data["pair_weights"]
-        self.pair_times = shared_data["pair_times"]
-        self.name_id_to_id = shared_data["name_id_to_id"]
-        self.area_dict = shared_data["area_dict"]
-        self.origin_service_cost = shared_data["origin_service_cost"]
-        self.initial_layout = shared_data["initial_layout"]
-
-        self._layout = copy.deepcopy(self.initial_layout)
-
-        self.np_times: np.ndarray = np.array([])
-        self.np_weights: np.ndarray = np.array([])
-        self._precompute_np_times()
-        self._precompute_np_weights()
-        self._sort_np_matrices()
-
-    def _precompute_np_times(self) -> None:
-        time_list = []
-        for (dept1, dept2), time in self.pair_times.items():
-            id1 = self.name_id_to_id.get(dept1)
-            id2 = self.name_id_to_id.get(dept2)
-            if id1 is None or id2 is None:
-                continue
-            time_list.append((id1, id2, time))
-        self.np_times = np.array(time_list)
-
-    def _precompute_np_weights(self) -> None:
-        weight_list = []
-        for (dept1, dept2), weight in self.pair_weights.items():
-            id1 = self.name_id_to_id.get(dept1)
-            id2 = self.name_id_to_id.get(dept2)
-            if id1 is None or id2 is None:
-                continue
-            weight_list.append((id1, id2, weight))
-        self.np_weights = np.array(weight_list)
-
-    def _sort_np_matrices(self):
-        sorted_indices = np.lexsort((self.np_times[:, 1], self.np_times[:, 0]))
-        self.np_times = self.np_times[sorted_indices]
-        sorted_indices = np.lexsort((self.np_weights[:, 1], self.np_weights[:, 0]))
-        self.np_weights = self.np_weights[sorted_indices]
-
-    @property
-    def layout(self) -> Dict[str, str]:
-        return self._layout
-
-    @property
-    def current_travel_cost(self) -> float:
-        travel_time = np.dot(self.np_times[:, 2], self.np_weights[:, 2])
-        return travel_time
-    
-    @property
-    def current_total_cost(self) -> float:
-        return self.origin_service_cost + self.current_travel_cost
-    
-    def reset(self) -> None:
-        self._layout = copy.deepcopy(self.initial_layout)
-        self._precompute_np_times()
-        self._sort_np_matrices()
-
-    def swap(self, dept1: str, dept2: str) -> Optional[float]:
-        slot1 = self._layout[dept1]
-        slot2 = self._layout[dept2]
-
-        id1 = self.name_id_to_id.get(slot1, -1)
-        id2 = self.name_id_to_id.get(slot2, -1)
-
-        if self.area_dict.get((id1, id2), False) is False:
-            self.logger.debug(f"Swap between {dept1} and {dept2} violates area compatibility constraint. Swap reverted.")
-            return None
-
-        mask_id1 = self.np_times[:, :2] == id1
-        mask_id2 = self.np_times[:, :2] == id2
-
-        self.np_times[:, :2][mask_id1] = id2
-        self.np_times[:, :2][mask_id2] = id1
-
-        self._sort_np_matrices()
-
-        self._layout[dept1] = slot2
-        self._layout[dept2] = slot1
-
-        return self.current_travel_cost
-</file>
-
 <file path="src/pipeline/pathway_generator.py">
 import random
 from typing import Dict, Any, List, Tuple
@@ -3382,6 +2981,309 @@ Ultrasound_20006,131.86,101.07,236.00,175.16,271.78,100.26,178.46,219.46,260.79,
 Urology_40002,190.68,122.55,300.25,187.63,270.01,138.84,180.54,231.93,273.26,110.34,123.85,233.73,115.46,230.01,266.99,117.88,123.79,233.83,132.87,280.89,140.16,245.36,185.80,228.01,91.28,298.02,273.26,88.16,163.34,146.15,279.47,259.51,272.70,63.95,248.71,110.34,231.37,117.34,303.76,142.05,141.63,187.63,293.45,172.02,179.01,164.65,280.23,216.28,86.05,190.50,62.74,109.53,85.24,109.53,207.50,63.95,207.33,248.97,147.93,0.00
 </file>
 
+<file path="src/pipeline/cost_manager.py">
+import pandas as pd
+import numpy as np
+import copy
+from typing import Dict, Any, Tuple, List, cast, Optional
+from collections import defaultdict
+from itertools import product, combinations_with_replacement, combinations
+
+from src.config.config_loader import ConfigLoader
+from src.utils.logger import setup_logger
+
+class CostManager:
+    def __init__(self, config: ConfigLoader, is_shuffle: bool = False):
+        self.logger = setup_logger(__name__)
+        self.config = config
+        
+        self.pathways: Dict[str, Dict[str, Any]] = {}
+        self.max_travel_time: float = 0.0
+        self.min_travel_time: float = float('inf')
+        self.travel_times: pd.DataFrame = pd.DataFrame(dtype=float)
+        self.name_to_name_id: Dict[str, List[str]] = defaultdict(list)
+        self.id_to_name_id: Dict[int, str] = {}
+        self.slots: pd.DataFrame = pd.DataFrame()
+        self.name_id_to_id: Dict[str, int] = {}
+        self.name_id_to_area: Dict[str, float] = {}
+        self.id_to_area: Dict[int, float] = {}
+        self.node_def: Dict[str, Any] = {}
+        self.cname_to_name: Dict[str, str] = {}
+        self.adjacency_preferences: Dict[Tuple[str, str], float] = {}
+
+        self._load_travel_times(is_shuffle)
+        self._load_slots_information()
+        self._load_node_definitions()
+        self._load_adjacency_preferences()
+
+        self.initial_layout: Dict[str, str] = {}
+        self.pair_weights: Dict[Tuple[str, str], float] = defaultdict(float)
+        self.pair_times: Dict[Tuple[str, str], float] = defaultdict(float)
+        self.service_weights: Dict[str, float] = defaultdict(float)
+        self.origin_service_cost: float = 0.0
+        self.area_dict: Dict[Tuple[int,int], bool] = {}
+
+        self.shared_data = {}
+
+    def _load_travel_times(self, is_shuffle: bool) -> None:
+        df = pd.read_csv(self.config.paths.travel_times_csv, index_col=0)
+        if is_shuffle:
+            df.columns = np.random.permutation(df.columns)
+            df.index = df.columns
+        for name_id in df.index:
+            name, id_num = name_id.rsplit('_', 1)
+            self.name_to_name_id[name].append(name_id)
+            self.id_to_name_id[int(id_num)] = name_id
+            self.name_id_to_id[name_id] = int(id_num)
+        self.max_travel_time = df.values.max()
+        self.min_travel_time = df.values[df.values > 0].min()
+        self.travel_times = df.copy()
+
+    def _load_slots_information(self) -> None:
+        df = pd.read_csv(self.config.paths.slots_csv)
+        for _, row in df[['name', 'id', 'area']].iterrows():
+            name_id = row['name'] + '_' + str(row['id'])
+            self.name_id_to_area[name_id] = float(row['area'])
+            self.id_to_area[int(row['id'])] = float(row['area'])
+        self.slots = df.copy()
+
+    def _load_node_definitions(self) -> None:
+        self.node_def = self.config.graph_config.node_definitions
+        self.cname_to_name = {v['cname']: k for k, v in self.node_def.items()}
+
+    def _load_adjacency_preferences(self) -> None:
+        if adjacency_preferences := self.config.constraints.adjacency_preferences:
+            for pref in adjacency_preferences:
+                depts: List[str] = []
+                dept_names = [self.cname_to_name[i] for i in pref.depts]
+                for i in dept_names:
+                    depts.extend(self.name_to_name_id[i])
+                weight = float(pref.weight)
+                self.adjacency_preferences.update({(dept1, dept2): weight for dept1, dept2 in combinations(depts, 2)})
+
+    def _precompute_initial_layout(self) -> None:
+        for _, row in self.slots[['name', 'id']].iterrows():
+            name = row['name'] + '_' + str(row['id'])
+            self.initial_layout[name] = name
+
+    def _precompute_pair_weights(self):
+
+        for dept1 in self.travel_times.index:
+            for dept2 in self.travel_times.columns:
+                if dept1 == dept2:
+                    continue
+                elif (dept2, dept1) in self.pair_weights:
+                    continue
+                self.pair_weights[(dept1, dept2)] = 0.0
+
+        for pathway in self.pathways.values():
+            sequence: List[str] = pathway.get('core_sequence', [])
+            weight = pathway.get('weight', 1.0)
+            start_nodes: List[str] = pathway.get('start_nodes', [])
+            end_nodes: List[str] = pathway.get('end_nodes', [])
+
+            for i, dept in enumerate(sequence):
+                dept = self.cname_to_name.get(dept, dept)
+                self.service_weights[dept] += weight
+                if i > 0:
+                    prev_dept = self.cname_to_name.get(sequence[i - 1], sequence[i - 1])
+                    pairs = list(product(self.name_to_name_id.get(prev_dept, [prev_dept]), self.name_to_name_id.get(dept, [dept])))
+                    for pair in pairs:
+                        reversed_pair = (pair[1], pair[0])
+                        if reversed_pair in self.pair_weights:
+                            self.pair_weights[reversed_pair] += weight / len(pairs)
+                            continue
+                        self.pair_weights[pair] += weight / len(pairs)
+
+            for start_node in start_nodes:
+                start_node = self.cname_to_name.get(start_node, start_node)
+                dept = self.cname_to_name.get(sequence[0], sequence[0])
+                pairs: List[Tuple[str, str]] = list(product(self.name_to_name_id.get(start_node, [start_node]), self.name_to_name_id.get(dept, [dept])))
+                for pair in pairs:
+                    reversed_pair = (pair[1], pair[0])
+                    if reversed_pair in self.pair_weights:
+                        self.pair_weights[reversed_pair] += weight / len(pairs)
+                        continue
+                    self.pair_weights[pair] += weight / len(pairs)
+
+            for i, end_node in enumerate(end_nodes):
+                end_node = self.cname_to_name.get(end_node, end_node)
+                if i == 0:
+                    dept = self.cname_to_name.get(sequence[-1], sequence[-1])
+                    pairs = list(product(self.name_to_name_id.get(dept, [dept]), self.name_to_name_id.get(end_node, [end_node])))
+                else:
+                    dept = self.cname_to_name.get(end_nodes[i - 1], end_nodes[i - 1])
+                    pairs = list(product(self.name_to_name_id.get(dept, [dept]), self.name_to_name_id.get(end_node, [end_node])))
+                for pair in pairs:
+                    reversed_pair = (pair[1], pair[0])
+                    if reversed_pair in self.pair_weights:
+                        self.pair_weights[reversed_pair] += weight / len(pairs)
+                        continue
+                    self.pair_weights[pair] += weight / len(pairs)
+        self.logger.info(f"Total {len(self.pair_weights)} pairs computed.")
+
+    def _precompute_service_time_cost(self) -> None:
+
+        service_cost = 0.0
+        for dept in self.service_weights:
+            service_time = self.node_def.get(dept, {}).get('service_time', 0)
+            service_cost += service_time * self.service_weights[dept]
+        self.origin_service_cost = service_cost
+
+    def _precompute_travel_time_cost(self) -> None:
+        for (dept1, dept2), _ in self.pair_weights.items():
+            slot1 = self.initial_layout.get(dept1, dept1)
+            slot2 = self.initial_layout.get(dept2, dept2)
+            time = cast(float, self.travel_times.loc[slot1, slot2])
+            self.pair_times[(dept1, dept2)] += time
+    
+    def _precompute_area_dict(self):
+        tolerance = cast(float, self.config.constraints.area_compatibility_tolerance)
+        for id1, id2 in combinations_with_replacement(self.id_to_area.keys(), 2):
+            area1 = self.id_to_area[id1]
+            area2 = self.id_to_area[id2]
+            is_compatible = abs(area1 - area2) <= tolerance * min(area1, area2)
+            self.area_dict[(id1, id2)] = is_compatible
+
+    def initialize(self, pathways: Dict[str, Dict[str, Any]] = {}) -> None:
+        self.pathways = pathways
+        self._precompute_initial_layout()
+        self._precompute_pair_weights()
+        self._precompute_service_time_cost()
+        self._precompute_travel_time_cost()
+        self._precompute_area_dict()
+        self.shared_data = {
+            "max_travel_time": self.max_travel_time,
+            "min_travel_time": self.min_travel_time,
+            "travel_times": self.travel_times,
+            "pair_weights": self.pair_weights,
+            "pair_times": self.pair_times,
+            "service_weights": self.service_weights,
+            "node_def": self.node_def,
+            "name_id_to_id": self.name_id_to_id,
+            "area_dict": self.area_dict,
+            "initial_layout": self.initial_layout,
+            "origin_service_cost": self.origin_service_cost,
+            "adjacency_preferences": self.adjacency_preferences,
+        }
+
+    def create_cost_engine(self) -> 'CostEngine':
+        return CostEngine(self.shared_data)
+
+class CostEngine():
+    def __init__(self, shared_data: Dict[str, Any]):
+        self.logger = setup_logger(__name__)
+        self.max_travel_time = shared_data["max_travel_time"]
+        self.min_travel_time = shared_data["min_travel_time"]
+        self.travel_times = shared_data["travel_times"]
+        self.pair_weights = shared_data["pair_weights"]
+        self.pair_times = shared_data["pair_times"]
+        self.name_id_to_id = shared_data["name_id_to_id"]
+        self.area_dict = shared_data["area_dict"]
+        self.origin_service_cost = shared_data["origin_service_cost"]
+        self.initial_layout = shared_data["initial_layout"]
+        self.adjacency_preferences = shared_data["adjacency_preferences"]
+
+        self._layout = copy.deepcopy(self.initial_layout)
+
+        self.np_times: np.ndarray = np.array([])
+        self.np_weights: np.ndarray = np.array([])
+        self._precompute_np_times()
+        self._precompute_np_weights()
+        self._sort_np_matrices()
+
+    def _precompute_np_times(self) -> None:
+        time_list = []
+        for (dept1, dept2), time in self.pair_times.items():
+            id1 = self.name_id_to_id.get(dept1)
+            id2 = self.name_id_to_id.get(dept2)
+            if id1 is None or id2 is None:
+                continue
+            time_list.append((id1, id2, time))
+        self.np_times = np.array(time_list)
+
+    def _precompute_np_weights(self) -> None:
+        weight_list = []
+        for (dept1, dept2), weight in self.pair_weights.items():
+            id1 = self.name_id_to_id.get(dept1)
+            id2 = self.name_id_to_id.get(dept2)
+            if id1 is None or id2 is None:
+                continue
+            weight_list.append((id1, id2, weight))
+        self.np_weights = np.array(weight_list)
+
+    def _sort_np_matrices(self):
+        sorted_indices = np.lexsort((self.np_times[:, 1], self.np_times[:, 0]))
+        self.np_times = self.np_times[sorted_indices]
+        sorted_indices = np.lexsort((self.np_weights[:, 1], self.np_weights[:, 0]))
+        self.np_weights = self.np_weights[sorted_indices]
+
+    @property
+    def layout(self) -> Dict[str, str]:
+        return self._layout
+
+    @property
+    def current_travel_cost(self) -> float:
+        travel_time = np.dot(self.np_times[:, 2], self.np_weights[:, 2])
+        return travel_time
+    
+    @property
+    def current_total_cost(self) -> float:
+        return self.origin_service_cost + self.current_travel_cost
+    
+    @property
+    def current_adjacency_cost(self) -> float:
+        adjacency_cost = 0.0
+        for (dept1, dept2), weight in self.adjacency_preferences.items():
+            time = self.dept_to_dept_cost(dept1, dept2)
+            adjacency_cost += time / self.max_travel_time * weight
+        return adjacency_cost
+    
+    def dept_to_dept_cost(self, dept1: str, dept2: str) -> Optional[float]:
+        id1 = self.name_id_to_id[dept1]
+        id2 = self.name_id_to_id[dept2]
+        mask = self.np_times[:, :2] == np.array([id1, id2])
+        if np.any(np.all(mask, axis=1)):
+            time = self.np_times[np.all(mask, axis=1), 2][0]
+            return time
+        else:
+            mask = self.np_times[:, :2] == np.array([id2, id1])
+            if np.any(np.all(mask, axis=1)):
+                time = self.np_times[np.all(mask, axis=1), 2][0]
+                return time
+
+    def reset(self) -> None:
+        self._layout = copy.deepcopy(self.initial_layout)
+        self._precompute_np_times()
+        self._sort_np_matrices()
+
+    def swap(self, dept1: str, dept2: str) -> Optional[float]:
+        slot1 = self._layout[dept1]
+        slot2 = self._layout[dept2]
+
+        s_id1 = self.name_id_to_id.get(slot1, -1)
+        s_id2 = self.name_id_to_id.get(slot2, -1)
+        d_id1 = self.name_id_to_id.get(dept1, -1)
+        d_id2 = self.name_id_to_id.get(dept2, -1)
+
+        if self.area_dict.get((s_id1, s_id2), False) is False:
+            self.logger.debug(f"Swap between {dept1} and {dept2} violates area compatibility constraint. Swap reverted.")
+            return None
+
+        mask_id1 = self.np_times[:, :2] == d_id1
+        mask_id2 = self.np_times[:, :2] == d_id2
+
+        self.np_times[:, :2][mask_id1] = d_id2
+        self.np_times[:, :2][mask_id2] = d_id1
+
+        self._sort_np_matrices()
+
+        self._layout[dept1] = slot2
+        self._layout[dept2] = slot1
+
+        return self.current_travel_cost
+</file>
+
 <file path="src/plotting/plotter.py">
 """
 Defines plotter classes for visualizing network graphs using Matplotlib and Plotly.
@@ -3765,33 +3667,6 @@ class PlotlyPlotter(BasePlotter):
             fig.show()
 </file>
 
-<file path="src/optimize_manager.py">
-import random
-
-from src.pipeline import PathwayGenerator, CostManager
-from src.config.config_loader import ConfigLoader
-from src.utils.logger import setup_logger
-
-class OptimizeManager:
-    def __init__(self, config: ConfigLoader, **kwargs):
-        self.logger = setup_logger(__name__)
-        self.config = config
-        self.kwargs = kwargs
-        self.pathway_generator = PathwayGenerator(self.config)
-        self.cost_manager = CostManager(self.config, is_shuffle=False)
-
-    def run(self):
-        self.pathways = self.pathway_generator.generate_all()
-        self.cost_manager.initialize(pathways=self.pathways)
-        cost_engine = self.cost_manager.create_cost_engine()
-
-        for i in range(1000):
-            dept1, dept2 = random.sample(list(cost_engine.layout), 2)
-            if cost_engine.swap(dept1, dept2):
-                self.logger.info(f"Swap {dept1} and {dept2}, new cost: {cost_engine.current_travel_cost}")
-        pass
-</file>
-
 <file path="src/analysis/travel_time.py">
 """
 Calculates travel times between specified room-like nodes in the graph.
@@ -3880,6 +3755,34 @@ def calculate_room_travel_times(
         logger.error(f"Failed to write travel times CSV to {csv_file_path}: {e}")
 
     return df.to_dict()
+</file>
+
+<file path="src/optimize_manager.py">
+import random
+
+from src.pipeline import PathwayGenerator, CostManager
+from src.config.config_loader import ConfigLoader
+from src.utils.logger import setup_logger
+
+class OptimizeManager:
+    def __init__(self, config: ConfigLoader, **kwargs):
+        self.logger = setup_logger(__name__)
+        self.config = config
+        self.kwargs = kwargs
+        self.pathway_generator = PathwayGenerator(self.config)
+        self.cost_manager = CostManager(self.config, is_shuffle=False)
+
+    def run(self):
+        self.pathways = self.pathway_generator.generate_all()
+        self.cost_manager.initialize(pathways=self.pathways)
+        cost_engine = self.cost_manager.create_cost_engine()
+
+        cost_engine.current_adjacency_cost
+        for i in range(5000):
+            dept1, dept2 = random.sample(list(cost_engine.layout), 2)
+            if cost_engine.swap(dept1, dept2):
+                self.logger.info(f"Swap {dept1} and {dept2}, new cost: {cost_engine.current_travel_cost}")
+        cost_engine.current_adjacency_cost
 </file>
 
 <file path="src/network_generator.py">
