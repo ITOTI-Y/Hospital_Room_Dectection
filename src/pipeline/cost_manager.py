@@ -230,6 +230,10 @@ class CostManager:
     @property
     def slots_dict(self) -> Dict[Hashable, Any]:
         return self.slots.to_dict()
+    
+    @property
+    def slots_name_id(self) -> pd.Series:
+        return self.slots["name"] + "_" + self.slots["id"].astype(str)
 
     def create_cost_engine(self) -> "CostEngine":
         return CostEngine(self.shared_data)
