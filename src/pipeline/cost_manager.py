@@ -3,19 +3,20 @@ import numpy as np
 import copy
 from typing import Dict, Any, Tuple, List, cast, Optional, Hashable
 from collections import defaultdict
-from itertools import product, combinations_with_replacement, combinations
+from itertools import product, combinations
 
 from src.config.config_loader import ConfigLoader
 from src.utils.logger import setup_logger
+
 
 class CostManager:
     def __init__(self, config: ConfigLoader, is_shuffle: bool = False):
         self.logger = setup_logger(__name__)
         self.config = config
-        
+
         self.pathways: Dict[str, Dict[str, Any]] = {}
         self.max_travel_time: float = 0.0
-        self.min_travel_time: float = float('inf')
+        self.min_travel_time: float = float("inf")
         self.travel_times: pd.DataFrame = pd.DataFrame(dtype=float)
         self.name_to_name_id: Dict[str, List[str]] = defaultdict(list)
         self.id_to_name_id: Dict[int, str] = {}
@@ -41,7 +42,7 @@ class CostManager:
             df.columns = np.random.permutation(df.columns)
             df.index = df.columns
         for name_id in df.index:
-            name, id_num = name_id.rsplit('_', 1)
+            name, id_num = name_id.rsplit("_", 1)
             self.name_to_name_id[name].append(name_id)
             self.id_to_name_id[int(id_num)] = name_id
             self.name_id_to_id[name_id] = int(id_num)
@@ -51,16 +52,16 @@ class CostManager:
 
     def _load_slots_information(self) -> None:
         df = pd.read_csv(self.config.paths.slots_csv)
-        for _, row in df[['name', 'id', 'area']].iterrows():
-            name_id = row['name'] + '_' + str(row['id'])
-            self.name_id_to_area[name_id] = float(row['area'])
-            self.id_to_area[int(row['id'])] = float(row['area'])
-        df['service_weight'] = 0.0
+        for _, row in df[["name", "id", "area"]].iterrows():
+            name_id = row["name"] + "_" + str(row["id"])
+            self.name_id_to_area[name_id] = float(row["area"])
+            self.id_to_area[int(row["id"])] = float(row["area"])
+        df["service_weight"] = 0.0
         self.slots = df.copy()
 
     def _load_node_definitions(self) -> None:
         self.node_def = self.config.graph_config.node_definitions
-        self.cname_to_name = {v['cname']: k for k, v in self.node_def.items()}
+        self.cname_to_name = {v["cname"]: k for k, v in self.node_def.items()}
 
     def _load_adjacency_preferences(self) -> None:
         if adjacency_preferences := self.config.constraints.adjacency_preferences:
@@ -70,15 +71,16 @@ class CostManager:
                 for i in dept_names:
                     depts.extend(self.name_to_name_id[i])
                 weight = float(pref.weight)
-                self.adjacency_preferences.update({(dept1, dept2): weight for dept1, dept2 in combinations(depts, 2)})
+                self.adjacency_preferences.update(
+                    {(dept1, dept2): weight for dept1, dept2 in combinations(depts, 2)}
+                )
 
     def _precompute_initial_layout(self) -> None:
-        for _, row in self.slots[['name', 'id']].iterrows():
-            name = row['name'] + '_' + str(row['id'])
+        for _, row in self.slots[["name", "id"]].iterrows():
+            name = row["name"] + "_" + str(row["id"])
             self.initial_layout[name] = name
 
     def _precompute_pair_weights(self):
-
         for dept1 in self.travel_times.index:
             for dept2 in self.travel_times.columns:
                 if dept1 == dept2:
@@ -88,18 +90,23 @@ class CostManager:
                 self.pair_weights[(dept1, dept2)] = 0.0
 
         for pathway in self.pathways.values():
-            sequence: List[str] = pathway.get('core_sequence', [])
-            weight = pathway.get('weight', 1.0)
-            start_nodes: List[str] = pathway.get('start_nodes', [])
-            end_nodes: List[str] = pathway.get('end_nodes', [])
+            sequence: List[str] = pathway.get("core_sequence", [])
+            weight = pathway.get("weight", 1.0)
+            start_nodes: List[str] = pathway.get("start_nodes", [])
+            end_nodes: List[str] = pathway.get("end_nodes", [])
 
             for i, dept in enumerate(sequence):
                 dept: str = self.cname_to_name.get(dept, dept)
                 self.service_weights[dept] += weight
-                self.slots.loc[self.slots['name'] == dept, 'service_weight'] += weight
+                self.slots.loc[self.slots["name"] == dept, "service_weight"] += weight
                 if i > 0:
                     prev_dept = self.cname_to_name.get(sequence[i - 1], sequence[i - 1])
-                    pairs = list(product(self.name_to_name_id.get(prev_dept, [prev_dept]), self.name_to_name_id.get(dept, [dept])))
+                    pairs = list(
+                        product(
+                            self.name_to_name_id.get(prev_dept, [prev_dept]),
+                            self.name_to_name_id.get(dept, [dept]),
+                        )
+                    )
                     for pair in pairs:
                         reversed_pair = (pair[1], pair[0])
                         if reversed_pair in self.pair_weights:
@@ -112,8 +119,15 @@ class CostManager:
                 dept = self.cname_to_name.get(sequence[0], sequence[0])
                 if dept in self.service_weights:
                     self.service_weights[dept] += weight
-                    self.slots.loc[self.slots['name'] == dept, 'service_weight'] += weight
-                pairs: List[Tuple[str, str]] = list(product(self.name_to_name_id.get(start_node, [start_node]), self.name_to_name_id.get(dept, [dept])))
+                    self.slots.loc[self.slots["name"] == dept, "service_weight"] += (
+                        weight
+                    )
+                pairs: List[Tuple[str, str]] = list(
+                    product(
+                        self.name_to_name_id.get(start_node, [start_node]),
+                        self.name_to_name_id.get(dept, [dept]),
+                    )
+                )
                 for pair in pairs:
                     reversed_pair = (pair[1], pair[0])
                     if reversed_pair in self.pair_weights:
@@ -127,14 +141,28 @@ class CostManager:
                     dept = self.cname_to_name.get(sequence[-1], sequence[-1])
                     if dept in self.service_weights:
                         self.service_weights[dept] += weight
-                    self.slots.loc[self.slots['name'] == dept, 'service_weight'] += weight
-                    pairs = list(product(self.name_to_name_id.get(dept, [dept]), self.name_to_name_id.get(end_node, [end_node])))
+                    self.slots.loc[self.slots["name"] == dept, "service_weight"] += (
+                        weight
+                    )
+                    pairs = list(
+                        product(
+                            self.name_to_name_id.get(dept, [dept]),
+                            self.name_to_name_id.get(end_node, [end_node]),
+                        )
+                    )
                 else:
                     dept = self.cname_to_name.get(end_nodes[i - 1], end_nodes[i - 1])
                     if dept in self.service_weights:
                         self.service_weights[dept] += weight
-                    self.slots.loc[self.slots['name'] == dept, 'service_weight'] += weight
-                    pairs = list(product(self.name_to_name_id.get(dept, [dept]), self.name_to_name_id.get(end_node, [end_node])))
+                    self.slots.loc[self.slots["name"] == dept, "service_weight"] += (
+                        weight
+                    )
+                    pairs = list(
+                        product(
+                            self.name_to_name_id.get(dept, [dept]),
+                            self.name_to_name_id.get(end_node, [end_node]),
+                        )
+                    )
                 for pair in pairs:
                     reversed_pair = (pair[1], pair[0])
                     if reversed_pair in self.pair_weights:
@@ -144,10 +172,9 @@ class CostManager:
         self.logger.info(f"Total {len(self.pair_weights)} pairs computed.")
 
     def _precompute_service_time_cost(self) -> None:
-
         service_cost = 0.0
         for dept in self.service_weights:
-            service_time = self.node_def.get(dept, {}).get('service_time', 0)
+            service_time = self.node_def.get(dept, {}).get("service_time", 0)
             service_cost += service_time * self.service_weights[dept]
         self.origin_service_cost = service_cost
 
@@ -157,7 +184,7 @@ class CostManager:
             slot2 = self.initial_layout.get(dept2, dept2)
             time = cast(float, self.travel_times.loc[slot1, slot2])
             self.pair_times[(dept1, dept2)] += time
-    
+
     def _precompute_area_dict(self):
         tolerance = cast(float, self.config.constraints.area_compatibility_tolerance)
         for id1, id2 in product(self.id_to_area.keys(), repeat=2):
@@ -170,9 +197,9 @@ class CostManager:
         self.initial_layout: Dict[str, str] = {}
         self.pair_weights: Dict[Tuple[str, str], float] = defaultdict(float)
         self.pair_times: Dict[Tuple[str, str], float] = defaultdict(float)
-        self.service_weights: Dict[str, float] = {i: 0.0 for i in self.slots['name']}
+        self.service_weights: Dict[str, float] = {i: 0.0 for i in self.slots["name"]}
         self.origin_service_cost: float = 0.0
-        self.area_dict: Dict[Tuple[int,int], bool] = {}
+        self.area_dict: Dict[Tuple[int, int], bool] = {}
 
     def initialize(self, pathways: Dict[str, Dict[str, Any]] = {}) -> None:
         self.pathways = pathways
@@ -197,17 +224,18 @@ class CostManager:
             "origin_service_cost": self.origin_service_cost,
             "adjacency_preferences": self.adjacency_preferences,
             "id_to_area": self.id_to_area,
-            "slots": self.slots
+            "slots": self.slots,
         }
 
     @property
     def slots_dict(self) -> Dict[Hashable, Any]:
         return self.slots.to_dict()
 
-    def create_cost_engine(self) -> 'CostEngine':
+    def create_cost_engine(self) -> "CostEngine":
         return CostEngine(self.shared_data)
 
-class CostEngine():
+
+class CostEngine:
     def __init__(self, shared_data: Dict[str, Any]):
         self.logger = setup_logger(__name__)
         self.max_travel_time = shared_data["max_travel_time"]
@@ -264,7 +292,7 @@ class CostEngine():
     @property
     def layout(self) -> Dict[str, str]:
         return self._layout
-    
+
     @property
     def slot_layout(self) -> Dict[str, str]:
         return self._slot_layout
@@ -273,11 +301,11 @@ class CostEngine():
     def current_travel_cost(self) -> float:
         travel_time = np.dot(self.np_times[:, 2], self.np_weights[:, 2])
         return travel_time
-    
+
     @property
     def current_total_cost(self) -> float:
         return self.origin_service_cost + self.current_travel_cost
-    
+
     @property
     def current_adjacency_cost(self) -> float:
         adjacency_cost = 0.0
@@ -288,10 +316,14 @@ class CostEngine():
 
     @property
     def slot_name_id_edge_weights(self):
-        id_weights = self.np_weights[self.np_weights[:,2] != 0]
-        name_id_weights = [(self.id_to_name_id[int(id1)], self.id_to_name_id[int(id2)], weight) for id1, id2, weight in id_weights if id1 in self.slots['id'].values and id2 in self.slots['id'].values]
+        id_weights = self.np_weights[self.np_weights[:, 2] != 0]
+        name_id_weights = [
+            (self.id_to_name_id[int(id1)], self.id_to_name_id[int(id2)], weight)
+            for id1, id2, weight in id_weights
+            if id1 in self.slots["id"].values and id2 in self.slots["id"].values
+        ]
         return name_id_weights
-    
+
     def dept_to_dept_cost(self, dept1: str, dept2: str) -> Optional[float]:
         id1 = self.name_id_to_id[dept1]
         id2 = self.name_id_to_id[dept2]
@@ -314,14 +346,18 @@ class CostEngine():
         slot1 = self._layout[dept1]
         slot2 = self._layout[dept2]
 
-        s_id1:int = self.name_id_to_id.get(slot1, -1)
-        s_id2:int = self.name_id_to_id.get(slot2, -1)
-        d_id1:int = self.name_id_to_id.get(dept1, -1)
-        d_id2:int = self.name_id_to_id.get(dept2, -1)
+        s_id1: int = self.name_id_to_id.get(slot1, -1)
+        s_id2: int = self.name_id_to_id.get(slot2, -1)
+        d_id1: int = self.name_id_to_id.get(dept1, -1)
+        d_id2: int = self.name_id_to_id.get(dept2, -1)
 
-        is_swapable:bool = (self.area_dict.get((d_id1, s_id2), False) and self.area_dict.get((d_id2, s_id1), False))
+        is_swapable: bool = self.area_dict.get(
+            (d_id1, s_id2), False
+        ) and self.area_dict.get((d_id2, s_id1), False)
         if not is_swapable:
-            self.logger.debug(f"Swap between {dept1} and {dept2} violates area compatibility constraint. Swap reverted.")
+            self.logger.debug(
+                f"Swap between {dept1} and {dept2} violates area compatibility constraint. Swap reverted."
+            )
             return None
 
         mask_id1 = self.np_times[:, :2] == d_id1
@@ -331,7 +367,7 @@ class CostEngine():
         self.np_times[:, :2][mask_id2] = d_id1
 
         self._sort_np_matrices()
-        
+
         self._layout[dept1] = slot2
         self._layout[dept2] = slot1
 
