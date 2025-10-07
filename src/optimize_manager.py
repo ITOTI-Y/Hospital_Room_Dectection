@@ -1,4 +1,3 @@
-import random
 import numpy as np
 
 from src.pipeline import PathwayGenerator, CostManager
@@ -18,9 +17,13 @@ class OptimizeManager:
     def run(self):
         self.pathways = self.pathway_generator.generate_all()
         self.cost_manager.initialize(pathways=self.pathways)
-        cost_engine = self.cost_manager.create_cost_engine()
         self.env.reset()
         self.env.step(np.array([0, 1]))
+
+        for _ in range(1000):
+            actions = self.env.action_space.sample()
+            self.env.step(actions)
+
 
 
 

@@ -1,7 +1,7 @@
 import gymnasium as gym
+import numpy as np
 from gymnasium import spaces
 from sklearn.preprocessing import StandardScaler
-import numpy as np
 from typing import Dict, Optional
 
 from src.config.config_loader import ConfigLoader
@@ -23,6 +23,8 @@ class LayoutEnv(gym.Env):
         # [service_time, service_weight, area, x, y, z]
         self.numerical_feature_dim = 6
         self.categorical_feature_dim = 1  # [name]
+        self.fixable_features: np.ndarray = np.zeros((self.max_departments, 3), dtype=np.float32)
+        self.moveable_features: np.ndarray = np.zeros((self.max_departments, 3), dtype=np.float32)
 
         self.pathway_generator = PathwayGenerator(self.config)
         self.cost_manager = CostManager(self.config, is_shuffle=True)
@@ -76,10 +78,17 @@ class LayoutEnv(gym.Env):
         pathways = self.pathway_generator.generate_all()
         self.cost_manager.initialize(pathways=pathways)
 
-        features = self.cost_manager.slots[
-            ["service_time", "service_weight", "area", "pos_x", "pos_y", "pos_z"]
-        ]
-        self.scaler.fit(features)
+        fixable_features = self.cost_manager.slots[
+            ["service_time", "service_weight", "area"]
+        ].to_numpy()
+        moveable_features = self.cost_manager.slots[
+            ["pos_x", "pos_y", "pos_z"]
+        ].to_numpy()
+
+        self.fixable_features[:len(fixable_features)] = fixable_features
+        self.moveable_features[:len(moveable_features)] = moveable_features
+
+        self.scaler.fit(np.concatenate([self.fixable_features, self.moveable_features], axis=1))
 
     def _precompute_categorical_features(self):
         slots_name_ids = self.cost_manager.slots_name_id
@@ -87,6 +96,9 @@ class LayoutEnv(gym.Env):
         self.num_total_slot = len(slots_name_ids)
         self.index_to_dept_id = {i: name for i, name in enumerate(slots_name_ids)}
         self.dept_id_to_index = {name: i for i, name in enumerate(slots_name_ids)}
+
+    def _compute_numerical_features(self):
+        pass
 
     def step(self, action: np.ndarray):
         self.current_step += 1
@@ -111,6 +123,7 @@ class LayoutEnv(gym.Env):
         step_penalty = self.config.constraints.step_penalty
         if new_cost is None:
             reward: float = self.config.constraints.invalid_action
+            self.logger.warning(f"Invalid swap: {dept1} <-> {dept2}, reward: {reward}")
         else:
             cost_diff = previous_cost - new_cost
             reward = cost_diff / (self.initial_cost + 1e-6)
@@ -150,18 +163,16 @@ class LayoutEnv(gym.Env):
         return observation, info
 
     def _get_observation(self) -> Dict[str, np.ndarray]:
-        x_numerical = np.zeros(
-            (self.max_departments, self.numerical_feature_dim), dtype=np.float32
-        )
-        x_categorical = np.zeros((self.max_departments,), dtype=np.int32)
+        x_categorical = np.ones((self.max_departments,), dtype=np.int32) * -1
         node_mask = np.zeros((self.max_departments,), dtype=np.int32)
 
+        shuffled_indexes = [self.dept_id_to_index[slot_id] for slot_id in self.cost_engine.layout.values()]
+        moveable_feature = np.zeros_like(self.moveable_features)
+        moveable_feature[: self.num_total_slot, :] = self.moveable_features[shuffled_indexes]
+        
         x_norm_numerical = self.scaler.transform(
-            self.cost_manager.slots[
-                ["service_time", "service_weight", "area", "pos_x", "pos_y", "pos_z"]
-            ]
+            np.concatenate((self.fixable_features, moveable_feature), axis=1)
         )
-        x_numerical[: self.num_total_slot, :] = x_norm_numerical
 
         x_categorical[: self.num_total_slot] = np.array(
             [i for i in self.index_to_dept_id.keys()]
@@ -183,7 +194,7 @@ class LayoutEnv(gym.Env):
                 edge_mask[i] = 1
         
         return {
-            "x_numerical": x_numerical,
+            "x_numerical": x_norm_numerical,
             "x_categorical": x_categorical,
             "edge_index": edge_index,
             "edge_weight": edge_weight,

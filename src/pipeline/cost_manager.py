@@ -255,6 +255,7 @@ class CostEngine:
         self.adjacency_preferences = shared_data["adjacency_preferences"]
         self.id_to_area = shared_data["id_to_area"]
         self.slots = shared_data["slots"]
+        self._previous_swap: Optional[Tuple[str, str]] = None
 
         self._layout = copy.deepcopy(self.initial_layout)
         self._slot_layout = {v: k for k, v in self._layout.items()}
@@ -317,6 +318,10 @@ class CostEngine:
             time = self.dept_to_dept_cost(dept1, dept2)
             adjacency_cost += time / self.max_travel_time * weight
         return adjacency_cost
+    
+    @property
+    def previous_swap(self) -> Optional[Tuple[str, str]]:
+        return self._previous_swap
 
     @property
     def slot_name_id_edge_weights(self):
@@ -363,6 +368,8 @@ class CostEngine:
                 f"Swap between {dept1} and {dept2} violates area compatibility constraint. Swap reverted."
             )
             return None
+
+        self._previous_swap = (dept1, dept2)
 
         mask_id1 = self.np_times[:, :2] == d_id1
         mask_id2 = self.np_times[:, :2] == d_id2
