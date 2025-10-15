@@ -41,9 +41,9 @@ class EmbeddingLayer(nn.Module):
         return embedded
 
 
-class FeatureProcess(nn.Module):
+class FeatureProcessor(nn.Module):
     """
-    FeatureProcess : intergrate categorical and numerical feature
+    FeatureProcessor : integrate categorical and numerical feature
     """
 
     def __init__(

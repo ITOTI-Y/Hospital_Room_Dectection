@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 from torch_geometric.nn import GCNConv
 from torch_geometric.data import Data, Batch
+from tianshou.data import Batch as TianshouBatch
 from typing import Optional, List
 
 
@@ -9,7 +10,7 @@ class GCNEncoder(nn.Module):
     def __init__(
         self,
         input_dim: int,
-        hidden_dim: List[int],
+        hidden_dims: List[int],
         output_dim: int,
         num_layers: int = 3,
         dropout: float = 0.1,
@@ -20,12 +21,12 @@ class GCNEncoder(nn.Module):
         self.output_dim = output_dim
         self.num_layers = num_layers
 
-        if len(hidden_dim) != num_layers - 1:
+        if len(hidden_dims) != num_layers - 1:
             raise ValueError(
-                f"Length of hidden_dim must be {num_layers - 1}, got {len(hidden_dim)}"
+                f"Length of hidden_dim must be {num_layers - 1}, got {len(hidden_dims)}"
             )
 
-        self.dims = [input_dim] + hidden_dim + [output_dim]
+        self.dims = [input_dim] + hidden_dims + [output_dim]
 
         self.convs = nn.ModuleList()
         self.layer_norms = nn.ModuleList()
@@ -92,11 +93,11 @@ class GCNEncoder(nn.Module):
 
     def forward_batch(
         self,
-        x: torch.Tensor,
-        edge_index: torch.Tensor,
-        edge_weight: torch.Tensor,
-        node_mask: torch.Tensor,
-        edge_mask: torch.Tensor,
+        x: TianshouBatch | torch.Tensor,
+        edge_index: TianshouBatch | torch.Tensor,
+        edge_weight: TianshouBatch | torch.Tensor,
+        node_mask: TianshouBatch | torch.Tensor,
+        edge_mask: TianshouBatch | torch.Tensor,
     ) -> torch.Tensor:
         batch_size, num_nodes, feat_dim = x.size()
 

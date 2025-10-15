@@ -1,5 +1,6 @@
 import gymnasium as gym
 import numpy as np
+from dataclasses import dataclass
 from gymnasium import spaces
 from sklearn.preprocessing import StandardScaler
 from typing import Dict, Optional
@@ -8,6 +9,36 @@ from src.config.config_loader import ConfigLoader
 from src.pipeline import PathwayGenerator, CostManager
 from src.utils.logger import setup_logger
 
+@dataclass
+class GraphObservation:
+    x_numerical: np.ndarray  # Shape: (max_departments, numerical_feature_dim)
+    x_categorical: np.ndarray  # Shape: (max_departments,)
+    edge_index: np.ndarray  # Shape: (2, E_max)
+    edge_weight: np.ndarray  # Shape: (E_max,)
+    node_mask: np.ndarray  # Shape: (max_departments,)
+    edge_mask: np.ndarray  # Shape: (E_max,)
+
+    def to_dict(self) -> Dict[str, np.ndarray]:
+        return {
+            "x_numerical": self.x_numerical,
+            "x_categorical": self.x_categorical,
+            "edge_index": self.edge_index,
+            "edge_weight": self.edge_weight,
+            "node_mask": self.node_mask,
+            "edge_mask": self.edge_mask,
+        }
+    
+    def __repr__(self) -> str:
+        return (
+            f"GraphObservation(\n,"
+            f" x_numerical shape: {self.x_numerical.shape},\n"
+            f" x_categorical shape: {self.x_categorical.shape},\n"
+            f" edge_index shape: {self.edge_index.shape},\n"
+            f" edge_weight shape: {self.edge_weight.shape},\n"
+            f" node_mask shape: {self.node_mask.shape},\n"
+            f" edge_mask shape: {self.edge_mask.shape},\n"
+            f")"
+        )
 
 class LayoutEnv(gym.Env):
     metadata = {"render.modes": ["human"]}
@@ -137,7 +168,7 @@ class LayoutEnv(gym.Env):
         observation = self._get_observation()
         info = self._get_info()
 
-        return observation, reward, terminated, truncated, info
+        return observation.to_dict(), reward, terminated, truncated, info
 
 
     def reset(self, seed: Optional[int] = None) -> tuple[Dict[str, np.ndarray], Dict]:
@@ -160,9 +191,9 @@ class LayoutEnv(gym.Env):
         observation = self._get_observation()
         info = self._get_info()
 
-        return observation, info
+        return observation.to_dict(), info
 
-    def _get_observation(self) -> Dict[str, np.ndarray]:
+    def _get_observation(self) -> GraphObservation:
         x_categorical = np.ones((self.max_departments,), dtype=np.int32) * -1
         node_mask = np.zeros((self.max_departments,), dtype=np.int32)
 
@@ -193,14 +224,14 @@ class LayoutEnv(gym.Env):
                 edge_weight[i] = weight
                 edge_mask[i] = 1
         
-        return {
-            "x_numerical": x_norm_numerical,
-            "x_categorical": x_categorical,
-            "edge_index": edge_index,
-            "edge_weight": edge_weight,
-            "node_mask": node_mask,
-            "edge_mask": edge_mask,
-        }
+        return GraphObservation(
+            x_numerical=x_norm_numerical,
+            x_categorical=x_categorical,
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            node_mask=node_mask,
+            edge_mask=edge_mask
+        )
 
     def _get_info(self) -> Dict:
         return {
