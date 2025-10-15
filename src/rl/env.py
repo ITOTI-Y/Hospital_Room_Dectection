@@ -30,7 +30,7 @@ class GraphObservation:
     
     def __repr__(self) -> str:
         return (
-            f"GraphObservation(\n,"
+            f"GraphObservation(\n"
             f" x_numerical shape: {self.x_numerical.shape},\n"
             f" x_categorical shape: {self.x_categorical.shape},\n"
             f" edge_index shape: {self.edge_index.shape},\n"

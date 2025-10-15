@@ -144,7 +144,7 @@ class LayoutOptimizationModel(nn.Module):
 
         Returns:
             log_prob (torch.Tensor): Joint log probability of action1 and action2, shape (batch_size,).
-            entryopy (torch.Tensor): Sum of entropies of action1 and action2 distributions, shape (batch_size,).
+            entropy (torch.Tensor): Sum of entropies of action1 and action2 distributions, shape (batch_size,).
         """
 
         node_embeddings, node_mask = self._encode_observations(obs)
@@ -153,14 +153,14 @@ class LayoutOptimizationModel(nn.Module):
         action1 = actions[:, 0]
         action2 = actions[:, 1]
 
-        _, _, log_prob, entryopy = self.actor.get_log_prob_and_entropy(
+        _, _, log_prob, entropy = self.actor.get_log_prob_and_entropy(
             node_embeddings=node_embeddings,
             node_mask=node_mask,
             action1=action1,
             action2=action2,
         )
 
-        return log_prob, entryopy
+        return log_prob, entropy
     
     def get_value(
             self,

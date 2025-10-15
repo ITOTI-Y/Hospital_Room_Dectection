@@ -47,6 +47,6 @@ max_grad_norm: 0.5
 value_clip: True
 advantage_normalization: True
 recompute_advantage: False
-dual_clip: Null
+dual_clip: null
 reward_normalization: True
 eps_clip: 0.2
