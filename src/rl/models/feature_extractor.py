@@ -4,7 +4,7 @@ from typing import Optional
 
 
 class EmbeddingLayer(nn.Module):
-    def __init__(self, num_categories: int, embedding_dim: int, padding_idx: int = -1):
+    def __init__(self, num_categories: int, embedding_dim: int, padding_idx: int):
         """
         num_categories is equal max_departments
         value == padding_idx position will be set to zero and ignored in the loss computation

@@ -49,6 +49,7 @@ class LayoutEnv(gym.Env):
         self.config = config
         self.logger = setup_logger(__name__)
         self.max_departments = max_departments
+        self.PADDING_IDX = max_departments - 1
         self.max_step = max_step
 
         # [service_time, service_weight, area, x, y, z]
@@ -194,7 +195,7 @@ class LayoutEnv(gym.Env):
         return observation.to_dict(), info
 
     def _get_observation(self) -> GraphObservation:
-        x_categorical = np.ones((self.max_departments,), dtype=np.int32) * -1
+        x_categorical = np.ones((self.max_departments,), dtype=np.int32) * self.PADDING_IDX
         node_mask = np.zeros((self.max_departments,), dtype=np.int32)
 
         shuffled_indexes = [self.dept_id_to_index[slot_id] for slot_id in self.cost_engine.layout.values()]

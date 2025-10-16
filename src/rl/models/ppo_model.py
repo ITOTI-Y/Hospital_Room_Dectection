@@ -40,7 +40,7 @@ class LayoutOptimizationModel(nn.Module):
             embedding_dim=embedding_dim,
             numerical_feat_dim=numerical_feat_dim,
             numerical_hidden_dim=numerical_hidden_dim,
-            padding_idx=-1,
+            padding_idx=num_categories - 1,
         )
 
         self.gnn_encoder = GCNEncoder(
