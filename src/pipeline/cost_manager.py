@@ -350,6 +350,7 @@ class CostEngine:
         self._layout = copy.deepcopy(self.initial_layout)
         self._precompute_np_times()
         self._sort_np_matrices()
+        self._previous_swap = None
 
     def swap(self, dept1: str, dept2: str) -> Optional[float]:
         slot1 = self._layout[dept1]
@@ -369,8 +370,6 @@ class CostEngine:
             )
             return None
 
-        self._previous_swap = (dept1, dept2)
-
         mask_id1 = self.np_times[:, :2] == d_id1
         mask_id2 = self.np_times[:, :2] == d_id2
 
@@ -385,4 +384,5 @@ class CostEngine:
         self._slot_layout[slot1] = dept2
         self._slot_layout[slot2] = dept1
 
+        self._previous_swap = (dept1, dept2)
         return self.current_travel_cost

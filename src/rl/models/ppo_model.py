@@ -122,7 +122,7 @@ class LayoutOptimizationModel(nn.Module):
 
         node_embeddings, node_mask = self._encode_observations(obs)
 
-        action1, action2 = self.actor(
+        action1, action2 = self.actor.get_action(
             node_embeddings=node_embeddings,
             node_mask=node_mask,
             deterministic=kwargs.get("deterministic", False),

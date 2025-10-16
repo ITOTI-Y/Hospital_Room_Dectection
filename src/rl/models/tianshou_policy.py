@@ -67,9 +67,9 @@ class LayoutPPOPolicy(PPOPolicy):
             **kwargs,
         )
 
-        action = torch.stack([action1, action2], dim=-1)  # (batch_size, 2)
+        actions = torch.stack([action1, action2], dim=-1)  # (batch_size, 2)
 
-        return Batch(act=to_numpy(action), state=state)
+        return Batch(act=to_numpy(actions), state=state)
 
     def learn(
         self,

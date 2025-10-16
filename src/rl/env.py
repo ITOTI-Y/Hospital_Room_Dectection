@@ -158,6 +158,7 @@ class LayoutEnv(gym.Env):
             self.logger.warning(f"Invalid swap: {dept1} <-> {dept2}, reward: {reward}")
         else:
             cost_diff = previous_cost - new_cost
+            self.logger.success(f"Step {self.current_step}: Swapped {dept1} <-> {dept2}")
             reward = cost_diff / (self.initial_cost + 1e-6)
             self.current_cost = new_cost
         

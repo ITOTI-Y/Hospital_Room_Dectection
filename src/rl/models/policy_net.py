@@ -97,7 +97,7 @@ class AutoregressiveActor(nn.Module):
         log_prob1 = dist1.log_prob(action1)  # (batch_size,)
 
         dept1_embeddings = node_embeddings.gather(
-            1, action1.unsqueeze(-1).expand(-1, -1, self.node_hidden_dim)
+            1, action1.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, self.node_hidden_dim)
         )  # (batch_size, 1, node_hidden_dim)
 
         dept1_embeddings_expanded = dept1_embeddings.expand(

@@ -1,4 +1,5 @@
 import torch
+from torch.utils.tensorboard import SummaryWriter
 from tianshou.data import Collector, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
 from tianshou.trainer import onpolicy_trainer
@@ -119,9 +120,11 @@ class OptimizeManager:
             env=test_envs,
         )
 
-        tensorboard_logger = TensorboardLogger(
-            self.config.paths.tensorboard_dir
+        writer = SummaryWriter(
+            log_dir=self.config.paths.tensorboard_dir
         )
+
+        tensorboard_logger = TensorboardLogger(writer)
 
         result = onpolicy_trainer(
             policy=policy,
