@@ -9,6 +9,7 @@ from .gnn_encoder import GCNEncoder
 from .policy_net import AutoregressiveActor
 from .value_net import ValueNet
 
+
 class LayoutOptimizationModel(nn.Module):
     def __init__(
         self,
@@ -16,20 +17,16 @@ class LayoutOptimizationModel(nn.Module):
         embedding_dim: int,
         numerical_feat_dim: int,
         numerical_hidden_dim: Optional[int] = None,
-
         gnn_hidden_dims: List[int] = [128, 128],
         gnn_output_dim: int = 256,
         gnn_num_layers: int = 3,
         gnn_dropout: float = 0.1,
-
         actor_hidden_dim: int = 128,
         actor_dropout: float = 0.1,
-
         value_hidden_dim: int = 256,
         value_num_layers: int = 3,
         value_pooling_type: Literal["mean", "max", "sum", "attention"] = "mean",
         value_dropout: float = 0.1,
-
         device: Optional[torch.device] = torch.device("cpu"),
     ):
         super().__init__()
@@ -68,9 +65,16 @@ class LayoutOptimizationModel(nn.Module):
         self.to(self.device)
 
     def _prepare_inputs(
-            self,
-            obs: Union[Dict, Batch],
-    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        self,
+        obs: Union[Dict, Batch],
+    ) -> Tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
         if isinstance(obs, Batch):
             x_categorical = obs.x_categorical
             x_numerical = obs.x_numerical
@@ -86,20 +90,28 @@ class LayoutOptimizationModel(nn.Module):
             node_mask = obs["node_mask"]
             edge_mask = obs["edge_mask"]
 
-        x_categorical = torch.as_tensor(x_categorical, device=self.device, dtype=torch.long)
-        x_numerical = torch.as_tensor(x_numerical, device=self.device, dtype=torch.float32)
+        x_categorical = torch.as_tensor(
+            x_categorical, device=self.device, dtype=torch.long
+        )
+        x_numerical = torch.as_tensor(
+            x_numerical, device=self.device, dtype=torch.float32
+        )
         edge_index = torch.as_tensor(edge_index, device=self.device, dtype=torch.long)
-        edge_weight = torch.as_tensor(edge_weight, device=self.device, dtype=torch.float32)
+        edge_weight = torch.as_tensor(
+            edge_weight, device=self.device, dtype=torch.float32
+        )
         node_mask = torch.as_tensor(node_mask, device=self.device, dtype=torch.float32)
         edge_mask = torch.as_tensor(edge_mask, device=self.device, dtype=torch.float32)
 
         return x_categorical, x_numerical, edge_index, edge_weight, node_mask, edge_mask
-    
+
     def _encode_observations(
-            self,
-            obs: Union[Dict, Batch],
+        self,
+        obs: Union[Dict, Batch],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
-        x_categorical, x_numerical, edge_index, edge_weight, node_mask, edge_mask = self._prepare_inputs(obs)
+        x_categorical, x_numerical, edge_index, edge_weight, node_mask, edge_mask = (
+            self._prepare_inputs(obs)
+        )
 
         node_features = self.feature_processor(x_categorical, x_numerical)
 
@@ -108,33 +120,33 @@ class LayoutOptimizationModel(nn.Module):
             edge_index=edge_index,
             edge_weight=edge_weight,
             node_mask=node_mask,
-            edge_mask=edge_mask
+            edge_mask=edge_mask,
         )
 
         return node_embeddings, node_mask
 
     def forward(
-            self,
-            obs: Union[Dict, Batch],
-            state: Optional[Any] = None,
-            **kwargs
-    ) -> Tuple[Tuple[torch.Tensor, torch.Tensor], Any]:
-
+        self, obs: Union[Dict, Batch], state: Optional[Any] = None, **kwargs
+    ) -> Tuple[torch.Tensor, torch.Tensor, Any]:
         node_embeddings, node_mask = self._encode_observations(obs)
 
-        action1, action2 = self.actor.get_action(
+        action1, action2, log_prob1, log_prob2, _, _ = self.actor(
             node_embeddings=node_embeddings,
             node_mask=node_mask,
             deterministic=kwargs.get("deterministic", False),
         )
 
-        return (action1, action2), state
-    
+        actions = torch.stack([action1, action2], dim=-1)  # (batch_size, 2)
+
+        log_prob = log_prob1 + log_prob2  # (batch_size,)
+
+        return actions, log_prob, state
+
     def get_action_log_prob(
-            self,
-            obs: Union[Dict, Batch],
-            action: np.ndarray,
-            **kwargs: Any,
+        self,
+        obs: Union[Dict, Batch],
+        action: np.ndarray,
+        **kwargs: Any,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
 
@@ -161,18 +173,17 @@ class LayoutOptimizationModel(nn.Module):
         )
 
         return log_prob, entropy
-    
+
     def get_value(
-            self,
-            obs: Union[Dict, Batch],
-            **kwargs: Any,
+        self,
+        obs: Union[Dict, Batch],
+        **kwargs: Any,
     ) -> torch.Tensor:
-        
         node_embeddings, node_mask = self._encode_observations(obs)
 
         value = self.critic.get_value(
             node_embeddings=node_embeddings,
             node_mask=node_mask,
-        ) # (batch_size)
+        )  # (batch_size)
 
         return value

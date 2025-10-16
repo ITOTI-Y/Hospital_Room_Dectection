@@ -76,6 +76,13 @@ src/
     __init__.py
     plotter.py
   rl/
+    models/
+      feature_extractor.py
+      gnn_encoder.py
+      policy_net.py
+      ppo_model.py
+      tianshou_policy.py
+      value_net.py
     env.py
   utils/
     logger.py
@@ -87,11 +94,6 @@ main.py
 
 <files>
 This section contains the contents of the repository's files.
-
-<file path="configs/agent.yaml">
-learning_rate: 0.0003
-gamma: 0.99
-</file>
 
 <file path="configs/plotter.yaml">
 # Configuration for PlotlyPlotter
@@ -156,166 +158,6 @@ plotly_config:
 from .travel_time import calculate_room_travel_times
 
 __all__ = ["calculate_room_travel_times"]
-</file>
-
-<file path="src/config/graph_config.py">
-"""
-Manages loading and accessing configuration from graph_config.yaml.
-
-This module provides a centralized, read-only interface to the graph
-generation configuration, ensuring that the YAML file is loaded only once.
-It also builds convenient reverse mappings and helper functions to query
-node definitions by various attributes like category or RGB color.
-"""
-
-import yaml
-from pathlib import Path
-from typing import Dict, Any, List, Tuple, Optional
-
-_config_cache: Optional[Dict[str, Any]] = None
-_rgb_to_name_map_cache: Optional[Dict[Tuple[int, int, int], str]] = None
-
-
-def get_config() -> Dict[str, Any]:
-    """
-    Loads graph configuration from YAML file and caches it.
-
-    This function ensures the YAML configuration is read only once and
-    provides a consistent, read-only dictionary of settings for the
-    entire application.
-
-    Returns:
-        A dictionary containing the entire graph configuration.
-
-    Raises:
-        FileNotFoundError: If the configuration file cannot be found.
-        yaml.YAMLError: If there is an error parsing the YAML file.
-    """
-    global _config_cache
-    if _config_cache is None:
-        config_path = (
-            Path(__file__).parent.parent.parent / "configs" / "graph_config.yaml"
-        )
-        if not config_path.exists():
-            raise FileNotFoundError(f"Configuration file not found at: {config_path}")
-
-        with open(config_path, "r", encoding="utf-8") as f:
-            try:
-                _config_cache = yaml.safe_load(f)
-            except yaml.YAMLError as e:
-                # Log or handle the error appropriately
-                raise e
-    return _config_cache
-
-
-def get_node_definitions() -> Dict[str, Dict[str, Any]]:
-    """
-    Retrieves the node definitions section from the configuration.
-
-    Returns:
-        A dictionary where keys are node names (e.g., 'Wall') and
-        values are dictionaries of their properties.
-    """
-    config = get_config()
-    return config.get("node_definitions", {})
-
-
-def get_rgb_to_name_map() -> Dict[Tuple[int, int, int], str]:
-    """
-    Creates and caches a mapping from RGB color tuples to node names.
-
-    This is essential for the image processing step, allowing for quick
-    identification of node types based on pixel color.
-
-    Returns:
-        A dictionary mapping RGB tuples to their corresponding node names.
-    """
-    global _rgb_to_name_map_cache
-    if _rgb_to_name_map_cache is None:
-        node_defs = get_node_definitions()
-        _rgb_to_name_map_cache = {
-            tuple(properties["rgb"]): node_name
-            for node_name, properties in node_defs.items()
-            if "rgb" in properties
-        }
-    return _rgb_to_name_map_cache
-
-
-def get_nodes_by_category(category: str) -> List[str]:
-    """
-    Finds all node names belonging to a specific category.
-
-    Args:
-        category: The category to filter by (e.g., 'SLOT', 'PATH').
-
-    Returns:
-        A list of node names that match the given category.
-    """
-    node_defs = get_node_definitions()
-    return [
-        node_name
-        for node_name, properties in node_defs.items()
-        if properties.get("category") == category
-    ]
-
-
-def get_geometry_config() -> Dict[str, float]:
-    """
-    Retrieves the geometry settings from the configuration.
-
-    Returns:
-        A dictionary with geometry-related parameters like scale and speed.
-    """
-    config = get_config()
-    return config.get("geometry", {})
-
-
-def get_super_network_config() -> Dict[str, Any]:
-    """
-    Retrieves the super_network settings from the configuration.
-
-    Returns:
-        A dictionary with super_network-related parameters.
-    """
-    config = get_config()
-    return config.get("super_network", {})
-
-
-def get_special_ids() -> Dict[str, int]:
-    """
-    Retrieves the special ID mappings from the configuration.
-
-    Returns:
-        A dictionary mapping special area names to their integer IDs.
-    """
-    config = get_config()
-    return config.get("special_ids", {})
-
-
-_plotter_config_cache: Optional[Dict[str, Any]] = None
-
-
-def get_plotter_config() -> Dict[str, Any]:
-    """
-    Loads plotter configuration from plotter.yaml and caches it.
-
-    Returns:
-        A dictionary containing the plotter configuration.
-    """
-    global _plotter_config_cache
-    if _plotter_config_cache is None:
-        config_path = Path(__file__).parent.parent.parent / "configs" / "plotter.yaml"
-        if not config_path.exists():
-            raise FileNotFoundError(
-                f"Plotter configuration file not found at: {config_path}"
-            )
-
-        with open(config_path, "r", encoding="utf-8") as f:
-            try:
-                _plotter_config_cache = yaml.safe_load(f)
-            except yaml.YAMLError as e:
-                raise e
-    return _plotter_config_cache
 </file>
 
 <file path="src/config/path_manager.py">
@@ -416,6 +258,146 @@ def _load_paths():
 from .plotter import BasePlotter, PlotlyPlotter  # MatplotlibPlotter can be added later
 
 __all__ = ["BasePlotter", "PlotlyPlotter"]
+</file>
+
+<file path="src/rl/models/value_net.py">
+import torch
+import torch.nn as nn
+from torch_geometric.nn import global_mean_pool, global_max_pool, global_add_pool
+from torch_geometric.nn.aggr import AttentionalAggregation
+from typing import Optional, Literal
+from loguru import logger
+
+class GlobalPooling(nn.Module):
+    def __init__(
+        self,
+        pooling_type: Literal["mean", "max", "sum", "attention"] = "mean",
+        hidden_dim: Optional[int] = None,
+    ):
+        super().__init__()
+        self.pooling_type = pooling_type
+
+        if pooling_type == "mean":
+            self.pool = global_mean_pool
+        elif pooling_type == "max":
+            self.pool = global_max_pool
+        elif pooling_type == "sum":
+            self.pool = global_add_pool
+        elif pooling_type == "attention":
+            if hidden_dim is None:
+                logger.error("hidden_dim must be provided for attention pooling")
+                raise ValueError("hidden_dim must be provided for attention pooling")
+            gate_nn = nn.Sequential(
+                nn.Linear(hidden_dim, hidden_dim // 2),
+                nn.Tanh(),
+                nn.Linear(hidden_dim // 2, 1),
+            )
+            self.pool = AttentionalAggregation(gate_nn)
+        else:
+            logger.error(f"Unsupported pooling type: {pooling_type}")
+            raise ValueError(f"Unsupported pooling type: {pooling_type}")
+
+    def forward(
+            self,
+            node_embeddings: torch.Tensor,
+            node_mask: torch.Tensor,
+            batch: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        
+        if batch is not None:
+            pooled = self.pool(node_embeddings, batch) # node_embeddings: (num_nodes, hidden_dim), batch: (num_nodes,)
+        else:
+            batch_size, num_nodes, hidden_dim = node_embeddings.size() # (batch_size, num_nodes, hidden_dim)
+
+            batch_indices = torch.arange(batch_size, device=node_embeddings.device)
+            batch_indices = batch_indices.unsqueeze(-1).expand(-1, num_nodes) # (batch_size, num_nodes)
+
+            valid_mask = node_mask.bool()
+            valid_node_embeddings = node_embeddings[valid_mask] # (num_valid_nodes, hidden_dim)
+            valid_batch = batch_indices[valid_mask] # (num_valid_nodes,)
+
+            pooled = self.pool(valid_node_embeddings, valid_batch) # (batch_size, hidden_dim)
+        
+        return pooled
+    
+
+class ValueNet(nn.Module):
+
+    def __init__(
+            self,
+            node_embedding_dim: int,
+            value_hidden_dim: int = 256,
+            num_layers: int = 3,
+            pooling_type: Literal["mean", "max", "sum", "attention"] = "mean",
+            dropout: float = 0.1,
+    ):
+        super().__init__()
+
+        self.node_embedding_dim = node_embedding_dim
+        self.value_hidden_dim = value_hidden_dim
+        self.num_layers = num_layers
+
+        self.global_pooling = GlobalPooling(
+            pooling_type=pooling_type,
+            hidden_dim=node_embedding_dim if pooling_type == "attention" else None,
+        )
+
+        layers = []
+        input_dim = node_embedding_dim
+
+        for _ in range(num_layers):
+            layers.extend([
+                nn.Linear(input_dim, value_hidden_dim),
+                nn.ReLU(),
+                nn.Dropout(dropout),
+                nn.LayerNorm(value_hidden_dim),
+            ])
+            input_dim = value_hidden_dim
+
+        layers.append(nn.Linear(value_hidden_dim, 1))
+
+        self.value_head = nn.Sequential(*layers)
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        for module in self.value_head.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.orthogonal_(module.weight, gain=nn.init.calculate_gain('relu'))
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
+
+    def forward(
+            self,
+            node_embeddings: torch.Tensor,
+            node_mask: torch.Tensor,
+            batch: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        
+        global_state = self.global_pooling(
+            node_embeddings,
+            node_mask,
+            batch=batch,
+        )
+
+        state_value = self.value_head(global_state) # (batch_size, 1)
+
+        return state_value
+    
+    def get_value(
+            self,
+            node_embeddings: torch.Tensor,
+            node_mask: torch.Tensor,
+            batch: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        
+        value = self.forward(
+            node_embeddings,
+            node_mask,
+            batch=batch,
+        ) # (batch_size, 1)
+
+        return value.squeeze(-1) # (batch_size,)
 </file>
 
 <file path="src/utils/logger.py">
@@ -633,6 +615,174 @@ class ConfigLoader:
 
     def __getattr__(self, name):
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'.")
+</file>
+
+<file path="src/config/graph_config.py">
+"""
+Manages loading and accessing configuration from graph_config.yaml.
+
+This module provides a centralized, read-only interface to the graph
+generation configuration, ensuring that the YAML file is loaded only once.
+It also builds convenient reverse mappings and helper functions to query
+node definitions by various attributes like category or RGB color.
+"""
+
+import yaml
+from pathlib import Path
+from typing import Dict, Any, List, Tuple, Optional
+
+_config_cache: Optional[Dict[str, Any]] = None
+_rgb_to_name_map_cache: Optional[Dict[Tuple[int, int, int], str]] = None
+
+
+def get_config() -> Optional[Dict[str, Any]]:
+    """
+    Loads graph configuration from YAML file and caches it.
+
+    This function ensures the YAML configuration is read only once and
+    provides a consistent, read-only dictionary of settings for the
+    entire application.
+
+    Returns:
+        A dictionary containing the entire graph configuration.
+
+    Raises:
+        FileNotFoundError: If the configuration file cannot be found.
+        yaml.YAMLError: If there is an error parsing the YAML file.
+    """
+    global _config_cache
+    if _config_cache is None:
+        config_path = (
+            Path(__file__).parent.parent.parent / "configs" / "graph_config.yaml"
+        )
+        if not config_path.exists():
+            raise FileNotFoundError(f"Configuration file not found at: {config_path}")
+
+        with open(config_path, "r", encoding="utf-8") as f:
+            try:
+                _config_cache = yaml.safe_load(f)
+            except yaml.YAMLError as e:
+                # Log or handle the error appropriately
+                raise e
+    return _config_cache
+
+
+def get_node_definitions() -> Dict[str, Dict[str, Any]]:
+    """
+    Retrieves the node definitions section from the configuration.
+
+    Returns:
+        A dictionary where keys are node names (e.g., 'Wall') and
+        values are dictionaries of their properties.
+    """
+    config = get_config()
+    if config is None:
+        return {}
+    return config.get("node_definitions", {})
+
+
+def get_rgb_to_name_map() -> Dict[Tuple[int, int, int], str]:
+    """
+    Creates and caches a mapping from RGB color tuples to node names.
+
+    This is essential for the image processing step, allowing for quick
+    identification of node types based on pixel color.
+
+    Returns:
+        A dictionary mapping RGB tuples to their corresponding node names.
+    """
+    global _rgb_to_name_map_cache
+    if _rgb_to_name_map_cache is None:
+        node_defs = get_node_definitions()
+        _rgb_to_name_map_cache = {
+            tuple(properties["rgb"]): node_name
+            for node_name, properties in node_defs.items()
+            if "rgb" in properties
+        }
+    return _rgb_to_name_map_cache
+
+
+def get_nodes_by_category(category: str) -> List[str]:
+    """
+    Finds all node names belonging to a specific category.
+
+    Args:
+        category: The category to filter by (e.g., 'SLOT', 'PATH').
+
+    Returns:
+        A list of node names that match the given category.
+    """
+    node_defs = get_node_definitions()
+    return [
+        node_name
+        for node_name, properties in node_defs.items()
+        if properties.get("category") == category
+    ]
+
+
+def get_geometry_config() -> Dict[str, float]:
+    """
+    Retrieves the geometry settings from the configuration.
+
+    Returns:
+        A dictionary with geometry-related parameters like scale and speed.
+    """
+    config = get_config()
+    if config is None:
+        return {}
+    return config.get("geometry", {})
+
+
+def get_super_network_config() -> Dict[str, Any]:
+    """
+    Retrieves the super_network settings from the configuration.
+
+    Returns:
+        A dictionary with super_network-related parameters.
+    """
+    config = get_config()
+    if config is None:
+        return {}
+    return config.get("super_network", {})
+
+
+def get_special_ids() -> Dict[str, int]:
+    """
+    Retrieves the special ID mappings from the configuration.
+
+    Returns:
+        A dictionary mapping special area names to their integer IDs.
+    """
+    config = get_config()
+    if config is None:
+        return {}
+    return config.get("special_ids", {})
+
+
+_plotter_config_cache: Dict[str, Any] = {}
+
+
+def get_plotter_config() -> Dict[str, Any]:
+    """
+    Loads plotter configuration from plotter.yaml and caches it.
+
+    Returns:
+        A dictionary containing the plotter configuration.
+    """
+    global _plotter_config_cache
+    if _plotter_config_cache is None:
+        config_path = Path(__file__).parent.parent.parent / "configs" / "plotter.yaml"
+        if not config_path.exists():
+            raise FileNotFoundError(
+                f"Plotter configuration file not found at: {config_path}"
+            )
+
+        with open(config_path, "r", encoding="utf-8") as f:
+            try:
+                _plotter_config_cache = yaml.safe_load(f)
+            except yaml.YAMLError as e:
+                raise e
+    return _plotter_config_cache
 </file>
 
 <file path="src/network/graph_manager.py">
@@ -1203,6 +1353,503 @@ from .cost_manager import CostManager
 __all__ = ["PathwayGenerator", "CostManager"]
 </file>
 
+<file path="src/rl/models/gnn_encoder.py">
+import torch
+import torch.nn as nn
+from torch_geometric.nn import GCNConv
+from torch_geometric.data import Data, Batch
+from tianshou.data import Batch as TianshouBatch
+from typing import Optional, List
+
+
+class GCNEncoder(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        hidden_dims: List[int],
+        output_dim: int,
+        num_layers: int = 3,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+
+        self.input_dim = input_dim
+        self.output_dim = output_dim
+        self.num_layers = num_layers
+
+        if len(hidden_dims) != num_layers - 1:
+            raise ValueError(
+                f"Length of hidden_dim must be {num_layers - 1}, got {len(hidden_dims)}"
+            )
+
+        self.dims = [input_dim] + hidden_dims + [output_dim]
+
+        self.convs = nn.ModuleList()
+        self.layer_norms = nn.ModuleList()
+
+        for i in range(num_layers):
+            in_dim = self.dims[i]
+            out_dim = self.dims[i + 1]
+
+            self.convs.append(
+                GCNConv(
+                    in_channels=in_dim,
+                    out_channels=out_dim,
+                    add_self_loops=True,
+                    normalize=True,
+                )
+            )
+
+            self.layer_norms.append(nn.LayerNorm(out_dim))
+
+        self.dropout = nn.Dropout(dropout)
+
+        self.residual_projections = nn.ModuleList()
+        for i in range(num_layers):
+            in_dim = self.dims[i]
+            out_dim = self.dims[i + 1]
+            if in_dim != out_dim:
+                self.residual_projections.append(nn.Linear(in_dim, out_dim, bias=False))
+            else:
+                self.residual_projections.append(nn.Identity())
+
+        self._reset_parameters()
+
+    def _reset_parameters(self):
+        for conv in self.convs:
+            if hasattr(conv, "lin") and isinstance(conv.lin, nn.Linear):
+                nn.init.xavier_uniform_(conv.lin.weight)
+                if conv.lin.bias is not None:
+                    nn.init.zeros_(conv.lin.bias)
+
+        for proj in self.residual_projections:
+            if isinstance(proj, nn.Linear):
+                nn.init.xavier_uniform_(proj.weight)
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_weight: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        for i, conv in enumerate(self.convs):
+            identity = x
+
+            x = conv(x, edge_index, edge_weight)
+            x = self.layer_norms[i](x)
+
+            if i < self.num_layers - 1:
+                x = torch.relu(x)
+                x = self.dropout(x)
+
+            identity = self.residual_projections[i](identity)
+            x = x + identity
+
+        return x
+
+    def forward_batch(
+        self,
+        x: TianshouBatch | torch.Tensor,
+        edge_index: TianshouBatch | torch.Tensor,
+        edge_weight: TianshouBatch | torch.Tensor,
+        node_mask: TianshouBatch | torch.Tensor,
+        edge_mask: TianshouBatch | torch.Tensor,
+    ) -> torch.Tensor:
+        batch_size, num_nodes, feat_dim = x.size()
+
+        data_list = []
+        for i in range(batch_size):
+            valid_nodes = node_mask[i].bool()
+            valid_edges = edge_mask[i].bool()
+
+            node_feat = x[i][valid_nodes]
+
+            valid_edge_index = edge_index[i][:, valid_edges]
+            valid_edge_weight = edge_weight[i][valid_edges]
+
+            data = Data(
+                x=node_feat, edge_index=valid_edge_index, edge_attr=valid_edge_weight
+            )
+            data_list.append(data)
+
+        batch_data = Batch.from_data_list(data_list)
+
+        node_embeddings = self.forward(
+            x=batch_data.x,  # type: ignore
+            edge_index=batch_data.edge_index,  # type: ignore
+            edge_weight=batch_data.edge_attr,  # type: ignore
+        )
+
+        output = torch.zeros(
+            batch_size, num_nodes, self.output_dim, device=x.device, dtype=x.dtype
+        )
+
+        ptr = 0
+        for i in range(batch_size):
+            num_valid = int(node_mask[i].sum().item())
+            valid_nodes = node_mask[i].bool()
+            output[i][valid_nodes] = node_embeddings[ptr : ptr + num_valid]
+            ptr += num_valid
+
+        return output
+</file>
+
+<file path="src/rl/models/policy_net.py">
+import torch
+import torch.nn as nn
+from torch.distributions import Categorical
+from typing import Optional, Tuple
+
+
+class AutoregressiveActor(nn.Module):
+    def __init__(
+        self,
+        node_hidden_dim: int,
+        actor_hidden_dim: int,
+        dropout: float = 0.1,
+    ):
+        """
+        Autoregression Policy Network, used to select two departments to swap.
+
+        Args:
+            node_hidden_dim (int): GNN output dimension
+            action_hidden_dim (int): Action MLP hidden dimension
+            dropout (float, optional): Dropout rate
+        """
+
+        super().__init__()
+
+        self.node_hidden_dim = node_hidden_dim
+        self.actor_hidden_dim = actor_hidden_dim
+
+        self.first_action_head = nn.Sequential(
+            nn.Linear(node_hidden_dim, actor_hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.LayerNorm(actor_hidden_dim),
+            nn.Linear(actor_hidden_dim, actor_hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(actor_hidden_dim // 2, 1),
+        )
+
+        self.second_action_head = nn.Sequential(
+            nn.Linear(node_hidden_dim * 2, actor_hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.LayerNorm(actor_hidden_dim),
+            nn.Linear(actor_hidden_dim, actor_hidden_dim // 2),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(actor_hidden_dim // 2, 1),
+        )
+
+    def _create_masked_distribution(
+            self,
+            logits: torch.Tensor,
+            mask: torch.Tensor
+    ) -> Categorical:
+        
+        mask_value = torch.finfo(logits.dtype).min
+        masked_logits = logits.masked_fill(mask == 0, mask_value)
+        
+        dist = Categorical(logits=masked_logits)
+        return dist
+
+    def forward(
+        self,
+        node_embeddings: torch.Tensor,
+        node_mask: torch.Tensor,
+        deterministic: bool = False,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, Optional[Categorical], Optional[Categorical]]:
+        """
+        Forward, execute autoregressive two action select
+
+        Args:
+            node_embeddings (torch.Tensor): GNN node embeddings, shape (batch_size, num_nodes, node_hidden_dim)
+            node_mask (torch.Tensor): Node mask, shape (batch_size, num_nodes) (1 for valid nodes, 0 for padding nodes)
+
+        Returns:
+            action1: torch.Tensor: First selected action (node index), shape (batch_size,)
+            action2: torch.Tensor: Second selected action (node index), shape (batch_size,)
+            log_prob1: torch.Tensor: Log probability of action1, shape (batch_size,)
+            log_prob2: torch.Tensor: Log probability of action2, shape (batch_size,)
+            dist1: Optional[Categorical]: Action distribution for action1, None if deterministic is True
+            dist2: Optional[Categorical]: Action distribution for action2, None if deterministic is
+        """
+
+        batch_size, num_nodes, _ = node_embeddings.size()
+
+        logits1: torch.Tensor = self.first_action_head(node_embeddings).squeeze(
+            -1
+        )  # (batch_size, num_nodes)
+
+        dist1 = self._create_masked_distribution(logits1, node_mask)
+        
+        if deterministic:
+            action1 = dist1.probs.argmax(dim=-1)  #type: ignore (batch_size,)
+        else:
+            action1 = dist1.sample()  # (batch_size,)
+
+        log_prob1 = dist1.log_prob(action1)  # (batch_size,)
+
+        dept1_embeddings = node_embeddings.gather(
+            1, action1.unsqueeze(-1).unsqueeze(-1).expand(-1, -1, self.node_hidden_dim)
+        )  # (batch_size, 1, node_hidden_dim)
+
+        dept1_embeddings_expanded = dept1_embeddings.expand(
+            -1, num_nodes, -1
+        )  # (batch_size, num_nodes, node_hidden_dim)
+        combined_embeddings = torch.cat(
+            [node_embeddings, dept1_embeddings_expanded], dim=-1
+        )
+
+        logits2: torch.Tensor = self.second_action_head(combined_embeddings).squeeze(-1) # (batch_size, num_nodes)
+        
+        mask2 = node_mask.clone()
+        mask2.scatter_(1, action1.unsqueeze(-1), 0)
+
+        dist2 = self._create_masked_distribution(logits2, mask2)
+
+        if deterministic:
+            action2 = dist2.probs.argmax(dim=-1)  #type: ignore (batch_size,)
+        else:
+            action2 = dist2.sample()  # (batch_size,)
+
+        log_prob2 = dist2.log_prob(action2)  # (batch_size,)
+
+        return action1, action2, log_prob1, log_prob2, dist1, dist2
+    
+    def get_log_prob_and_entropy(
+            self,
+            node_embeddings: torch.Tensor,
+            node_mask: torch.Tensor,
+            action1: torch.Tensor,
+            action2: torch.Tensor,
+    ) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Calculate selected action log_prob and entropy
+
+        Args:
+            node_embeddings (torch.Tensor): GNN node embeddings, shape (batch_size, num_nodes, node_hidden_dim)
+            node_mask (torch.Tensor): Node mask, shape (batch_size, num_nodes) (1 for valid nodes, 0 for padding nodes)
+            action1 (torch.Tensor): First selected action (node index), shape (batch_size,)
+            action2 (torch.Tensor): Second selected action (node index), shape (batch_size,)
+
+        Returns:
+            log_prob1: torch.Tensor: Log probability of action1, shape (batch_size,)
+            log_prob2: torch.Tensor: Log probability of action2, shape (batch_size,)
+            total_log_prob: torch.Tensor: Sum of action1 and action2 log probability, shape (batch_size,)
+            total_entropy: torch.Tensor: Sum of action1 and action2 entropy, shape (batch_size,)
+        """
+
+        batch_size, num_nodes, _ = node_embeddings.size()
+
+        logits1 = self.first_action_head(node_embeddings).squeeze(-1)  # (batch_size, num_nodes)
+        dist1 = self._create_masked_distribution(logits1, node_mask)
+        log_prob1 = dist1.log_prob(action1) # (batch_size,)
+        entropy1 = dist1.entropy() # (batch_size,)
+
+        dept1_embeddings = node_embeddings.gather(
+            1, action1.unsqueeze(-1).expand(-1, -1, self.node_hidden_dim)
+        )  # (batch_size, 1, node_hidden_dim)
+        dept1_embeddings_expanded = dept1_embeddings.expand(
+            -1, num_nodes, -1
+        )  # (batch_size, num_nodes, node_hidden_dim)
+        combined_embeddings = torch.cat(
+            [node_embeddings, dept1_embeddings_expanded], dim=-1
+        )
+
+        logits2 = self.second_action_head(combined_embeddings).squeeze(-1)  # (batch_size, num_nodes)
+
+        mask2 = node_mask.clone()
+        mask2.scatter_(1, action1.unsqueeze(-1), 0)
+
+        dist2 = self._create_masked_distribution(logits2, mask2)
+        log_prob2 = dist2.log_prob(action2) # (batch_size,)
+        entropy2 = dist2.entropy() # (batch_size,)
+
+        total_log_prob = log_prob1 + log_prob2
+        total_entropy = entropy1 + entropy2
+
+        return log_prob1, log_prob2, total_log_prob, total_entropy
+    
+    @torch.no_grad()
+    def get_action(
+            self,
+            node_embeddings: torch.Tensor,
+            node_mask: torch.Tensor,
+            deterministic: bool = False,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+        Get action only
+
+        Args:
+            node_embeddings (torch.Tensor): GNN node embeddings, shape (batch_size, num_nodes, node_hidden_dim)
+            node_mask (torch.Tensor): Node mask, shape (batch_size, num_nodes) (1 for valid nodes, 0 for padding nodes)
+            deterministic (bool, optional): Whether to select actions deterministically. Defaults to False.
+
+        Returns:
+            action1: torch.Tensor: First selected action (node index), shape (batch_size,)
+            action2: torch.Tensor: Second selected action (node index), shape (batch_size,)
+        """
+
+        action1, action2, _, _, _, _ = self.forward(
+            node_embeddings, node_mask, deterministic
+        )
+
+        return action1, action2
+</file>
+
+<file path="src/rl/models/tianshou_policy.py">
+import torch
+import numpy as np
+from typing import Any, Dict, Optional, Union
+from tianshou.data import Batch, to_numpy
+from tianshou.policy import PPOPolicy
+
+from .ppo_model import LayoutOptimizationModel
+
+
+class LayoutPPOPolicy(PPOPolicy):
+    def __init__(
+        self,
+        model: LayoutOptimizationModel,
+        optim: torch.optim.Optimizer,
+        discount_factor: float = 0.99,
+        gae_lambda: float = 0.95,
+        vf_coef: float = 0.5,
+        ent_coef: float = 0.01,
+        max_grad_norm: float = 0.5,
+        value_clip: bool = True,
+        advantage_normalization: bool = True,
+        recompute_advantage: bool = False,
+        dual_clip: Optional[float] = None,
+        reward_normalization: bool = False,
+        eps_clip: float = 0.2,
+        **kwargs: Any,
+    ):
+        super().__init__(
+            actor=model,
+            critic=model,
+            optim=optim,
+            dist_fn=torch.distributions.Categorical,
+            discount_factor=discount_factor,
+            gae_lambda=gae_lambda,
+            vf_coef=vf_coef,
+            ent_coef=ent_coef,
+            max_grad_norm=max_grad_norm,
+            value_clip=value_clip,
+            advantage_normalization=advantage_normalization,
+            recompute_advantage=recompute_advantage,
+            dual_clip=dual_clip,
+            reward_normalization=reward_normalization,
+            **kwargs,
+        )
+
+        self._eps_clip = eps_clip
+        self._recompute_adv = recompute_advantage
+        self._adv_norm = advantage_normalization
+        self._weight_vf = vf_coef
+        self._weight_ent = ent_coef
+        self._grad_norm = max_grad_norm
+        self._dual_clip = dual_clip
+        self._value_clip = value_clip
+
+        self.model = model
+
+    def forward(
+        self,
+        batch: Batch,
+        state: Optional[Union[Dict, Batch, np.ndarray]] = None,
+        **kwargs: Any,
+    ) -> Batch:
+        actions, log_prob, state = self.model(
+            obs=batch.obs,
+            state=state,
+            **kwargs,
+        )
+
+        return Batch(act=to_numpy(actions), log_prob=to_numpy(log_prob), state=state)
+
+    def learn(
+        self,
+        batch: Batch,
+        batch_size: Optional[int] = None,
+        repeat: int = 1,
+        **kwargs: Any,
+    ) -> Dict[Any, Any]:
+        losses = []
+
+        for _ in range(repeat):
+            log_prob, entropy = self.model.get_action_log_prob(
+                batch.obs,
+                batch.act,
+            )
+
+            value = self.model.get_value(batch.obs)
+
+            if self._recompute_adv:
+                with torch.no_grad():
+                    value_old = self.model.get_value(batch.obs)
+                    advantages = batch.returns - value_old
+            else:
+                advantages = batch.adv
+
+            if self._adv_norm:
+                advantages = (advantages - advantages.mean()) / (
+                    advantages.std() + 1e-8
+                )
+
+            ratio = (log_prob - batch.logp_old).exp()
+            surr1 = ratio * advantages
+            surr2 = ratio.clamp(1 - self._eps_clip, 1 + self._eps_clip) * advantages
+
+            if self._dual_clip:
+                clip_loss = -torch.max(
+                    torch.min(surr1, surr2),
+                    self._dual_clip * advantages,
+                ).mean()
+            else:
+                clip_loss = -torch.min(surr1, surr2).mean()
+
+            if self._value_clip:
+                value_clip = batch.v_s + (value - batch.v_s).clamp(
+                    -self._eps_clip, self._eps_clip
+                )
+                vf_loss = torch.max(
+                    (value - batch.returns).pow(2),
+                    (value_clip - batch.returns).pow(2),
+                ).mean()
+            else:
+                vf_loss = (value - batch.returns).pow(2).mean()
+
+            ent_loss = -entropy.mean()
+
+            loss = clip_loss + self._weight_vf * vf_loss + self._weight_ent * ent_loss
+
+            self.optim.zero_grad()
+            loss.backward()
+
+            if self._grad_norm:
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), self._grad_norm)
+
+            self.optim.step()
+
+            losses.append(
+                {
+                    "loss": loss.item(),
+                    "loss/clip": clip_loss.item(),
+                    "loss/vf": vf_loss.item(),
+                    "loss/ent": ent_loss.item(),
+                }
+            )
+
+        avg_loss = {k: np.mean([loss[k] for loss in losses]) for k in losses[0].keys()}
+
+        return avg_loss
+</file>
+
 <file path="configs/constraints.yaml">
 # Hospital Department Layout Constraints Configuration
 area_compatibility_tolerance: 0.15
@@ -1598,26 +2245,6 @@ node_definitions:
     code: "T14"
     service_time: 0
     category: "SLOT"
-</file>
-
-<file path="configs/paths.yaml">
-# Paths are relative to the project root directory.
-
-# Source data directories
-data_dir: "data"
-label_dir: "${data_dir}/label"
-
-# Output directories
-results_dir: "results"
-network_dir: "${results_dir}/network"
-model_dir: "${results_dir}/model"
-debug_dir: "debug"
-
-# Specific file paths
-travel_times_csv: "${network_dir}/hospital_travel_times.csv"
-slots_csv: "${network_dir}/slots.csv"
-vis_html: "${network_dir}/hospital_network_3d.html"
-graph_pkl: "${network_dir}/hospital_network.pkl"
 </file>
 
 <file path="results/network/slots.csv">
@@ -2598,6 +3225,103 @@ class PathwayGenerator:
                 generated_sequence.append(context[target])
 </file>
 
+<file path="src/rl/models/feature_extractor.py">
+import torch
+import torch.nn as nn
+from typing import Optional
+
+
+class EmbeddingLayer(nn.Module):
+    def __init__(self, num_categories: int, embedding_dim: int, padding_idx: int):
+        """
+        num_categories is equal max_departments
+        value == padding_idx position will be set to zero and ignored in the loss computation
+        """
+        super().__init__()
+        self.num_categories = num_categories
+        self.embedding_dim = embedding_dim
+
+        self.embedding = nn.Embedding(
+            num_embeddings=self.num_categories,
+            embedding_dim=self.embedding_dim,
+            padding_idx=padding_idx,
+        )
+
+        nn.init.xavier_uniform_(self.embedding.weight)
+        if padding_idx is not None:
+            with torch.no_grad():
+                self.embedding.weight[padding_idx].fill_(0)
+
+    def forward(self, categories_ids: torch.Tensor) -> torch.Tensor:
+        """
+
+        Args:
+            categories_ids (torch.Tensor): categories indices, shape (batch_size, num_nodes[max_departments])
+
+        Returns:
+            embedded (torch.Tensor): embedded features, shape (batch_size, num_nodes, embedding_dim)
+        """
+
+        categories_ids = categories_ids.long()
+        embedded = self.embedding(
+            categories_ids
+        )  # (batch_size, num_nodes, embedding_dim)
+        return embedded
+
+
+class FeatureProcessor(nn.Module):
+    """
+    FeatureProcessor : integrate categorical and numerical feature
+    """
+
+    def __init__(
+        self,
+        num_categories: int,
+        embedding_dim: int,
+        numerical_feat_dim: int,
+        numerical_hidden_dim: Optional[int] = None,
+        padding_idx: int = -1,
+    ):
+        super().__init__()
+        self.num_categories = num_categories
+        self.embedding_dim = embedding_dim
+        self.numerical_feat_dim = numerical_feat_dim
+
+        self.embedding_layer = EmbeddingLayer(
+            num_categories=self.num_categories,
+            embedding_dim=self.embedding_dim,
+            padding_idx=padding_idx,
+        )
+
+        self.numerical_hidden_dim = numerical_hidden_dim or embedding_dim
+        self.numerical_projection = nn.Sequential(
+            nn.Linear(self.numerical_feat_dim, self.numerical_hidden_dim),
+            nn.ReLU(),
+            nn.LayerNorm(self.numerical_hidden_dim),
+        )
+        self.output_dim = embedding_dim + self.numerical_hidden_dim
+
+    def forward(
+        self,
+        categorical_feat: torch.Tensor,
+        numerical_feat: torch.Tensor,
+    ) -> torch.Tensor:
+        
+        embedded_categorical = self.embedding_layer(
+            categorical_feat
+        )  # (batch_size, num_nodes, embedding_dim)
+
+        projected_numerical = self.numerical_projection(
+            numerical_feat
+        )  # (batch_size, num_nodes, numerical_hidden_dim)
+
+        conbined_features = torch.cat(
+            [embedded_categorical, projected_numerical], dim=-1
+        )  # (batch_size, num_nodes, embedding_dim + numerical_hidden_dim)
+
+        return conbined_features
+</file>
+
 <file path="src/utils/processor.py">
 """Handles image loading, preprocessing, and basic morphological operations."""
 
@@ -2821,6 +3545,29 @@ class DebugImage:
             logger.warning("Napari is not installed. Skipping napari display.")
         except Exception as e:
             logger.error(f"Error showing image with napari: {e}")
+</file>
+
+<file path="configs/paths.yaml">
+# Paths are relative to the project root directory.
+
+# Source data directories
+data_dir: "data"
+label_dir: "${data_dir}/label"
+
+# Output directories
+results_dir: "results"
+network_dir: "${results_dir}/network"
+model_dir: "${results_dir}/model"
+debug_dir: "debug"
+
+# Specific file paths
+travel_times_csv: "${network_dir}/hospital_travel_times.csv"
+slots_csv: "${network_dir}/slots.csv"
+vis_html: "${network_dir}/hospital_network_3d.html"
+graph_pkl: "${network_dir}/hospital_network.pkl"
+
+# Training logs
+tensorboard_dir: "${results_dir}/tensorboard"
 </file>
 
 <file path="configs/pathways.yaml">
@@ -3357,224 +4104,251 @@ class PlotlyPlotter(BasePlotter):
             fig.show()
 </file>
 
-<file path="src/rl/env.py">
-import gymnasium as gym
+<file path="src/rl/models/ppo_model.py">
+import torch
+import torch.nn as nn
 import numpy as np
-from gymnasium import spaces
-from sklearn.preprocessing import StandardScaler
-from typing import Dict, Optional
+from typing import Optional, List, Tuple, Literal, Dict, Union, Any
+from tianshou.data import Batch
 
-from src.config.config_loader import ConfigLoader
-from src.pipeline import PathwayGenerator, CostManager
-from src.utils.logger import setup_logger
+from .feature_extractor import FeatureProcessor
+from .gnn_encoder import GCNEncoder
+from .policy_net import AutoregressiveActor
+from .value_net import ValueNet
 
 
-class LayoutEnv(gym.Env):
-    metadata = {"render.modes": ["human"]}
-
-    def __init__(self, config: ConfigLoader, max_departments: int, max_step: int):
+class LayoutOptimizationModel(nn.Module):
+    def __init__(
+        self,
+        num_categories: int,
+        embedding_dim: int,
+        numerical_feat_dim: int,
+        numerical_hidden_dim: Optional[int] = None,
+        gnn_hidden_dims: List[int] = [128, 128],
+        gnn_output_dim: int = 256,
+        gnn_num_layers: int = 3,
+        gnn_dropout: float = 0.1,
+        actor_hidden_dim: int = 128,
+        actor_dropout: float = 0.1,
+        value_hidden_dim: int = 256,
+        value_num_layers: int = 3,
+        value_pooling_type: Literal["mean", "max", "sum", "attention"] = "mean",
+        value_dropout: float = 0.1,
+        device: Optional[torch.device] = torch.device("cpu"),
+    ):
         super().__init__()
+        self.device = device
 
-        self.config = config
-        self.logger = setup_logger(__name__)
-        self.max_departments = max_departments
-        self.max_step = max_step
-
-        # [service_time, service_weight, area, x, y, z]
-        self.numerical_feature_dim = 6
-        self.categorical_feature_dim = 1  # [name]
-        self.fixable_features: np.ndarray = np.zeros((self.max_departments, 3), dtype=np.float32)
-        self.moveable_features: np.ndarray = np.zeros((self.max_departments, 3), dtype=np.float32)
-
-        self.pathway_generator = PathwayGenerator(self.config)
-        self.cost_manager = CostManager(self.config, is_shuffle=True)
-
-        self.norm_numerical_feature: Optional[np.ndarray] = None
-        self.index_to_dept_id: Dict[int, str] = {}
-        self.dept_id_to_index: Dict[str, int] = {}
-        self.num_total_slot: int = 0
-        self.num_total_travel_node: int = 0
-        self.scaler: StandardScaler = StandardScaler()
-        self._precompute_normalization_stats()
-        self._precompute_categorical_features()
-
-        self.E_max = self.max_departments * (self.max_departments - 1) // 2
-        self.observation_space = spaces.Dict(
-            {
-                "x_numerical": spaces.Box(
-                    low=-5,
-                    high=5,
-                    shape=(self.max_departments, self.numerical_feature_dim),
-                    dtype=np.float32,
-                ),
-                "x_categorical": spaces.Box(
-                    low=0,
-                    high=self.num_total_slot - 1,
-                    shape=(self.max_departments,),
-                    dtype=np.int32,
-                ),
-                "edge_index": spaces.Box(
-                    low=0,
-                    high=self.max_departments - 1,
-                    shape=(2, self.E_max),
-                    dtype=np.int32,
-                ),
-                "edge_weight": spaces.Box(
-                    low=0, high=1, shape=(self.E_max,), dtype=np.float32
-                ),
-                "node_mask": spaces.MultiBinary(self.max_departments),
-                "edge_mask": spaces.MultiBinary(self.E_max),
-            }
-        )
-        self.action_space = spaces.MultiDiscrete(
-            [self.max_departments, self.max_departments]
+        self.feature_processor = FeatureProcessor(
+            num_categories=num_categories,
+            embedding_dim=embedding_dim,
+            numerical_feat_dim=numerical_feat_dim,
+            numerical_hidden_dim=numerical_hidden_dim,
+            padding_idx=num_categories - 1,
         )
 
-        self.current_step = 0
-        self.current_cost = 0.0
-        self.initial_cost = 0.0
+        self.gnn_encoder = GCNEncoder(
+            input_dim=self.feature_processor.output_dim,
+            hidden_dims=gnn_hidden_dims,
+            output_dim=gnn_output_dim,
+            num_layers=gnn_num_layers,
+            dropout=gnn_dropout,
+        )
 
-    def _precompute_normalization_stats(self) -> None:
-        pathways = self.pathway_generator.generate_all()
-        self.cost_manager.initialize(pathways=pathways)
+        self.actor = AutoregressiveActor(
+            node_hidden_dim=gnn_output_dim,
+            actor_hidden_dim=actor_hidden_dim,
+            dropout=actor_dropout,
+        )
 
-        fixable_features = self.cost_manager.slots[
-            ["service_time", "service_weight", "area"]
-        ].to_numpy()
-        moveable_features = self.cost_manager.slots[
-            ["pos_x", "pos_y", "pos_z"]
-        ].to_numpy()
+        self.critic = ValueNet(
+            node_embedding_dim=gnn_output_dim,
+            value_hidden_dim=value_hidden_dim,
+            num_layers=value_num_layers,
+            pooling_type=value_pooling_type,
+            dropout=value_dropout,
+        )
 
-        self.fixable_features[:len(fixable_features)] = fixable_features
-        self.moveable_features[:len(moveable_features)] = moveable_features
+        self.to(self.device)
 
-        self.scaler.fit(np.concatenate([self.fixable_features, self.moveable_features], axis=1))
-
-    def _precompute_categorical_features(self):
-        slots_name_ids = self.cost_manager.slots_name_id
-        self.num_total_travel_node = len(self.cost_manager.travel_times.index)
-        self.num_total_slot = len(slots_name_ids)
-        self.index_to_dept_id = {i: name for i, name in enumerate(slots_name_ids)}
-        self.dept_id_to_index = {name: i for i, name in enumerate(slots_name_ids)}
-
-    def _compute_numerical_features(self):
-        pass
-
-    def step(self, action: np.ndarray):
-        self.current_step += 1
-
-        idx1: int = action[0].astype(int)
-        idx2: int = action[1].astype(int)
-
-        if idx1 >= self.num_total_slot or idx2 >= self.num_total_slot or idx1 == idx2:
-            reward: float = self.config.constraints.invalid_action
-            observation = self._get_observation()
-            done = self.current_step >= self.max_step
-            info = self._get_info()
-            self.logger.warning(f"Invalid action: {action}, reward: {reward}")
-            return observation, reward, done, False, info
-        
-        dept1 = self.index_to_dept_id[idx1]
-        dept2 = self.index_to_dept_id[idx2]
-
-        previous_cost = self.current_cost
-        new_cost = self.cost_engine.swap(dept1, dept2)
-        
-        step_penalty = self.config.constraints.step_penalty
-        if new_cost is None:
-            reward: float = self.config.constraints.invalid_action
-            self.logger.warning(f"Invalid swap: {dept1} <-> {dept2}, reward: {reward}")
+    def _prepare_inputs(
+        self,
+        obs: Union[Dict, Batch],
+    ) -> Tuple[
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+        torch.Tensor,
+    ]:
+        if isinstance(obs, Batch):
+            x_categorical = obs.x_categorical
+            x_numerical = obs.x_numerical
+            edge_index = obs.edge_index
+            edge_weight = obs.edge_weight
+            node_mask = obs.node_mask
+            edge_mask = obs.edge_mask
         else:
-            cost_diff = previous_cost - new_cost
-            reward = cost_diff / (self.initial_cost + 1e-6)
-            self.current_cost = new_cost
-        
-        reward += step_penalty
+            x_categorical = obs["x_categorical"]
+            x_numerical = obs["x_numerical"]
+            edge_index = obs["edge_index"]
+            edge_weight = obs["edge_weight"]
+            node_mask = obs["node_mask"]
+            edge_mask = obs["edge_mask"]
 
-        terminated = False
-        truncated = self.current_step >= self.max_step
+        x_categorical = torch.as_tensor(
+            x_categorical, device=self.device, dtype=torch.long
+        )
+        x_numerical = torch.as_tensor(
+            x_numerical, device=self.device, dtype=torch.float32
+        )
+        edge_index = torch.as_tensor(edge_index, device=self.device, dtype=torch.long)
+        edge_weight = torch.as_tensor(
+            edge_weight, device=self.device, dtype=torch.float32
+        )
+        node_mask = torch.as_tensor(node_mask, device=self.device, dtype=torch.float32)
+        edge_mask = torch.as_tensor(edge_mask, device=self.device, dtype=torch.float32)
 
-        observation = self._get_observation()
-        info = self._get_info()
+        return x_categorical, x_numerical, edge_index, edge_weight, node_mask, edge_mask
 
-        return observation, reward, terminated, truncated, info
-
-
-    def reset(self, seed: Optional[int] = None) -> tuple[Dict[str, np.ndarray], Dict]:
-        super().reset(seed=seed)
-        self.logger.info("Resetting environment")
-
-        pathways = self.pathway_generator.generate_all()
-        # self.cost_manager = CostManager(self.config, is_shuffle=True) # If needed to shuffle travel_matrix
-        self.cost_manager.initialize(pathways=pathways)
-        self.cost_engine = self.cost_manager.create_cost_engine()
-
-        self.current_step = 0
-        self.initial_cost = self.cost_engine.current_travel_cost
-        self.current_cost = self.initial_cost
-
-        self.logger.info(
-            f"New instance created. Active departments: {self.num_total_slot}, Initial travel cost: {self.initial_cost}"
+    def _encode_observations(
+        self,
+        obs: Union[Dict, Batch],
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        x_categorical, x_numerical, edge_index, edge_weight, node_mask, edge_mask = (
+            self._prepare_inputs(obs)
         )
 
-        observation = self._get_observation()
-        info = self._get_info()
+        node_features = self.feature_processor(x_categorical, x_numerical)
 
-        return observation, info
-
-    def _get_observation(self) -> Dict[str, np.ndarray]:
-        x_categorical = np.ones((self.max_departments,), dtype=np.int32) * -1
-        node_mask = np.zeros((self.max_departments,), dtype=np.int32)
-
-        shuffled_indexes = [self.dept_id_to_index[slot_id] for slot_id in self.cost_engine.layout.values()]
-        moveable_feature = np.zeros_like(self.moveable_features)
-        moveable_feature[: self.num_total_slot, :] = self.moveable_features[shuffled_indexes]
-        
-        x_norm_numerical = self.scaler.transform(
-            np.concatenate((self.fixable_features, moveable_feature), axis=1)
+        node_embeddings = self.gnn_encoder.forward_batch(
+            x=node_features,
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            node_mask=node_mask,
+            edge_mask=edge_mask,
         )
 
-        x_categorical[: self.num_total_slot] = np.array(
-            [i for i in self.index_to_dept_id.keys()]
+        return node_embeddings, node_mask
+
+    def forward(
+        self, obs: Union[Dict, Batch], state: Optional[Any] = None, **kwargs
+    ) -> Tuple[torch.Tensor, torch.Tensor, Any]:
+        node_embeddings, node_mask = self._encode_observations(obs)
+
+        action1, action2, log_prob1, log_prob2, _, _ = self.actor(
+            node_embeddings=node_embeddings,
+            node_mask=node_mask,
+            deterministic=kwargs.get("deterministic", False),
         )
-        node_mask[: self.num_total_slot] = 1
 
-        edge_index = np.ones((2, self.E_max), dtype=np.int32) * -1
-        edge_weight = np.zeros((self.E_max,), dtype=np.float32)
-        edge_mask = np.zeros((self.E_max,), dtype=np.int32)
+        actions = torch.stack([action1, action2], dim=-1)  # (batch_size, 2)
 
-        slot_name_id_edge_weights = self.cost_engine.slot_name_id_edge_weights
-        for i, (name_id1, name_id2, weight) in enumerate(slot_name_id_edge_weights):
-            if name_id1 in self.dept_id_to_index and name_id2 in self.dept_id_to_index:
-                idx1 = self.dept_id_to_index[name_id1]
-                idx2 = self.dept_id_to_index[name_id2]
-                edge_index[0, i] = idx1
-                edge_index[1, i] = idx2
-                edge_weight[i] = weight
-                edge_mask[i] = 1
-        
-        return {
-            "x_numerical": x_norm_numerical,
-            "x_categorical": x_categorical,
-            "edge_index": edge_index,
-            "edge_weight": edge_weight,
-            "node_mask": node_mask,
-            "edge_mask": edge_mask,
-        }
+        log_prob = log_prob1 + log_prob2  # (batch_size,)
 
-    def _get_info(self) -> Dict:
-        return {
-            "current_cost": self.current_cost,
-            "initial_cost": self.initial_cost,
-            "step": self.current_step,
-            "num_departments": self.num_total_slot,
-        }
+        return actions, log_prob, state
 
-    def render(self, mode:str="human"):
-        if mode == "human":
-            print(f"Step: {self.current_step}")
-            print(f"Current Total Travel Cost: {self.current_cost:.2f} (Initial: {self.initial_cost:.2f})")
-            print(f"Improvement: {(self.initial_cost - self.current_cost) / (self.initial_cost + 1e-6) * 100:.2f}%")
+    def get_action_log_prob(
+        self,
+        obs: Union[Dict, Batch],
+        action: np.ndarray,
+        **kwargs: Any,
+    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        """
+
+        Args:
+            obs (Union[Dict, Batch]): Observation from the environment.
+            action (np.ndarray): Action taken shape (batch_size, 2).
+
+        Returns:
+            log_prob (torch.Tensor): Joint log probability of action1 and action2, shape (batch_size,).
+            entropy (torch.Tensor): Sum of entropies of action1 and action2 distributions, shape (batch_size,).
+        """
+
+        node_embeddings, node_mask = self._encode_observations(obs)
+
+        actions = torch.as_tensor(action, device=self.device, dtype=torch.long)
+        action1 = actions[:, 0]
+        action2 = actions[:, 1]
+
+        _, _, log_prob, entropy = self.actor.get_log_prob_and_entropy(
+            node_embeddings=node_embeddings,
+            node_mask=node_mask,
+            action1=action1,
+            action2=action2,
+        )
+
+        return log_prob, entropy
+
+    def get_value(
+        self,
+        obs: Union[Dict, Batch],
+        **kwargs: Any,
+    ) -> torch.Tensor:
+        node_embeddings, node_mask = self._encode_observations(obs)
+
+        value = self.critic.get_value(
+            node_embeddings=node_embeddings,
+            node_mask=node_mask,
+        )  # (batch_size)
+
+        return value
+</file>
+
+<file path="configs/agent.yaml">
+# Global parameters
+num_train_envs: 2
+num_test_envs: 1
+
+max_departments: 100
+max_steps: 1000
+
+lr: 3e-4
+
+
+# TianShou PPO parameters
+buffer_size: 20000
+max_epoch: 100
+step_per_epoch: 150
+repeat_per_collect: 4
+episode_per_test: 10
+batch_size: 64
+step_per_collect: 200
+
+# Feature Extractor parameters
+embedding_dim: 32
+numerical_feat_dim: 6
+numerical_hidden_dim: 32
+
+# GNN Encoder parameters
+gnn_hidden_dims: [256, 256]
+gnn_output_dim: 256
+gnn_num_layers: 3
+gnn_dropout: 0.1
+
+# Actor parameters
+actor_hidden_dim: 256
+actor_dropout: 0.1
+
+# Critic parameters
+value_hidden_dim: 256
+value_num_layers: 2
+value_pooling_type: "mean" # Options: "mean", "max", "sum", "attention"
+value_dropout: 0.1
+
+# Policy parameters
+discount_factor: 0.99
+gae_lambda: 0.95
+vf_coef: 0.5
+ent_coef: 0.01
+max_grad_norm: 0.5
+value_clip: True
+advantage_normalization: True
+recompute_advantage: False
+dual_clip: null
+reward_normalization: True
+eps_clip: 0.2
 </file>
 
 <file path="src/analysis/travel_time.py">
@@ -4003,6 +4777,259 @@ if __name__ == "__main__":
     app()
 </file>
 
+<file path="src/rl/env.py">
+import gymnasium as gym
+import numpy as np
+from dataclasses import dataclass
+from gymnasium import spaces
+from sklearn.preprocessing import StandardScaler
+from typing import Dict, Optional
+
+from src.config.config_loader import ConfigLoader
+from src.pipeline import PathwayGenerator, CostManager
+from src.utils.logger import setup_logger
+
+@dataclass
+class GraphObservation:
+    x_numerical: np.ndarray  # Shape: (max_departments, numerical_feature_dim)
+    x_categorical: np.ndarray  # Shape: (max_departments,)
+    edge_index: np.ndarray  # Shape: (2, E_max)
+    edge_weight: np.ndarray  # Shape: (E_max,)
+    node_mask: np.ndarray  # Shape: (max_departments,)
+    edge_mask: np.ndarray  # Shape: (E_max,)
+
+    def to_dict(self) -> Dict[str, np.ndarray]:
+        return {
+            "x_numerical": self.x_numerical,
+            "x_categorical": self.x_categorical,
+            "edge_index": self.edge_index,
+            "edge_weight": self.edge_weight,
+            "node_mask": self.node_mask,
+            "edge_mask": self.edge_mask,
+        }
+    
+    def __repr__(self) -> str:
+        return (
+            f"GraphObservation(\n"
+            f" x_numerical shape: {self.x_numerical.shape},\n"
+            f" x_categorical shape: {self.x_categorical.shape},\n"
+            f" edge_index shape: {self.edge_index.shape},\n"
+            f" edge_weight shape: {self.edge_weight.shape},\n"
+            f" node_mask shape: {self.node_mask.shape},\n"
+            f" edge_mask shape: {self.edge_mask.shape},\n"
+            f")"
+        )
+
+class LayoutEnv(gym.Env):
+    metadata = {"render.modes": ["human"]}
+
+    def __init__(self, config: ConfigLoader, max_departments: int, max_step: int):
+        super().__init__()
+
+        self.config = config
+        self.logger = setup_logger(__name__)
+        self.max_departments = max_departments
+        self.PADDING_IDX = max_departments - 1
+        self.max_step = max_step
+
+        # [service_time, service_weight, area, x, y, z]
+        self.numerical_feature_dim = 6
+        self.categorical_feature_dim = 1  # [name]
+        self.fixable_features: np.ndarray = np.zeros((self.max_departments, 3), dtype=np.float32)
+        self.moveable_features: np.ndarray = np.zeros((self.max_departments, 3), dtype=np.float32)
+
+        self.pathway_generator = PathwayGenerator(self.config)
+        self.cost_manager = CostManager(self.config, is_shuffle=True)
+
+        self.norm_numerical_feature: Optional[np.ndarray] = None
+        self.index_to_dept_id: Dict[int, str] = {}
+        self.dept_id_to_index: Dict[str, int] = {}
+        self.num_total_slot: int = 0
+        self.num_total_travel_node: int = 0
+        self.scaler: StandardScaler = StandardScaler()
+        self._precompute_normalization_stats()
+        self._precompute_categorical_features()
+
+        self.E_max = self.max_departments * (self.max_departments - 1) // 2
+        self.observation_space = spaces.Dict(
+            {
+                "x_numerical": spaces.Box(
+                    low=-5,
+                    high=5,
+                    shape=(self.max_departments, self.numerical_feature_dim),
+                    dtype=np.float32,
+                ),
+                "x_categorical": spaces.Box(
+                    low=0,
+                    high=self.num_total_slot - 1,
+                    shape=(self.max_departments,),
+                    dtype=np.int32,
+                ),
+                "edge_index": spaces.Box(
+                    low=0,
+                    high=self.max_departments - 1,
+                    shape=(2, self.E_max),
+                    dtype=np.int32,
+                ),
+                "edge_weight": spaces.Box(
+                    low=0, high=1, shape=(self.E_max,), dtype=np.float32
+                ),
+                "node_mask": spaces.MultiBinary(self.max_departments),
+                "edge_mask": spaces.MultiBinary(self.E_max),
+            }
+        )
+        self.action_space = spaces.MultiDiscrete(
+            [self.max_departments, self.max_departments]
+        )
+
+        self.current_step = 0
+        self.current_cost = 0.0
+        self.initial_cost = 0.0
+
+    def _precompute_normalization_stats(self) -> None:
+        pathways = self.pathway_generator.generate_all()
+        self.cost_manager.initialize(pathways=pathways)
+
+        fixable_features = self.cost_manager.slots[
+            ["service_time", "service_weight", "area"]
+        ].to_numpy()
+        moveable_features = self.cost_manager.slots[
+            ["pos_x", "pos_y", "pos_z"]
+        ].to_numpy()
+
+        self.fixable_features[:len(fixable_features)] = fixable_features
+        self.moveable_features[:len(moveable_features)] = moveable_features
+
+        self.scaler.fit(np.concatenate([self.fixable_features, self.moveable_features], axis=1))
+
+    def _precompute_categorical_features(self):
+        slots_name_ids = self.cost_manager.slots_name_id
+        self.num_total_travel_node = len(self.cost_manager.travel_times.index)
+        self.num_total_slot = len(slots_name_ids)
+        self.index_to_dept_id = {i: name for i, name in enumerate(slots_name_ids)}
+        self.dept_id_to_index = {name: i for i, name in enumerate(slots_name_ids)}
+
+    def _compute_numerical_features(self):
+        pass
+
+    def step(self, action: np.ndarray):
+        self.current_step += 1
+
+        idx1: int = action[0].astype(int)
+        idx2: int = action[1].astype(int)
+
+        if idx1 >= self.num_total_slot or idx2 >= self.num_total_slot or idx1 == idx2:
+            reward: float = self.config.constraints.invalid_action
+            observation = self._get_observation()
+            done = self.current_step >= self.max_step
+            info = self._get_info()
+            self.logger.warning(f"Invalid action: {action}, reward: {reward}")
+            return observation, reward, done, False, info
+        
+        dept1 = self.index_to_dept_id[idx1]
+        dept2 = self.index_to_dept_id[idx2]
+
+        previous_cost = self.current_cost
+        new_cost = self.cost_engine.swap(dept1, dept2)
+        
+        step_penalty = self.config.constraints.step_penalty
+        if new_cost is None:
+            reward: float = self.config.constraints.invalid_action
+            self.logger.warning(f"Invalid swap: {dept1} <-> {dept2}, reward: {reward}")
+        else:
+            cost_diff = previous_cost - new_cost
+            self.logger.success(f"Step {self.current_step}: Swapped {dept1} <-> {dept2}")
+            reward = cost_diff / (self.initial_cost + 1e-6)
+            self.current_cost = new_cost
+        
+        reward += step_penalty
+
+        terminated = False
+        truncated = self.current_step >= self.max_step
+
+        observation = self._get_observation()
+        info = self._get_info()
+
+        return observation.to_dict(), reward, terminated, truncated, info
+
+
+    def reset(self, seed: Optional[int] = None) -> tuple[Dict[str, np.ndarray], Dict]:
+        super().reset(seed=seed)
+        self.logger.info("Resetting environment")
+
+        pathways = self.pathway_generator.generate_all()
+        # self.cost_manager = CostManager(self.config, is_shuffle=True) # If needed to shuffle travel_matrix
+        self.cost_manager.initialize(pathways=pathways)
+        self.cost_engine = self.cost_manager.create_cost_engine()
+
+        self.current_step = 0
+        self.initial_cost = self.cost_engine.current_travel_cost
+        self.current_cost = self.initial_cost
+
+        self.logger.info(
+            f"New instance created. Active departments: {self.num_total_slot}, Initial travel cost: {self.initial_cost}"
+        )
+
+        observation = self._get_observation()
+        info = self._get_info()
+
+        return observation.to_dict(), info
+
+    def _get_observation(self) -> GraphObservation:
+        x_categorical = np.ones((self.max_departments,), dtype=np.int32) * self.PADDING_IDX
+        node_mask = np.zeros((self.max_departments,), dtype=np.int32)
+
+        shuffled_indexes = [self.dept_id_to_index[slot_id] for slot_id in self.cost_engine.layout.values()]
+        moveable_feature = np.zeros_like(self.moveable_features)
+        moveable_feature[: self.num_total_slot, :] = self.moveable_features[shuffled_indexes]
+        
+        x_norm_numerical = self.scaler.transform(
+            np.concatenate((self.fixable_features, moveable_feature), axis=1)
+        )
+
+        x_categorical[: self.num_total_slot] = np.array(
+            [i for i in self.index_to_dept_id.keys()]
+        )
+        node_mask[: self.num_total_slot] = 1
+
+        edge_index = np.ones((2, self.E_max), dtype=np.int32) * -1
+        edge_weight = np.zeros((self.E_max,), dtype=np.float32)
+        edge_mask = np.zeros((self.E_max,), dtype=np.int32)
+
+        slot_name_id_edge_weights = self.cost_engine.slot_name_id_edge_weights
+        for i, (name_id1, name_id2, weight) in enumerate(slot_name_id_edge_weights):
+            if name_id1 in self.dept_id_to_index and name_id2 in self.dept_id_to_index:
+                idx1 = self.dept_id_to_index[name_id1]
+                idx2 = self.dept_id_to_index[name_id2]
+                edge_index[0, i] = idx1
+                edge_index[1, i] = idx2
+                edge_weight[i] = weight
+                edge_mask[i] = 1
+        
+        return GraphObservation(
+            x_numerical=x_norm_numerical,
+            x_categorical=x_categorical,
+            edge_index=edge_index,
+            edge_weight=edge_weight,
+            node_mask=node_mask,
+            edge_mask=edge_mask
+        )
+
+    def _get_info(self) -> Dict:
+        return {
+            "current_cost": self.current_cost,
+            "initial_cost": self.initial_cost,
+            "step": self.current_step,
+            "num_departments": self.num_total_slot,
+        }
+
+    def render(self, mode:str="human"):
+        if mode == "human":
+            print(f"Step: {self.current_step}")
+            print(f"Current Total Travel Cost: {self.current_cost:.2f} (Initial: {self.initial_cost:.2f})")
+            print(f"Improvement: {(self.initial_cost - self.current_cost) / (self.initial_cost + 1e-6) * 100:.2f}%")
+</file>
+
 <file path="src/pipeline/cost_manager.py">
 import pandas as pd
 import numpy as np
@@ -4356,6 +5383,7 @@ class CostEngine:
         self._layout = copy.deepcopy(self.initial_layout)
         self._precompute_np_times()
         self._sort_np_matrices()
+        self._previous_swap = None
 
     def swap(self, dept1: str, dept2: str) -> Optional[float]:
         slot1 = self._layout[dept1]
@@ -4375,8 +5403,6 @@ class CostEngine:
             )
             return None
 
-        self._previous_swap = (dept1, dept2)
-
         mask_id1 = self.np_times[:, :2] == d_id1
         mask_id2 = self.np_times[:, :2] == d_id2
 
@@ -4391,50 +5417,160 @@ class CostEngine:
         self._slot_layout[slot1] = dept2
         self._slot_layout[slot2] = dept1
 
+        self._previous_swap = (dept1, dept2)
         return self.current_travel_cost
 </file>
 
 <file path="src/optimize_manager.py">
-import numpy as np
+import torch
+from torch.utils.tensorboard import SummaryWriter
+from tianshou.data import Collector, VectorReplayBuffer
+from tianshou.env import DummyVectorEnv
+from tianshou.trainer import onpolicy_trainer
+from tianshou.utils import TensorboardLogger
 
 from src.pipeline import PathwayGenerator, CostManager
 from src.config.config_loader import ConfigLoader
 from src.utils.logger import setup_logger
 from src.rl.env import LayoutEnv
+from src.rl.models.ppo_model import LayoutOptimizationModel
+from src.rl.models.tianshou_policy import LayoutPPOPolicy
+
 
 class OptimizeManager:
     def __init__(self, config: ConfigLoader, **kwargs):
         self.logger = setup_logger(__name__)
         self.config = config
         self.kwargs = kwargs
+
         self.pathway_generator = PathwayGenerator(self.config)
         self.cost_manager = CostManager(self.config, is_shuffle=True)
-        self.env = LayoutEnv(config, max_departments=100, max_step=1000)
+        self.max_departments = self.config.agent.max_departments
+        self.max_steps = self.config.agent.max_steps
 
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.logger.info(f"Using device: {self.device}")
+
+    def create_env(self):
+        train_envs = DummyVectorEnv(
+            [
+                lambda: LayoutEnv(
+                    config=self.config,
+                    max_departments=self.max_departments,
+                    max_step=self.max_steps,
+                )
+                for _ in range(self.config.agent.num_train_envs)
+            ]
+        )
+
+        test_envs = DummyVectorEnv(
+            [
+                lambda: LayoutEnv(
+                    config=self.config,
+                    max_departments=self.max_departments,
+                    max_step=self.max_steps,
+                )
+                for _ in range(self.config.agent.num_test_envs)
+            ]
+        )
+
+        return train_envs, test_envs
+
+    def create_model(self):
+        agent_cfg = self.config.agent
+        model = LayoutOptimizationModel(
+            num_categories=agent_cfg.max_departments,
+            embedding_dim=agent_cfg.embedding_dim,
+            numerical_feat_dim=agent_cfg.numerical_feat_dim,
+            numerical_hidden_dim=agent_cfg.numerical_hidden_dim,
+            gnn_hidden_dims=agent_cfg.gnn_hidden_dims,
+            gnn_output_dim=agent_cfg.gnn_output_dim,
+            gnn_num_layers=agent_cfg.gnn_num_layers,
+            gnn_dropout=agent_cfg.gnn_dropout,
+            actor_hidden_dim=agent_cfg.actor_hidden_dim,
+            actor_dropout=agent_cfg.actor_dropout,
+            value_hidden_dim=agent_cfg.value_hidden_dim,
+            value_num_layers=agent_cfg.value_num_layers,
+            value_pooling_type=agent_cfg.value_pooling_type,
+            value_dropout=agent_cfg.value_dropout,
+            device=self.device,
+        )
+
+        self.logger.info(
+            f"Model created with {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters."
+        )
+        return model
+    
     def run(self):
-        self.pathways = self.pathway_generator.generate_all()
-        self.cost_manager.initialize(pathways=self.pathways)
-        self.env.reset()
-        self.env.step(np.array([0, 1]))
 
-        for _ in range(1000):
-            actions = self.env.action_space.sample()
-            self.env.step(actions)
+        self.logger.info("Starting PPO training...")
 
+        train_envs, test_envs = self.create_env()
 
+        model = self.create_model()
 
+        optim = torch.optim.Adam(
+            model.parameters(),
+            lr=self.config.agent.lr,
+        )
 
-        # original_cost = cost_engine.current_travel_cost
-        # current_cost = cost_engine.current_travel_cost
-        # optimize_layout = None
-        # for i in range(50000):
-        #     dept1, dept2 = random.sample(list(cost_engine.layout), 2)
-        #     if cost_engine.swap(dept1, dept2):
-        #         self.logger.info(f"Swap {dept1} and {dept2}, new cost: {cost_engine.current_travel_cost}")
-        #         if cost_engine.current_travel_cost < current_cost:
-        #             current_cost = cost_engine.current_travel_cost
-        #             optimize_layout = cost_engine.layout.copy()
-        # pass
+        policy = LayoutPPOPolicy(
+            model=model,
+            optim=optim,
+            discount_factor=self.config.agent.discount_factor,
+            gae_lambda=self.config.agent.gae_lambda,
+            vf_coef=self.config.agent.vf_coef,
+            ent_coef=self.config.agent.ent_coef,
+            max_grad_norm=self.config.agent.max_grad_norm,
+            value_clip=self.config.agent.value_clip,
+            advantage_normalization=self.config.agent.advantage_normalization,
+            recompute_advantage=self.config.agent.recompute_advantage,
+            dual_clip=self.config.agent.dual_clip,
+            reward_normalization=self.config.agent.reward_normalization,
+            eps_clip=self.config.agent.eps_clip,
+        )
+
+        train_collector = Collector(
+            policy=policy,
+            env=train_envs,
+            buffer=VectorReplayBuffer(
+                total_size=self.config.agent.buffer_size,
+                buffer_num=len(train_envs),
+            )
+        )
+
+        test_collector = Collector(
+            policy=policy,
+            env=test_envs,
+        )
+
+        writer = SummaryWriter(
+            log_dir=self.config.paths.tensorboard_dir
+        )
+
+        tensorboard_logger = TensorboardLogger(writer)
+
+        result = onpolicy_trainer(
+            policy=policy,
+            train_collector=train_collector,
+            test_collector=test_collector,
+            max_epoch=self.config.agent.max_epoch,
+            step_per_epoch=self.config.agent.step_per_epoch,
+            step_per_collect=self.config.agent.step_per_collect,
+            episode_per_test=self.config.agent.episode_per_test,
+            batch_size=self.config.agent.batch_size,
+            repeat_per_collect=self.config.agent.repeat_per_collect,
+            logger=tensorboard_logger,
+        )
+
+        self.logger.info(f"Training completed! Best reward: {result['best_reward']}")
+
+        torch.save(
+            model.state_dict(),
+            self.config.paths.model_dir / "ppo_layout_model.pth",
+        )
+
+        return result
 </file>
 
 </files>

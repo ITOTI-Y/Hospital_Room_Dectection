@@ -11,11 +11,11 @@ lr: 3e-4
 # TianShou PPO parameters
 buffer_size: 20000
 max_epoch: 100
-step_per_epoch: 2000
+step_per_epoch: 2
 repeat_per_collect: 4
 episode_per_test: 10
 batch_size: 64
-step_per_collect: 2000
+step_per_collect: 2
 
 # Feature Extractor parameters
 embedding_dim: 32

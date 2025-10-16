@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from typing import Any, Dict, Optional, Union
-from tianshou.data import Batch, to_numpy
+from tianshou.data import Batch
 from tianshou.policy import PPOPolicy
 
 from .ppo_model import LayoutOptimizationModel
@@ -25,7 +25,6 @@ class LayoutPPOPolicy(PPOPolicy):
         eps_clip: float = 0.2,
         **kwargs: Any,
     ):
-        
         super().__init__(
             actor=model,
             critic=model,
@@ -43,7 +42,7 @@ class LayoutPPOPolicy(PPOPolicy):
             reward_normalization=reward_normalization,
             **kwargs,
         )
-        
+
         self._eps_clip = eps_clip
         self._recompute_adv = recompute_advantage
         self._adv_norm = advantage_normalization
@@ -61,15 +60,15 @@ class LayoutPPOPolicy(PPOPolicy):
         state: Optional[Union[Dict, Batch, np.ndarray]] = None,
         **kwargs: Any,
     ) -> Batch:
-        (action1, action2), state = self.model(
+        actions, log_prob, state = self.model(
             obs=batch.obs,
             state=state,
             **kwargs,
         )
 
-        actions = torch.stack([action1, action2], dim=-1)  # (batch_size, 2)
+        value = self.model.get_value(batch.obs)
 
-        return Batch(act=to_numpy(actions), state=state)
+        return Batch(act=actions, log_prob=log_prob, state=state, vf=value)
 
     def learn(
         self,
