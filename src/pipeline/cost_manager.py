@@ -4,14 +4,14 @@ import copy
 from typing import Dict, Any, Tuple, List, cast, Optional, Hashable
 from collections import defaultdict
 from itertools import product, combinations
+from loguru import logger
 
 from src.config.config_loader import ConfigLoader
-from src.utils.logger import setup_logger
 
 
 class CostManager:
     def __init__(self, config: ConfigLoader, is_shuffle: bool = False):
-        self.logger = setup_logger(__name__)
+        self.logger = logger.bind(module=__name__)
         self.config = config
 
         self.pathways: Dict[str, Dict[str, Any]] = {}
@@ -241,7 +241,7 @@ class CostManager:
 
 class CostEngine:
     def __init__(self, shared_data: Dict[str, Any]):
-        self.logger = setup_logger(__name__)
+        self.logger = logger.bind(module=__name__)
         self.max_travel_time = shared_data["max_travel_time"]
         self.min_travel_time = shared_data["min_travel_time"]
         self.travel_times = shared_data["travel_times"]

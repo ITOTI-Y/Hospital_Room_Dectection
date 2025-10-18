@@ -3,12 +3,12 @@
 import itertools
 import networkx as nx
 import numpy as np
-from src.utils.logger import setup_logger
+from loguru import logger
 from typing import Dict, Optional, Iterator, List, Tuple, Any
 
 from src.config import graph_config
 
-logger = setup_logger(__name__)
+logger = logger.bind(module=__name__)
 
 
 class GraphManager:

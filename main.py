@@ -1,5 +1,6 @@
 from pathlib import Path
 import typer
+from datetime import datetime
 from typing import Optional
 from typing_extensions import Annotated
 
@@ -9,7 +10,7 @@ from src.utils.logger import setup_logger
 from src.config import config_loader
 
 config = config_loader.ConfigLoader()
-logger = setup_logger(__name__)
+logger = setup_logger(log_file=Path(config.paths.log_dir) / f"{datetime.now():%Y-%m-%d_%H-%M-%S}.log")
 app = typer.Typer()
 
 

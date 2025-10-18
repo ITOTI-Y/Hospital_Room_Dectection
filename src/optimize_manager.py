@@ -1,4 +1,5 @@
 import torch
+from loguru import logger
 from torch.utils.tensorboard import SummaryWriter
 from tianshou.data import Collector, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
@@ -7,7 +8,6 @@ from tianshou.utils import TensorboardLogger
 
 from src.pipeline import PathwayGenerator, CostManager
 from src.config.config_loader import ConfigLoader
-from src.utils.logger import setup_logger
 from src.rl.env import LayoutEnv
 from src.rl.models.ppo_model import LayoutOptimizationModel
 from src.rl.models.tianshou_policy import LayoutPPOPolicy
@@ -15,7 +15,7 @@ from src.rl.models.tianshou_policy import LayoutPPOPolicy
 
 class OptimizeManager:
     def __init__(self, config: ConfigLoader, **kwargs):
-        self.logger = setup_logger(__name__)
+        self.logger = logger.bind(module=__name__)
         self.config = config
         self.kwargs = kwargs
 

@@ -1,16 +1,15 @@
 from pathlib import Path
 from typing import Dict, Optional, Any
+from loguru import logger
 import networkx as nx
 
-from src.utils.logger import setup_logger
 from src.config.config_loader import ConfigLoader
 from src.network.super_network import SuperNetwork
 from src.plotting.plotter import PlotlyPlotter
 from src.analysis.travel_time import calculate_room_travel_times
 from src.analysis.slots_exporter import export_slots_to_csv
 
-logger = setup_logger(__name__)
-
+logger = logger.bind(module=__name__)
 
 class NetworkGenerator:
     """

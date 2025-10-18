@@ -4,7 +4,7 @@ from __future__ import annotations
 import abc
 import cv2
 import numpy as np
-from src.utils.logger import setup_logger
+from loguru import logger
 from scipy.spatial import KDTree
 from typing import Dict, Tuple, Any, Optional, Iterable, TYPE_CHECKING
 
@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 from src.config import graph_config
 
-logger = setup_logger(__name__)
+logger = logger.bind(module=__name__)
 
 
 class BaseNodeCreator(abc.ABC):

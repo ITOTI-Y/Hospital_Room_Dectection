@@ -4,7 +4,7 @@ Defines plotter classes for visualizing network graphs using Matplotlib and Plot
 
 import abc
 import pathlib
-from src.utils.logger import setup_logger
+from loguru import logger
 import networkx as nx
 import numpy as np
 import plotly.graph_objects as go
@@ -12,7 +12,7 @@ from typing import Dict, Any, List, Optional
 
 from src.config import graph_config
 
-logger = setup_logger(__name__)
+logger = logger.bind(module=__name__)
 
 
 class BasePlotter(abc.ABC):

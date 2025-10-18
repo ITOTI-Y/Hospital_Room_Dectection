@@ -26,7 +26,7 @@ class NpEncoder(json.JSONEncoder):
 
 
 def setup_logger(
-    name: str, log_file: Optional[pathlib.Path] = None, level: int = 20
+    log_file: Optional[pathlib.Path] = None, level: int = 20
 ) -> Any:
     """配置并返回loguru日志记录器。
 
@@ -42,20 +42,9 @@ def setup_logger(
     level_map = {10: "DEBUG", 20: "INFO", 30: "WARNING", 40: "ERROR", 50: "CRITICAL"}
     log_level = level_map.get(level, "INFO")
 
-    # 检查是否为多进程环境中的子进程
-    is_main_process = True
-    try:
-        current_process = multiprocessing.current_process()
-        if current_process.name != "MainProcess":
-            is_main_process = False
-    except Exception as e:
-        logger.error(f"无法确定进程类型，假设为主进程: {e}")
 
-
-    # 移除现有的handlers以避免重复配置
     logger.remove()
 
-    # 配置控制台输出（彩色日志）
     console_format = (
         "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
         "<level>{level: <8}</level> | "
@@ -63,8 +52,7 @@ def setup_logger(
         "<level>{message}</level>"
     )
 
-    # 为主进程和子进程设置不同的日志级别
-    console_level = log_level if is_main_process else "WARNING"
+    console_level = log_level
 
     logger.add(
         sys.stdout,
@@ -75,8 +63,7 @@ def setup_logger(
         diagnose=True,
     )
 
-    # 如果提供了日志文件路径且在主进程中，添加文件处理器
-    if log_file and is_main_process:
+    if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
 
         file_format = (
@@ -91,10 +78,10 @@ def setup_logger(
             retention="30 days",
             compression="zip",
             encoding="utf-8",
+            backtrace=True,
+            diagnose=True,
+            enqueue=True,
         )
-
-    # 绑定模块名称到logger上下文
-    return logger.bind(module=name)
 
 
 def save_json(data: dict, path: pathlib.Path):

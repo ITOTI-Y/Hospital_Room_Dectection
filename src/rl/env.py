@@ -4,10 +4,10 @@ from dataclasses import dataclass
 from gymnasium import spaces
 from sklearn.preprocessing import StandardScaler
 from typing import Dict, Optional
+from loguru import logger
 
 from src.config.config_loader import ConfigLoader
 from src.pipeline import PathwayGenerator, CostManager
-from src.utils.logger import setup_logger
 
 @dataclass
 class GraphObservation:
@@ -47,7 +47,7 @@ class LayoutEnv(gym.Env):
         super().__init__()
 
         self.config = config
-        self.logger = setup_logger(__name__)
+        self.logger = logger.bind(module=__name__)
         self.max_departments = max_departments
         self.PADDING_IDX = max_departments - 1
         self.max_step = max_step
@@ -158,8 +158,8 @@ class LayoutEnv(gym.Env):
             self.logger.warning(f"Invalid swap: {dept1} <-> {dept2}, reward: {reward}")
         else:
             cost_diff = previous_cost - new_cost
-            self.logger.success(f"Step {self.current_step}: Swapped {dept1} <-> {dept2}")
             reward = cost_diff / (self.initial_cost + 1e-6)
+            self.logger.success(f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, reward: {reward}")
             self.current_cost = new_cost
         
         reward += step_penalty
