@@ -3,6 +3,7 @@ import typer
 from datetime import datetime
 from typing import Optional
 from typing_extensions import Annotated
+from loguru import logger
 
 from src.network_generator import NetworkGenerator
 from src.optimize_manager import OptimizeManager
@@ -10,7 +11,9 @@ from src.utils.logger import setup_logger
 from src.config import config_loader
 
 config = config_loader.ConfigLoader()
-logger = setup_logger(log_file=Path(config.paths.log_dir) / f"{datetime.now():%Y-%m-%d_%H-%M-%S}.log")
+setup_logger(log_file=Path(config.paths.log_dir) / f"{datetime.now():%Y-%m-%d_%H-%M-%S}.log")
+
+logger = logger.bind(module=__name__)
 app = typer.Typer()
 
 
@@ -60,7 +63,7 @@ def network(
         logger.warning("Interrupted by user")
         raise typer.Exit(code=1)
     except Exception as e:
-        logger.error(f"System execution error: {e}", exc_info=True)
+        logger.exception(f"System execution error: {e}")
         raise typer.Exit(code=1)
 
 @app.command()

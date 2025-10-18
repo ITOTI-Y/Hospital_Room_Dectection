@@ -154,13 +154,10 @@ class AutoregressiveActor(nn.Module):
         entropy1 = dist1.entropy() # (batch_size,)
 
         dept1_embeddings = node_embeddings.gather(
-            1, action1.unsqueeze(-1).expand(-1, -1, self.node_hidden_dim)
-        )  # (batch_size, 1, node_hidden_dim)
-        dept1_embeddings_expanded = dept1_embeddings.expand(
-            -1, num_nodes, -1
+            1, action1.unsqueeze(-1).unsqueeze(-1).expand(batch_size, num_nodes, self.node_hidden_dim)
         )  # (batch_size, num_nodes, node_hidden_dim)
         combined_embeddings = torch.cat(
-            [node_embeddings, dept1_embeddings_expanded], dim=-1
+            [node_embeddings, dept1_embeddings], dim=-1
         )
 
         logits2 = self.second_action_head(combined_embeddings).squeeze(-1)  # (batch_size, num_nodes)

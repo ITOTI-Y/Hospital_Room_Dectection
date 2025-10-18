@@ -155,11 +155,11 @@ class LayoutEnv(gym.Env):
         step_penalty = self.config.constraints.step_penalty
         if new_cost is None:
             reward: float = self.config.constraints.invalid_action
-            self.logger.warning(f"Invalid swap: {dept1} <-> {dept2}, reward: {reward}")
+            self.logger.debug(f"Invalid swap: {dept1} <-> {dept2}, reward: {reward}")
         else:
             cost_diff = previous_cost - new_cost
-            reward = cost_diff / (self.initial_cost + 1e-6)
-            self.logger.success(f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, reward: {reward}")
+            reward = cost_diff / (self.initial_cost + 1e-6) * 100.0
+            self.logger.debug(f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, reward: {reward}")
             self.current_cost = new_cost
         
         reward += step_penalty

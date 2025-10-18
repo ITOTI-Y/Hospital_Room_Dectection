@@ -53,7 +53,7 @@ class PathwayGenerator:
             f"{' -> '.join(generated_sequence)} -> "
             f"{' -> '.join(final_pathway['end_nodes'])}"
         )
-        self.logger.info(
+        self.logger.debug(
             f"Generated pathway: {final_pathway['process_id']}, Full sequence: {full_sequence_str}"
         )
 

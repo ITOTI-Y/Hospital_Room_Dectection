@@ -6,7 +6,7 @@ from tianshou.data import Batch
 
 from .feature_extractor import FeatureProcessor
 from .gnn_encoder import GCNEncoder
-from .policy_net import AutoregressiveActor
+from .actor import AutoregressiveActor
 from .value_net import ValueNet
 
 
@@ -105,7 +105,7 @@ class LayoutOptimizationModel(nn.Module):
 
         return x_categorical, x_numerical, edge_index, edge_weight, node_mask, edge_mask
 
-    def _encode_observations(
+    def encode_observations(
         self,
         obs: Union[Dict, Batch],
     ) -> Tuple[torch.Tensor, torch.Tensor]:
@@ -127,8 +127,23 @@ class LayoutOptimizationModel(nn.Module):
 
     def forward(
         self, obs: Union[Dict, Batch], state: Optional[Any] = None, **kwargs
+    ) -> torch.Tensor:
+        node_embeddings, node_mask = self.encode_observations(obs)
+
+        value = self.critic.get_value(
+            node_embeddings=node_embeddings,
+            node_mask=node_mask,
+        )  # (batch_size)
+
+        return value
+    
+    def forward_actor(
+            self,
+            obs: Union[Dict, Batch],
+            state: Optional[Any] = None,
+            **kwargs
     ) -> Tuple[torch.Tensor, torch.Tensor, Any]:
-        node_embeddings, node_mask = self._encode_observations(obs)
+        node_embeddings, node_mask = self.encode_observations(obs)
 
         action1, action2, log_prob1, log_prob2, _, _ = self.actor(
             node_embeddings=node_embeddings,
@@ -137,8 +152,7 @@ class LayoutOptimizationModel(nn.Module):
         )
 
         actions = torch.stack([action1, action2], dim=-1)  # (batch_size, 2)
-
-        log_prob = log_prob1 + log_prob2  # (batch_size,)
+        log_prob = log_prob1 + log_prob2 # (batch_size)
 
         return actions, log_prob, state
 
@@ -159,7 +173,7 @@ class LayoutOptimizationModel(nn.Module):
             entropy (torch.Tensor): Sum of entropies of action1 and action2 distributions, shape (batch_size,).
         """
 
-        node_embeddings, node_mask = self._encode_observations(obs)
+        node_embeddings, node_mask = self.encode_observations(obs)
 
         actions = torch.as_tensor(action, device=self.device, dtype=torch.long)
         action1 = actions[:, 0]
@@ -173,17 +187,3 @@ class LayoutOptimizationModel(nn.Module):
         )
 
         return log_prob, entropy
-
-    def get_value(
-        self,
-        obs: Union[Dict, Batch],
-        **kwargs: Any,
-    ) -> torch.Tensor:
-        node_embeddings, node_mask = self._encode_observations(obs)
-
-        value = self.critic.get_value(
-            node_embeddings=node_embeddings,
-            node_mask=node_mask,
-        )  # (batch_size)
-
-        return value

@@ -126,18 +126,22 @@ class OptimizeManager:
 
         tensorboard_logger = TensorboardLogger(writer)
 
-        result = onpolicy_trainer(
-            policy=policy,
-            train_collector=train_collector,
-            test_collector=test_collector,
-            max_epoch=self.config.agent.max_epoch,
-            step_per_epoch=self.config.agent.step_per_epoch,
-            step_per_collect=self.config.agent.step_per_collect,
-            episode_per_test=self.config.agent.episode_per_test,
-            batch_size=self.config.agent.batch_size,
-            repeat_per_collect=self.config.agent.repeat_per_collect,
-            logger=tensorboard_logger,
-        )
+        try:
+            result = onpolicy_trainer(
+                policy=policy,
+                train_collector=train_collector,
+                test_collector=test_collector,
+                max_epoch=self.config.agent.max_epoch,
+                step_per_epoch=self.config.agent.step_per_epoch,
+                step_per_collect=self.config.agent.step_per_collect,
+                episode_per_test=self.config.agent.episode_per_test,
+                batch_size=self.config.agent.batch_size,
+                repeat_per_collect=self.config.agent.repeat_per_collect,
+                logger=tensorboard_logger,
+            )
+        except Exception as e:
+            self.logger.exception(f"Training failed with error: {e}")
+            raise e
 
         self.logger.info(f"Training completed! Best reward: {result['best_reward']}")
 

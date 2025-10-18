@@ -84,7 +84,7 @@ class NetworkGenerator:
             return True
 
         except Exception as e:
-            logger.error(f"Error occurred while generating network: {e}", exc_info=True)
+            logger.exception(f"Error occurred while generating network: {e}")
             return False
 
     def visualize_network(
@@ -121,7 +121,7 @@ class NetworkGenerator:
             return True
 
         except Exception as e:
-            logger.error(f"Error occurred while visualizing network: {e}", exc_info=True)
+            logger.exception(f"Error occurred while visualizing network: {e}")
             return False
 
     def calculate_travel_times(
@@ -156,7 +156,7 @@ class NetworkGenerator:
             return True
 
         except Exception as e:
-            logger.error(f"Error occurred while calculating travel times: {e}", exc_info=True)
+            logger.exception(f"Error occurred while calculating travel times: {e}")
             return False
 
     def export_slots(self, output_filename: str = "slots.csv") -> bool:
@@ -186,7 +186,7 @@ class NetworkGenerator:
             logger.info(f"SLOT Nodes exported to: {slots_path}")
             return True
         except Exception as e:
-            logger.error(f"Error occurred while exporting SLOT nodes: {e}", exc_info=True)
+            logger.exception(f"Error occurred while exporting SLOT nodes: {e}")
             return False
 
     def get_network_info(self) -> Dict[str, Any]:

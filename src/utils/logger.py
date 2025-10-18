@@ -6,7 +6,6 @@ import json
 import pathlib
 import pickle
 import numpy as np
-import multiprocessing
 from loguru import logger
 
 
@@ -26,38 +25,34 @@ class NpEncoder(json.JSONEncoder):
 
 
 def setup_logger(
-    log_file: Optional[pathlib.Path] = None, level: int = 20
-) -> Any:
+    log_file: Optional[pathlib.Path] = None, level: str = "INFO"
+) -> None:
     """配置并返回loguru日志记录器。
 
     Args:
         name (str): 日志记录器的名称（用于上下文标识）。
         log_file (Optional[pathlib.Path]): 可选的日志文件路径。
-        level (int): 日志级别，默认为20（INFO）。
+        level (str): 日志记录级别，默认为"INFO"。
 
     Returns:
         logger: 配置好的loguru日志记录器实例。
     """
-    # 转换标准logging级别到loguru级别
-    level_map = {10: "DEBUG", 20: "INFO", 30: "WARNING", 40: "ERROR", 50: "CRITICAL"}
-    log_level = level_map.get(level, "INFO")
-
 
     logger.remove()
 
     console_format = (
         "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
         "<level>{level: <8}</level> | "
-        "<cyan>{extra[module]}</cyan> | "
+        "<cyan>{extra[module]!s}</cyan> | "
         "<level>{message}</level>"
     )
 
-    console_level = log_level
+    logger.configure(extra={"module": "unknown"})
 
     logger.add(
         sys.stdout,
         format=console_format,
-        level=console_level,
+        level=level,
         colorize=True,
         backtrace=True,
         diagnose=True,
@@ -67,13 +62,15 @@ def setup_logger(
         log_file.parent.mkdir(parents=True, exist_ok=True)
 
         file_format = (
-            "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | {extra[module]} | {message}"
+            "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | "
+            "{extra[module]} | {message}\n"
+            "{exception}"
         )
 
         logger.add(
             str(log_file),
             format=file_format,
-            level=log_level,
+            level=level,
             rotation="10 MB",
             retention="30 days",
             compression="zip",
