@@ -1,5 +1,6 @@
 import gymnasium as gym
 import numpy as np
+import uuid
 from dataclasses import dataclass
 from gymnasium import spaces
 from sklearn.preprocessing import StandardScaler
@@ -45,6 +46,7 @@ class LayoutEnv(gym.Env):
 
     def __init__(self, config: ConfigLoader, max_departments: int, max_step: int):
         super().__init__()
+        self.env_id = str(uuid.uuid4())[:8]
 
         self.config = config
         self.logger = logger.bind(module=__name__)
@@ -134,6 +136,7 @@ class LayoutEnv(gym.Env):
 
     def step(self, action: np.ndarray):
         self.current_step += 1
+        self.logger.info(f"Env {self.env_id} Step {self.current_step}, Action taken: {action}")
 
         idx1: int = action[0].astype(int)
         idx2: int = action[1].astype(int)
@@ -155,11 +158,11 @@ class LayoutEnv(gym.Env):
         step_penalty = self.config.constraints.step_penalty
         if new_cost is None:
             reward: float = self.config.constraints.invalid_action
-            self.logger.debug(f"Invalid swap: {dept1} <-> {dept2}, reward: {reward}")
+            self.logger.info(f"Invalid swap: {dept1} <-> {dept2}, reward: {reward}")
         else:
             cost_diff = previous_cost - new_cost
             reward = cost_diff / (self.initial_cost + 1e-6) * 100.0
-            self.logger.debug(f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, reward: {reward}")
+            self.logger.info(f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, reward: {reward}")
             self.current_cost = new_cost
         
         reward += step_penalty

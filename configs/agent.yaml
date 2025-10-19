@@ -1,21 +1,21 @@
 # Global parameters
-num_train_envs: 8
-num_test_envs: 2
+num_train_envs: 1
+num_test_envs: 1
 
 max_departments: 100
 max_steps: 1000
 
-lr: 3e-4
+lr: 1e-4
 
 
 # TianShou PPO parameters
 buffer_size: 20000
 max_epoch: 100
 step_per_epoch: 4000
-repeat_per_collect: 2
-episode_per_test: 100
+repeat_per_collect: 4
+episode_per_test: 10
 batch_size: 64
-step_per_collect: 16
+step_per_collect: 400
 
 # Feature Extractor parameters
 embedding_dim: 32
@@ -50,3 +50,5 @@ recompute_advantage: False
 dual_clip: null
 reward_normalization: True
 eps_clip: 0.2
+max_batchsize: 256
+deterministic_eval: True

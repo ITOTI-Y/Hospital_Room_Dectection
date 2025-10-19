@@ -1,5 +1,3 @@
-"""Handles image loading, preprocessing, and basic morphological operations."""
-
 from pathlib import Path
 import cv2
 from loguru import logger

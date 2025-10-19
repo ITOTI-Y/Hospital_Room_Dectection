@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from torch_geometric.nn import GCNConv
 from torch_geometric.data import Data, Batch
-from tianshou.data import Batch as TianshouBatch
 from typing import Optional, List
 
 
@@ -93,11 +92,11 @@ class GCNEncoder(nn.Module):
 
     def forward_batch(
         self,
-        x: TianshouBatch | torch.Tensor,
-        edge_index: TianshouBatch | torch.Tensor,
-        edge_weight: TianshouBatch | torch.Tensor,
-        node_mask: TianshouBatch | torch.Tensor,
-        edge_mask: TianshouBatch | torch.Tensor,
+        x: torch.Tensor,
+        edge_index: torch.Tensor,
+        edge_weight: torch.Tensor,
+        node_mask: torch.Tensor,
+        edge_mask: torch.Tensor,
     ) -> torch.Tensor:
         batch_size, num_nodes, feat_dim = x.size()
 
