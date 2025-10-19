@@ -1,5 +1,5 @@
 # Global parameters
-num_train_envs: 16
+num_train_envs: 8
 num_test_envs: 2
 
 max_departments: 100
@@ -15,7 +15,7 @@ step_per_epoch: 4000
 repeat_per_collect: 2
 episode_per_test: 100
 batch_size: 64
-step_per_collect: 400
+step_per_collect: 16
 
 # Feature Extractor parameters
 embedding_dim: 32
