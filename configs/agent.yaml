@@ -1,5 +1,5 @@
 # Global parameters
-num_train_envs: 1
+num_train_envs: 8
 num_test_envs: 1
 
 max_departments: 100
@@ -12,14 +12,14 @@ lr: 1e-4
 buffer_size: 20000
 max_epoch: 100
 step_per_epoch: 4000
-repeat_per_collect: 4
+repeat_per_collect: 2
 episode_per_test: 10
 batch_size: 64
 step_per_collect: 400
 
 # Feature Extractor parameters
 embedding_dim: 32
-numerical_feat_dim: 6
+numerical_feat_dim: 7
 numerical_hidden_dim: 32
 
 # GNN Encoder parameters

@@ -190,8 +190,12 @@ class CostManager:
         for id1, id2 in product(self.id_to_area.keys(), repeat=2):
             area1 = self.id_to_area[id1]
             area2 = self.id_to_area[id2]
-            is_compatible = (abs(area1 - area2) / max(area1, area2)) <= tolerance
-            self.area_dict[(id1, id2)] = is_compatible
+            area_penalty = (abs(area1 - area2) / max(area1, area2))
+            if area_penalty <= tolerance:
+                area_penalty = 0.0
+            else:
+                area_penalty = - area_penalty
+            self.area_dict[(id1, id2)] = area_penalty
 
     def _reset_initial_parameters(self):
         self.initial_layout: Dict[str, str] = {}
@@ -199,7 +203,7 @@ class CostManager:
         self.pair_times: Dict[Tuple[str, str], float] = defaultdict(float)
         self.service_weights: Dict[str, float] = {i: 0.0 for i in self.slots["name"]}
         self.origin_service_cost: float = 0.0
-        self.area_dict: Dict[Tuple[int, int], bool] = {}
+        self.area_dict: Dict[Tuple[int, int], float] = {}
 
     def initialize(self, pathways: Dict[str, Dict[str, Any]] = {}) -> None:
         self.pathways = pathways
@@ -249,7 +253,7 @@ class CostEngine:
         self.pair_times = shared_data["pair_times"]
         self.name_id_to_id = shared_data["name_id_to_id"]
         self.id_to_name_id = shared_data["id_to_name_id"]
-        self.area_dict = shared_data["area_dict"]
+        self.area_dict: Dict[Tuple[int, int], float] = shared_data["area_dict"]
         self.origin_service_cost = shared_data["origin_service_cost"]
         self.initial_layout = shared_data["initial_layout"]
         self.adjacency_preferences = shared_data["adjacency_preferences"]
@@ -312,6 +316,21 @@ class CostEngine:
         return self.origin_service_cost + self.current_travel_cost
 
     @property
+    def id_layout(self) -> Dict[int, int]:
+        return {
+            self.name_id_to_id[dept]: self.name_id_to_id[slot]
+            for dept, slot in self._layout.items()
+        }
+    
+    @property
+    def area_compatibility_cost(self) -> float:
+        area_cost = 0.0
+        for id1, id2 in self.id_layout.items():
+            area_score = self.area_dict.get((id1, id2), 0.0)
+            area_cost += area_score
+        return area_cost
+
+    @property
     def current_adjacency_cost(self) -> float:
         adjacency_cost = 0.0
         for (dept1, dept2), weight in self.adjacency_preferences.items():
@@ -352,23 +371,14 @@ class CostEngine:
         self._sort_np_matrices()
         self._previous_swap = None
 
-    def swap(self, dept1: str, dept2: str) -> Optional[float]:
+    def swap(self, dept1: str, dept2: str) -> Tuple[float, bool]:
         slot1 = self._layout[dept1]
         slot2 = self._layout[dept2]
 
-        s_id1: int = self.name_id_to_id.get(slot1, -1)
-        s_id2: int = self.name_id_to_id.get(slot2, -1)
         d_id1: int = self.name_id_to_id.get(dept1, -1)
         d_id2: int = self.name_id_to_id.get(dept2, -1)
-
-        is_swapable: bool = self.area_dict.get(
-            (d_id1, s_id2), False
-        ) and self.area_dict.get((d_id2, s_id1), False)
-        if not is_swapable:
-            self.logger.debug(
-                f"Swap between {dept1} and {dept2} violates area compatibility constraint. Swap reverted."
-            )
-            return None
+        s_id1: int = self.name_id_to_id.get(slot1, -1)
+        s_id2: int = self.name_id_to_id.get(slot2, -1)
 
         mask_id1 = self.np_times[:, :2] == d_id1
         mask_id2 = self.np_times[:, :2] == d_id2
@@ -385,4 +395,7 @@ class CostEngine:
         self._slot_layout[slot2] = dept1
 
         self._previous_swap = (dept1, dept2)
-        return self.current_travel_cost
+
+        is_swapable = self.area_dict[(d_id1,s_id2)] == 0 and self.area_dict[(d_id2,s_id1)] == 0
+
+        return self.current_travel_cost, is_swapable

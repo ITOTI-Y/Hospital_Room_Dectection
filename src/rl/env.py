@@ -54,11 +54,12 @@ class LayoutEnv(gym.Env):
         self.PADDING_IDX = max_departments - 1
         self.max_step = max_step
 
-        # [service_time, service_weight, area, x, y, z]
-        self.numerical_feature_dim = 6
+        # [service_time, service_weight, area, x, y, z, action_flag]
+        self.numerical_feature_dim = self.config.agent.numerical_feat_dim
         self.categorical_feature_dim = 1  # [name]
         self.fixable_features: np.ndarray = np.zeros((self.max_departments, 3), dtype=np.float32)
         self.moveable_features: np.ndarray = np.zeros((self.max_departments, 3), dtype=np.float32)
+        self.action_flag_feature: np.ndarray = np.zeros((self.max_departments, 1), dtype=np.float32)
 
         self.pathway_generator = PathwayGenerator(self.config)
         self.cost_manager = CostManager(self.config, is_shuffle=True)
@@ -108,6 +109,8 @@ class LayoutEnv(gym.Env):
         self.current_cost = 0.0
         self.initial_cost = 0.0
 
+        self.last_failed_action: Optional[np.ndarray] = None
+
     def _precompute_normalization_stats(self) -> None:
         pathways = self.pathway_generator.generate_all()
         self.cost_manager.initialize(pathways=pathways)
@@ -122,7 +125,7 @@ class LayoutEnv(gym.Env):
         self.fixable_features[:len(fixable_features)] = fixable_features
         self.moveable_features[:len(moveable_features)] = moveable_features
 
-        self.scaler.fit(np.concatenate([self.fixable_features, self.moveable_features], axis=1))
+        self.scaler.fit(np.concatenate([self.fixable_features, self.moveable_features, self.action_flag_feature], axis=1))
 
     def _precompute_categorical_features(self):
         slots_name_ids = self.cost_manager.slots_name_id
@@ -138,11 +141,16 @@ class LayoutEnv(gym.Env):
         self.current_step += 1
         self.logger.info(f"Env {self.env_id} Step {self.current_step}, Action taken: {action}")
 
+        reward: float = 0.0
+
         idx1: int = action[0].astype(int)
         idx2: int = action[1].astype(int)
 
         if idx1 >= self.num_total_slot or idx2 >= self.num_total_slot or idx1 == idx2:
             reward: float = self.config.constraints.invalid_action
+            self.last_failed_action = action.astype(dtype=int)
+            self.action_flag_feature[idx1, 0] += 1.0
+            self.action_flag_feature[idx2, 0] += 1.0
             observation = self._get_observation()
             done = self.current_step >= self.max_step
             info = self._get_info()
@@ -152,21 +160,25 @@ class LayoutEnv(gym.Env):
         dept1 = self.index_to_dept_id[idx1]
         dept2 = self.index_to_dept_id[idx2]
 
-        previous_cost = self.current_cost
-        new_cost = self.cost_engine.swap(dept1, dept2)
-        
-        step_penalty = self.config.constraints.step_penalty
-        if new_cost is None:
-            reward: float = self.config.constraints.invalid_action
-            self.logger.info(f"Invalid swap: {dept1} <-> {dept2}, reward: {reward}")
+        previous_cost: float = self.current_cost
+        new_cost, is_swapable = self.cost_engine.swap(dept1, dept2)
+        if not is_swapable:
+            self.last_failed_action = action.astype(dtype=int)
+            self.action_flag_feature[idx1, 0] += 1.0
+            self.action_flag_feature[idx2, 0] += 1.0
         else:
-            cost_diff = previous_cost - new_cost
-            reward = cost_diff / (self.initial_cost + 1e-6) * 100.0
-            self.logger.info(f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, reward: {reward}")
-            self.current_cost = new_cost
+            self.action_flag_feature[:, 0] = 0.0
+        area_cost = self.cost_engine.area_compatibility_cost
         
-        reward += step_penalty
+        step_penalty: float = self.config.constraints.step_penalty
+        cost_diff: float = previous_cost - new_cost
+        travel_reward: float = cost_diff / (self.initial_cost + 1e-6) * 10.0
+        self.current_cost = new_cost
 
+        reward = travel_reward + step_penalty + area_cost
+
+        self.logger.info(f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, reward: {reward}, travel_reward: {travel_reward}, area_cost: {area_cost}")
+        
         terminated = False
         truncated = self.current_step >= self.max_step
 
@@ -207,7 +219,7 @@ class LayoutEnv(gym.Env):
         moveable_feature[: self.num_total_slot, :] = self.moveable_features[shuffled_indexes]
         
         x_norm_numerical = self.scaler.transform(
-            np.concatenate((self.fixable_features, moveable_feature), axis=1)
+            np.concatenate((self.fixable_features, moveable_feature, self.action_flag_feature), axis=1)
         )
 
         x_categorical[: self.num_total_slot] = np.array(
