@@ -172,7 +172,7 @@ class LayoutEnv(gym.Env):
         
         step_penalty: float = self.config.constraints.step_penalty
         cost_diff: float = previous_cost - new_cost
-        travel_reward: float = cost_diff / (self.initial_cost + 1e-6) * 10.0
+        travel_reward: float = cost_diff / (self.initial_cost + 1e-6) * 100.0
         self.current_cost = new_cost
 
         reward = travel_reward + step_penalty + area_cost
