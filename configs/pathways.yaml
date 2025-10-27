@@ -1,0 +1,84 @@
+pathways_number: 40
+
+
+training_generation:
+  # 1. 可互换的科室分组
+  department_pools:
+    DiagnosticImaging: ["放射科", "超声科"]
+    LabWork: ["采血处", "检验中心"]
+    PrimaryCare: ["全科", "体检科", "中医科", "眼科", "口腔一区", "口腔二区"]
+    InternalMedicine: ["呼吸内科", "肾内科", "心血管内科", "神经内科", "消化内科", "肿瘤科"]
+    SurgicalDepts: ["甲状腺外科", "肝胆胰外科", "泌尿外科", "烧伤整形科", "骨科", "介入科"]
+    GynAndPeds: ["妇科", "产科", "儿科", "产前诊断门诊", "生殖医学科"]
+
+  # 2. 可复用的常见子流程
+  sequence_fragments:
+    StandardCheckup:
+      - { type: pool, pool_name: LabWork, probability: 0.9 }
+      - { type: pool, pool_name: DiagnosticImaging, probability: 0.6 }
+    SurgicalPreOp: # 外科术前检查
+      - { type: fixed, name: "采血处" }
+      - { type: fixed, name: "放射科" }
+      - { type: fixed, name: "心血管内科" } # 通常需要心电图
+
+  # 3. 就医流程
+  meta_rules:
+    - id: ROUTINE_INTERNAL_MEDICINE
+      description: "常规内科门诊流程"
+      base_weight: 1
+      start_nodes: ["门"]
+      end_nodes: ["内诊药房", "门"]
+      structure:
+        - { type: primary_department, from_pool: InternalMedicine }
+        - { type: optional, probability: 0.8, step: { type: fragment, fragment_name: "StandardCheckup" } }
+        - { type: repeat, target: primary_department }
+
+    - id: SURGICAL_CONSULTATION
+      description: "外科咨询流程"
+      base_weight: 1
+      start_nodes: ["门"]
+      end_nodes: ["门"]
+      structure:
+        - { type: primary_department, from_pool: SurgicalDepts }
+        - { type: optional, probability: 0.9, step: { type: fragment, fragment_name: "SurgicalPreOp" } }
+        - { type: repeat, target: primary_department } 
+
+    - id: GYN_PEDS_VISIT
+      description: "妇产儿科流程"
+      base_weight: 1
+      start_nodes: ["门"]
+      end_nodes: ["内诊药房", "门"]
+      structure:
+        - { type: primary_department, from_pool: GynAndPeds }
+        - { type: optional, probability: 0.7, step: { type: fixed, name: "超声科" } }
+        - { type: optional, probability: 0.5, step: { type: fixed, name: "采血处" } }
+        - { type: repeat, target: primary_department } # 会出现['妇科', '妇科']，但不影响通行时间
+
+    - id: SPECIAL_EXAM_VISIT
+      description: "特殊检查流程"
+      base_weight: 1
+      start_nodes: ["门"]
+      end_nodes: ["内诊药房", "门"]
+      structure:
+        - { type: primary_department, from_pool: ["消化内科", "肝胆胰外科"] }
+        - { type: fixed, name: "内镜中心" }
+        - { type: repeat, target: primary_department }
+
+    - id: SIMPLE_FOLLOW_UP
+      description: "简单复诊流程"
+      base_weight: 1
+      start_nodes: ["门"]
+      end_nodes: ["内诊药房", "门"]
+      structure:
+        - { type: primary_department, from_pool: PrimaryCare }
+
+# ===================================================================
+# Part 2: Fixed Scenarios for Evaluation (Evaluation Phase)
+# ===================================================================
+evaluation_scenarios:
+  smart:
+    description: "智慧医院流程评估场景"
+    file_path: "data/process_smart.json"
+  traditional:
+    description: "传统医院流程评估场景"
+    file_path: "data/process_traditional.json"

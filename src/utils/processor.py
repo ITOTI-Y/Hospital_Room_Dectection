@@ -1,15 +1,14 @@
-"""Handles image loading, preprocessing, and basic morphological operations."""
-
+from pathlib import Path
 import cv2
-from src.rl_optimizer.utils.setup import setup_logger
+from loguru import logger
 import numpy as np
 from PIL import Image
 from scipy.spatial import KDTree
-from typing import Tuple, Dict, Any, Optional
+from typing import Tuple, Optional
 
-from src.config import NetworkConfig
+from src.config import graph_config, path_manager
 
-logger = setup_logger(__name__)
+logger = logger.bind(module=__name__)
 
 
 class ImageProcessor:
@@ -18,21 +17,23 @@ class ImageProcessor:
     and morphological operations.
     """
 
-    def __init__(self, config: NetworkConfig, color_map_data: Dict[Tuple[int, int, int], Dict[str, Any]]):
+    def __init__(self):
         """
         Initializes the ImageProcessor.
-
-        Args:
-            config: The NetworkConfig object.
-            color_map_data: The color map dictionary.
         """
-        self.config = config
-        self.color_map_data = color_map_data
         self._current_image_data: Optional[np.ndarray] = None
         self._image_height: Optional[int] = None
         self._image_width: Optional[int] = None
+        # Caching config lookups
+        self.node_defs = graph_config.get_node_definitions()
+        self.rgb_map = {
+            tuple(props["rgb"]): name
+            for name, props in self.node_defs.items()
+            if "rgb" in props
+        }
+        self.geometry_config = graph_config.get_geometry_config()
 
-    def load_and_prepare_image(self, image_path: str) -> np.ndarray:
+    def load_and_prepare_image(self, image_path: Path) -> np.ndarray:
         """
         Loads an image, rotates it, and stores its dimensions.
 
@@ -49,9 +50,7 @@ class ImageProcessor:
             IOError: If the image cannot be opened or read.
         """
         try:
-            img = Image.open(image_path).convert('RGB')  # Ensure RGB
-            if self.config.IMAGE_ROTATE != 0:
-                img = img.rotate(self.config.IMAGE_ROTATE)
+            img = Image.open(image_path).convert("RGB")
         except FileNotFoundError:
             raise FileNotFoundError(f"Image file not found: {image_path}")
         except IOError:
@@ -59,11 +58,10 @@ class ImageProcessor:
 
         self._current_image_data = np.asarray(img, dtype=np.uint8)
         if self._current_image_data is None:
-            raise ValueError(
-                f"Failed to convert image to numpy array: {image_path}")
+            raise ValueError(f"Failed to convert image to numpy array: {image_path}")
 
         self._image_height, self._image_width = self._current_image_data.shape[:2]
-        return self._current_image_data.copy()  # 返回副本避免意外修改
+        return self._current_image_data.copy()
 
     def get_image_dimensions(self) -> Tuple[int, int]:
         """
@@ -76,8 +74,7 @@ class ImageProcessor:
             ValueError: If no image has been loaded yet.
         """
         if self._image_height is None or self._image_width is None:
-            raise ValueError(
-                "Image not loaded. Call load_and_prepare_image() first.")
+            raise ValueError("Image not loaded. Call load_and_prepare_image() first.")
         return self._image_height, self._image_width
 
     def quantize_colors(self, image_data: np.ndarray) -> np.ndarray:
@@ -91,19 +88,12 @@ class ImageProcessor:
         Returns:
             A NumPy array of the same shape with colors replaced.
         """
-        if not self.color_map_data:
-            # 如果颜色映射为空，返回原始图像以避免错误
-            logger.warning(
-                "Warning: Color map is empty. Returning original image from quantize_colors.")
+        if not self.rgb_map:
+            logger.warning("Color map is empty. Returning original image.")
             return image_data.copy()
 
         pixels = image_data.reshape(-1, 3)
-        map_colors_rgb = list(self.color_map_data.keys())
-
-        if not map_colors_rgb:  # 如果self.color_map_data不为空，这种情况不应该发生
-            logger.warning(
-                "Warning: No colors in color_map_data keys. Returning original image.")
-            return image_data.copy()
+        map_colors_rgb = list(self.rgb_map.keys())
 
         kdtree = KDTree(map_colors_rgb)
         _, closest_indices = kdtree.query(pixels)
@@ -112,8 +102,12 @@ class ImageProcessor:
         new_image = new_pixels.reshape(image_data.shape).astype(np.uint8)
         return new_image
 
-    def apply_morphology(self, mask: np.ndarray, operation: str = 'close_open',
-                         kernel_size: Optional[Tuple[int, int]] = None) -> np.ndarray:
+    def apply_morphology(
+        self,
+        mask: np.ndarray,
+        operation: str = "close_open",
+        kernel_size: Optional[Tuple[int, int]] = None,
+    ) -> np.ndarray:
         """
         Applies morphological operations to a binary mask.
 
@@ -132,42 +126,46 @@ class ImageProcessor:
             The processed binary mask.
         """
         if kernel_size is None:
-            k_size = self.config.MORPHOLOGY_KERNEL_SIZE
+            k_size_val = self.geometry_config.get("morphology_kernel_size", [5, 5])
+            if isinstance(k_size_val, (int, float)):
+                k_size = (int(k_size_val), int(k_size_val))
+            else:
+                k_size = tuple(k_size_val)
         else:
             k_size = kernel_size
 
         kernel = np.ones(k_size, np.uint8)
         processed_mask = mask.copy()
 
-        if operation == 'close_open':
-            processed_mask = cv2.morphologyEx(
-                processed_mask, cv2.MORPH_CLOSE, kernel)
-            processed_mask = cv2.morphologyEx(
-                processed_mask, cv2.MORPH_OPEN, kernel)
-        elif operation == 'open':
-            processed_mask = cv2.morphologyEx(
-                processed_mask, cv2.MORPH_OPEN, kernel)
-        elif operation == 'close':
-            processed_mask = cv2.morphologyEx(
-                processed_mask, cv2.MORPH_CLOSE, kernel)
-        elif operation == 'dilate':
+        if operation == "close_open":
+            processed_mask = cv2.morphologyEx(processed_mask, cv2.MORPH_CLOSE, kernel)
+            processed_mask = cv2.morphologyEx(processed_mask, cv2.MORPH_OPEN, kernel)
+        elif operation == "open":
+            processed_mask = cv2.morphologyEx(processed_mask, cv2.MORPH_OPEN, kernel)
+        elif operation == "close":
+            processed_mask = cv2.morphologyEx(processed_mask, cv2.MORPH_CLOSE, kernel)
+        elif operation == "dilate":
             processed_mask = cv2.dilate(processed_mask, kernel, iterations=1)
-        elif operation == 'erode':
+        elif operation == "erode":
             processed_mask = cv2.erode(processed_mask, kernel, iterations=1)
         else:
-            raise ValueError(
-                f"Unsupported morphological operation: {operation}")
+            raise ValueError(f"Unsupported morphological operation: {operation}")
 
         return processed_mask
-    
+
 
 class DebugImage:
     """Helper class for saving and displaying debug images."""
+
     count = 0
 
-    def __init__(self, image_data: np.ndarray, save: bool = False,
-                 show_napari: bool = False, suffix: str = '',
-                 config: NetworkConfig = NetworkConfig()):
+    def __init__(
+        self,
+        image_data: np.ndarray,
+        save: bool = False,
+        show_napari: bool = False,
+        suffix: str = "",
+    ):
         """
         Initializes DebugImage.
 
@@ -176,20 +174,18 @@ class DebugImage:
             save: If True, saves the image.
             show_napari: If True, shows the image using napari (requires napari installed).
             suffix: Suffix for the saved filename.
-            debug_path_base: Base directory for saving debug images.
         """
-        self.image_to_debug = image_data.copy()  # 使用副本工作
-        self.debug_path = config.DEBUG_PATH
-        self.debug_path.mkdir(parents=True, exist_ok=True)
+        self.image_to_debug = image_data.copy()
+        self.debug_path = path_manager.get_path("debug_dir", create_if_not_exist=True)
 
         if save:
             self._save_image(suffix)
         if show_napari:
             self._show_with_napari()
 
-    def _save_image(self, suffix: str = ''):
+    def _save_image(self, suffix: str = ""):
         """Saves the debug image."""
-        filename = f'debug_{DebugImage.count}_{suffix}.png'
+        filename = f"debug_{DebugImage.count}_{suffix}.png"
         save_path = self.debug_path / filename
         try:
             # 如果是RGB格式，转换为BGR以供Pillow保存，或处理灰度图
@@ -197,9 +193,11 @@ class DebugImage:
                 # Assume RGB from PIL, convert to BGR for OpenCV-style saving or save as is with PIL
                 img_to_save_pil = Image.fromarray(self.image_to_debug)
             elif self.image_to_debug.ndim == 2:  # 灰度图像
-                 img_to_save_pil = Image.fromarray(self.image_to_debug, mode='L')
+                img_to_save_pil = Image.fromarray(self.image_to_debug, mode="L")
             else:
-                logger.warning(f"Warning: Unsupported image format for saving: {self.image_to_debug.shape}")
+                logger.warning(
+                    f"Warning: Unsupported image format for saving: {self.image_to_debug.shape}"
+                )
                 return
 
             img_to_save_pil.save(save_path)
@@ -207,7 +205,6 @@ class DebugImage:
             logger.info(f"Debug image saved to {save_path}")
         except Exception as e:
             logger.error(f"Error saving debug image {save_path}: {e}")
-
 
     def _show_with_napari(self):
         """Shows the image using napari."""

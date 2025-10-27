@@ -161,10 +161,9 @@ cython_debug/
 logs/
 models/*.pth
 debug/
-archive/
-results/comparison/
-results/plots/
-results/reports/
-results/layouts/
-results/inference/
 *.pkl
+archive/
+docs/_dev/
+# TensorBoard files
+events.* 
+*.pth

@@ -1,0 +1,378 @@
+# configs/node_def.yaml
+
+geometry:
+  pixel_to_meter_scale: 0.1       # 像素到米的转换比例 (米/像素)
+  pedestrian_speed: 1.2           # 行人平均步行速度 (米/秒)
+  grid_size: 40                   # mesh节点生成的基础网格大小
+  morphology_kernel_size: [5, 5]  # 形态学操作的默认核大小
+  area_threshold: 60              # 节点连通区域最小面积阈值
+  mesh_node_connectivity_k: 9     # 网格节点连接的k-nearest neighbors
+  connection_dilation_kernel_size: [3, 3] # 连接节点（门）的膨胀核大小
+
+special_ids:
+  background: -2
+  outside: -1
+  pedestrian: -3
+
+super_network:
+  generate_outside_nodes: false      # 是否生成室外节点
+  ground_floor_number_for_outside: 0 # 指定用于处理室外节点的地面楼层，0代表第一层
+  default_floor_height: 4
+  default_vertical_connection_tolerance: 0
+  estimated_max_nodes_per_floor: 10000
+  z_level_diff_threshold: 1.0
+  min_vertical_tolerance: 10
+  vertical_tolerance_factor: 0.5
+  vertical_types: ["Stairs", "Elevator", "Escalator"]
+  outside_types: ["Outdoor"]
+
+node_definitions:
+  # name (key): 英文名称
+  # - cname: 中文名称
+  # - rgb: [R, G, B]
+  # - code: 标签
+  # - service_time: 节点服务时间 (秒) 
+  # - category: 节点类别 (STRUCTURE, SLOT, PATH, CONNECTOR, FIXED)
+
+  # --- 结构类 (STRUCTURE) ---
+  Wall:
+    cname: "墙"
+    rgb: [255, 235, 59]
+    code: "Z6"
+    service_time: 0
+    category: "STRUCTURE"
+  Greening:
+    cname: "绿化"
+    rgb: [76, 175, 80]
+    code: "Z5"
+    service_time: 0
+    category: "STRUCTURE"
+  Handrail:
+    cname: "栏杆"
+    rgb: [251, 242, 159]
+    code: "Z10"
+    service_time: 0
+    category: "STRUCTURE"
+  Courtyard:
+    cname: "中庭"
+    rgb: [179, 116, 190]
+    code: "Z9"
+    service_time: 0
+    category: "STRUCTURE"
+  VacantRoom:
+    cname: "空房间"
+    rgb: [255, 255, 255]
+    code: "Z11"
+    service_time: 0
+    category: "STRUCTURE"
+
+  # --- 路径类 (PATH) ---
+  # PATH节点的service_time为0, 通行时间由边权重决定。
+  Corridor:
+    cname: "走廊"
+    rgb: [207, 216, 220]
+    code: "Z1"
+    service_time: 0
+    category: "PATH"
+
+  # --- 室外类 (OUTSIDE) ---
+  # OUTSIDE节点的service_time为0, 通行时间由边权重决定。
+  Outdoor:
+    cname: "室外"
+    rgb: [156, 39, 176]
+    code: "Z8"
+    service_time: 0
+    category: "OUTSIDE"
+
+  # --- 连接器类 (CONNECTOR) ---
+  Door:
+    cname: "门"
+    rgb: [121, 85, 72]
+    code: "Z7"
+    service_time: 3.0 # 通过门所需的时间
+    category: "CONNECTOR"
+    time_per_floor: null
+    door_type: null # "EXTERIOR", "INTERIOR", "ROOM", or null
+  Stairs:
+    cname: "楼梯"
+    rgb: [117, 117, 117]
+    code: "Z2"
+    service_time: 0.0 # 上下一层楼的平均时间
+    category: "CONNECTOR"
+    time_per_floor: 15.0
+  Elevator:
+    cname: "电梯"
+    rgb: [189, 189, 189]
+    code: "Z3"
+    service_time: 0.0 # 含等待时间
+    category: "CONNECTOR"
+    time_per_floor: 10.0
+  Escalator:
+    cname: "扶梯"
+    rgb: [158, 158, 158]
+    code: "Z4"
+    service_time: 0.0 # 上下一层楼的平均时间
+    category: "CONNECTOR"
+    time_per_floor: 10.0
+
+  # --- 固定功能类 (FIXED) ---
+  RegistrationFee:
+    cname: "挂号收费"
+    rgb: [0, 150, 136]
+    code: "R1-R4"
+    service_time: 678
+    category: "FIXED"
+  Emergency:
+    cname: "急诊科"
+    rgb: [103, 58, 183]
+    code: "D26"
+    service_time: 9000
+    category: "FIXED"
+
+  # --- 可布局槽位类 (SLOT) ---
+  Pharmacy:
+    cname: "内诊药房"
+    rgb: [244, 67, 54]
+    code: "T16"
+    service_time: 781
+    category: "SLOT"
+  GeneralPractice:
+    cname: "全科"
+    rgb: [33, 150, 243]
+    code: "D1"
+    service_time: 1965
+    category: "SLOT"
+  Radiology:
+    cname: "放射科"
+    rgb: [3, 169, 244]
+    code: "T2"
+    service_time: 1484
+    category: "SLOT"
+  Pediatrics:
+    cname: "儿科"
+    rgb: [0, 188, 212]
+    code: "D2"
+    service_time: 5632
+    category: "SLOT"
+  EndoscopyCenter:
+    cname: "内镜中心"
+    rgb: [139, 195, 74]
+    code: "T7"
+    service_time: 5333
+    category: "SLOT"
+  ClinicalLaboratory:
+    cname: "检验中心"
+    rgb: [205, 220, 57]
+    code: "T4"
+    service_time: 180
+    category: "SLOT"
+  Gastroenterology:
+    cname: "消化内科"
+    rgb: [255, 193, 7]
+    code: "D10"
+    service_time: 916
+    category: "SLOT"
+  ThyroidSurgery:
+    cname: "甲状腺外科"
+    rgb: [255, 152, 0]
+    code: "D18"
+    service_time: 5637
+    category: "SLOT"
+  Nephrology:
+    cname: "肾内科"
+    rgb: [254, 87, 34]
+    code: "D6"
+    service_time: 1493
+    category: "SLOT"
+  CardiovascularMedicine:
+    cname: "心血管内科"
+    rgb: [169, 238, 90]
+    code: "D8"
+    service_time: 8089
+    category: "SLOT"
+  BloodCollection:
+    cname: "采血处"
+    rgb: [88, 67, 60]
+    code: "T15"
+    service_time: 1104
+    category: "SLOT"
+  Ophthalmology:
+    cname: "眼科"
+    rgb: [239, 199, 78]
+    code: "D22"
+    service_time: 3228
+    category: "SLOT"
+  ChineseMedicine:
+    cname: "中医科"
+    rgb: [253, 186, 87]
+    code: "D3"
+    service_time: 3110
+    category: "SLOT"
+  Otolaryngology:
+    cname: "耳鼻喉科"
+    rgb: [250, 133, 96]
+    code: "D23"
+    service_time: 9550
+    category: "SLOT"
+  DentalClinic1:
+    cname: "口腔一区"
+    rgb: [197, 254, 130]
+    code: "D24"
+    service_time: 10542
+    category: "SLOT"
+  Ultrasound:
+    cname: "超声科"
+    rgb: [173, 133, 11]
+    code: "T1"
+    service_time: 3023
+    category: "SLOT"
+  Pathology:
+    cname: "病理科"
+    rgb: [119, 90, 10]
+    code: "T5"
+    service_time: 0
+    category: "SLOT"
+  Orthopedics:
+    cname: "骨科"
+    rgb: [250, 146, 138]
+    code: "D7"
+    service_time: 1090
+    category: "SLOT"
+  Urology:
+    cname: "泌尿外科"
+    rgb: [255, 128, 171]
+    code: "D12"
+    service_time: 1019
+    category: "SLOT"
+  HepatobiliaryPancreatic:
+    cname: "肝胆胰外科"
+    rgb: [33, 250, 230]
+    code: "D19"
+    service_time: 2953
+    category: "SLOT"
+  Dermatology:
+    cname: "皮肤科"
+    rgb: [82, 108, 255]
+    code: "D21"
+    service_time: 2802
+    category: "SLOT"
+  Gynaecology:
+    cname: "妇科"
+    rgb: [226, 58, 255]
+    code: "D15"
+    service_time: 5000
+    category: "SLOT"
+  Obstetrics:
+    cname: "产科"
+    rgb: [100, 139, 55]
+    code: "D14"
+    service_time: 2208
+    category: "SLOT"
+  DeliveryRoom:
+    cname: "产房"
+    rgb: [170, 190, 150]
+    code: "T9"
+    service_time: 0
+    category: "SLOT"
+  Theater:
+    cname: "手术室"
+    rgb: [113, 134, 91]
+    code: "T13"
+    service_time: 0
+    category: "SLOT"
+  AmbulatorySurgery:
+    cname: "门诊手术室"
+    rgb: [175, 207, 142]
+    code: "T12"
+    service_time: 0
+    category: "SLOT"
+  DentalClinic2:
+    cname: "口腔二区"
+    rgb: [232, 137, 248]
+    code: "D25"
+    service_time: 4964
+    category: "SLOT"
+  Neurology:
+    cname: "神经内科"
+    rgb: [63, 100, 23]
+    code: "D9"
+    service_time: 2396
+    category: "SLOT"
+  Respiratory:
+    cname: "呼吸内科"
+    rgb: [240, 222, 165]
+    code: "D5"
+    service_time: 1457
+    category: "SLOT"
+  LaserClinic:
+    cname: "综合激光科"
+    rgb: [187, 24, 80]
+    code: "D20"
+    service_time: 1848
+    category: "SLOT"
+  HaemodialysisUnit:
+    cname: "透析中心"
+    rgb: [150, 133, 179]
+    code: "T8"
+    service_time: 44267
+    category: "SLOT"
+  Oncology:
+    cname: "肿瘤科"
+    rgb: [112, 40, 236]
+    code: "D11"
+    service_time: 11729
+    category: "SLOT"
+  PrenatalDiagnosis:
+    cname: "产前诊断门诊"
+    rgb: [241, 190, 186]
+    code: "D13"
+    service_time: 1252
+    category: "SLOT"
+  PhysicalExamination:
+    cname: "体检科"
+    rgb: [186, 146, 160]
+    code: "D4"
+    service_time: 7336
+    category: "SLOT"
+  ReproductiveMedicine:
+    cname: "生殖医学科"
+    rgb: [71, 195, 180]
+    code: "D16"
+    service_time: 1086
+    category: "SLOT"
+  PlasticSurgery:
+    cname: "烧伤整形科"
+    rgb: [187, 152, 247]
+    code: "D17"
+    service_time: 854
+    category: "SLOT"
+  InterventionalTherapy:
+    cname: "介入科"
+    rgb: [254, 210, 145]
+    code: "T6"
+    service_time: 14688
+    category: "SLOT"
+  CSSD:
+    cname: "中心供应室"
+    rgb: [145, 102, 86]
+    code: "T3"
+    service_time: 0
+    category: "SLOT"
+  NICU:
+    cname: "NICU"
+    rgb: [240, 61, 123]
+    code: "T10"
+    service_time: 0
+    category: "SLOT"
+  ICU:
+    cname: "ICU"
+    rgb: [250, 162, 193]
+    code: "T11"
+    service_time: 0
+    category: "SLOT"
+  PIVAS:
+    cname: "静配中心"
+    rgb: [252, 201, 126]
+    code: "T14"
+    service_time: 0
+    category: "SLOT"
