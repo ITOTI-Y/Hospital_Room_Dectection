@@ -16,16 +16,16 @@ class GCNEncoder(nn.Module):
     ):
         super().__init__()
 
-        self.input_dim = input_dim
-        self.output_dim = output_dim
-        self.num_layers = num_layers
+        self.input_dim: int = input_dim
+        self.output_dim: int = output_dim
+        self.num_layers: int = num_layers
 
         if len(hidden_dims) != num_layers - 1:
             raise ValueError(
                 f"Length of hidden_dim must be {num_layers - 1}, got {len(hidden_dims)}"
             )
 
-        self.dims = [input_dim] + hidden_dims + [output_dim]
+        self.dims: List[int] = [input_dim] + hidden_dims + [output_dim]
 
         self.convs = nn.ModuleList()
         self.layer_norms = nn.ModuleList()

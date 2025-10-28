@@ -10,8 +10,8 @@ class EmbeddingLayer(nn.Module):
         value == padding_idx position will be set to zero and ignored in the loss computation
         """
         super().__init__()
-        self.num_categories = num_categories
-        self.embedding_dim = embedding_dim
+        self.num_categories: int = num_categories
+        self.embedding_dim: int = embedding_dim
 
         self.embedding = nn.Embedding(
             num_embeddings=self.num_categories,
@@ -55,9 +55,9 @@ class FeatureProcessor(nn.Module):
         padding_idx: int = -1,
     ):
         super().__init__()
-        self.num_categories = num_categories
-        self.embedding_dim = embedding_dim
-        self.numerical_feat_dim = numerical_feat_dim
+        self.num_categories: int = num_categories
+        self.embedding_dim: int = embedding_dim
+        self.numerical_feat_dim: int = numerical_feat_dim
 
         self.embedding_layer = EmbeddingLayer(
             num_categories=self.num_categories,
@@ -65,13 +65,13 @@ class FeatureProcessor(nn.Module):
             padding_idx=padding_idx,
         )
 
-        self.numerical_hidden_dim = numerical_hidden_dim or embedding_dim
+        self.numerical_hidden_dim: int = numerical_hidden_dim or embedding_dim
         self.numerical_projection = nn.Sequential(
             nn.Linear(self.numerical_feat_dim, self.numerical_hidden_dim),
             nn.ReLU(),
             nn.LayerNorm(self.numerical_hidden_dim),
         )
-        self.output_dim = embedding_dim + self.numerical_hidden_dim
+        self.output_dim: int = embedding_dim + self.numerical_hidden_dim
 
     def forward(
         self,

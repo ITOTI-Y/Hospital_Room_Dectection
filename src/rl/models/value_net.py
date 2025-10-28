@@ -12,7 +12,7 @@ class GlobalPooling(nn.Module):
         hidden_dim: Optional[int] = None,
     ):
         super().__init__()
-        self.pooling_type = pooling_type
+        self.pooling_type: Literal["mean", "max", "sum", "attention"] = pooling_type
 
         if pooling_type == "mean":
             self.pool = global_mean_pool
@@ -70,9 +70,9 @@ class ValueNet(nn.Module):
     ):
         super().__init__()
 
-        self.node_embedding_dim = node_embedding_dim
-        self.value_hidden_dim = value_hidden_dim
-        self.num_layers = num_layers
+        self.node_embedding_dim: int = node_embedding_dim
+        self.value_hidden_dim: int = value_hidden_dim
+        self.num_layers: int = num_layers
 
         self.global_pooling = GlobalPooling(
             pooling_type=pooling_type,

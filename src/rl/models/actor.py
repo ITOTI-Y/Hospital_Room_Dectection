@@ -22,8 +22,8 @@ class AutoregressiveActor(nn.Module):
 
         super().__init__()
 
-        self.node_hidden_dim = node_hidden_dim
-        self.actor_hidden_dim = actor_hidden_dim
+        self.node_hidden_dim: int = node_hidden_dim
+        self.actor_hidden_dim: int = actor_hidden_dim
 
         self.first_action_head = nn.Sequential(
             nn.Linear(node_hidden_dim, actor_hidden_dim),

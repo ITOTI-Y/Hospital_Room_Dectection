@@ -4,7 +4,8 @@ import itertools
 import networkx as nx
 import numpy as np
 from loguru import logger
-from typing import Dict, Optional, Iterator, List, Tuple, Any
+from typing import Dict, Optional, List, Tuple, Any
+from networkx.classes.reportviews import NodeDataView
 
 from src.config import graph_config
 
@@ -98,7 +99,7 @@ class GraphManager:
             return self._graph.nodes[node_id]
         return None
 
-    def get_all_nodes_data(self) -> Iterator[Tuple[int, Dict[str, Any]]]:
+    def get_all_nodes_data(self) -> NodeDataView:
         """Returns an iterator over all nodes and their data."""
         return self._graph.nodes(data=True)
 

@@ -30,7 +30,7 @@ class LayoutOptimizationModel(nn.Module):
         device: Optional[torch.device] = torch.device("cpu"),
     ):
         super().__init__()
-        self.device = device
+        self.device: Optional[torch.device] = device
 
         self.feature_processor = FeatureProcessor(
             num_categories=num_categories,

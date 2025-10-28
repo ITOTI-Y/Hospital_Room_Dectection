@@ -352,7 +352,7 @@ class CostEngine:
         ]
         return name_id_weights
 
-    def dept_to_dept_cost(self, dept1: str, dept2: str) -> Optional[float]:
+    def dept_to_dept_cost(self, dept1: str, dept2: str) -> Optional[np.ndarray]:
         id1 = self.name_id_to_id[dept1]
         id2 = self.name_id_to_id[dept2]
         mask = self.np_times[:, :2] == np.array([id1, id2])
