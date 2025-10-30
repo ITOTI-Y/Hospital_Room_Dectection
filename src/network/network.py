@@ -6,7 +6,7 @@ from __future__ import annotations
 from pathlib import Path
 import numpy as np
 import networkx as nx
-from src.utils.logger import setup_logger
+from loguru import logger
 from typing import Tuple, List, Optional, Dict, TYPE_CHECKING, Sequence
 from scipy.spatial import KDTree
 import cv2
@@ -26,7 +26,7 @@ from .node_creators import (
     ConnectionNodeCreator,
 )
 
-logger = setup_logger(__name__)
+logger = logger.bind(module=__name__)
 
 
 class Network:
@@ -88,9 +88,7 @@ class Network:
                 raise ValueError("Category identifier must be a string.")
             target_names = graph_config.get_nodes_by_category(identifier)
         else:
-            target_names = (
-                identifier if isinstance(identifier, list) else [identifier]
-            )
+            target_names = identifier if isinstance(identifier, list) else [identifier]
 
         if not target_names:
             return np.zeros((self._image_height, self._image_width), dtype=np.uint8)
@@ -117,7 +115,9 @@ class Network:
         if apply_morphology:
             geometry_config = graph_config.get_geometry_config()
             kernel_size = geometry_config.get("morphology_kernel_size", (5, 5))
-            logger.info(f"Kernel size before conversion: {kernel_size} (type: {type(kernel_size)})")
+            logger.info(
+                f"Kernel size before conversion: {kernel_size} (type: {type(kernel_size)})"
+            )
             if isinstance(kernel_size, (float, int, str)):
                 kernel_size = (int(kernel_size), int(kernel_size))
             combined_mask = self.image_processor.apply_morphology(
@@ -155,9 +155,7 @@ class Network:
                         apply_morphology=True,
                     )
                     if outside_mask is not None:
-                        self._id_map[outside_mask != 0] = special_ids.get(
-                            "outside", -1
-                        )
+                        self._id_map[outside_mask != 0] = special_ids.get("outside", -1)
 
     def _create_all_node_types(
         self, z_level: float, process_outside_nodes: bool, floor_num: int
@@ -273,7 +271,9 @@ class Network:
                         self.graph_manager.connect_nodes_by_ids(door_id, nid)
 
                 # Connect to the nearest passageway
-                combined_passageway_nodes = corridor_nodes_list + other_connector_nodes_list
+                combined_passageway_nodes = (
+                    corridor_nodes_list + other_connector_nodes_list
+                )
                 passageway_tree, passageway_nodes_list = build_kdtree(
                     combined_passageway_nodes
                 )
@@ -312,15 +312,11 @@ class Network:
 
         self._initialize_run(image_path, process_outside_nodes)
 
-        self._create_all_node_types(
-            z_level, process_outside_nodes, floor_num
-        ) 
+        self._create_all_node_types(z_level, process_outside_nodes, floor_num)
 
         self._refine_door_connections(z_level)
 
-        logger.info(
-            f"Finished floor. Nodes: {self.graph_manager.node_count()}"
-        )
+        logger.info(f"Finished floor. Nodes: {self.graph_manager.node_count()}")
 
         if self._image_width is None or self._image_height is None:
             raise RuntimeError("Image dimensions not set.")

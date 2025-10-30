@@ -15,7 +15,7 @@ _config_cache: Optional[Dict[str, Any]] = None
 _rgb_to_name_map_cache: Optional[Dict[Tuple[int, int, int], str]] = None
 
 
-def get_config() -> Dict[str, Any]:
+def get_config() -> Optional[Dict[str, Any]]:
     """
     Loads graph configuration from YAML file and caches it.
 
@@ -56,6 +56,8 @@ def get_node_definitions() -> Dict[str, Dict[str, Any]]:
         values are dictionaries of their properties.
     """
     config = get_config()
+    if config is None:
+        return {}
     return config.get("node_definitions", {})
 
 
@@ -106,6 +108,8 @@ def get_geometry_config() -> Dict[str, float]:
         A dictionary with geometry-related parameters like scale and speed.
     """
     config = get_config()
+    if config is None:
+        return {}
     return config.get("geometry", {})
 
 
@@ -117,6 +121,8 @@ def get_super_network_config() -> Dict[str, Any]:
         A dictionary with super_network-related parameters.
     """
     config = get_config()
+    if config is None:
+        return {}
     return config.get("super_network", {})
 
 
@@ -128,10 +134,12 @@ def get_special_ids() -> Dict[str, int]:
         A dictionary mapping special area names to their integer IDs.
     """
     config = get_config()
+    if config is None:
+        return {}
     return config.get("special_ids", {})
 
 
-_plotter_config_cache: Optional[Dict[str, Any]] = None
+_plotter_config_cache: Dict[str, Any] = {}
 
 
 def get_plotter_config() -> Dict[str, Any]:
