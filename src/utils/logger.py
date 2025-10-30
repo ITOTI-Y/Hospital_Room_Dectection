@@ -27,15 +27,14 @@ class NpEncoder(json.JSONEncoder):
 def setup_logger(
     log_file: Optional[pathlib.Path] = None, level: str = "INFO"
 ) -> None:
-    """配置并返回loguru日志记录器。
+    """配置loguru日志记录器。
 
     Args:
-        name (str): 日志记录器的名称（用于上下文标识）。
         log_file (Optional[pathlib.Path]): 可选的日志文件路径。
         level (str): 日志记录级别，默认为"INFO"。
 
     Returns:
-        logger: 配置好的loguru日志记录器实例。
+        None
     """
 
     logger.remove()

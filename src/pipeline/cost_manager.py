@@ -205,8 +205,8 @@ class CostManager:
         self.origin_service_cost: float = 0.0
         self.area_dict: Dict[Tuple[int, int], float] = {}
 
-    def initialize(self, pathways: Dict[str, Dict[str, Any]] = {}) -> None:
-        self.pathways = pathways
+    def initialize(self, pathways: Optional[Dict[str, Dict[str, Any]]] = None) -> None:
+        self.pathways = pathways or {}
         self._reset_initial_parameters()
         self._precompute_initial_layout()
         self._precompute_pair_weights()

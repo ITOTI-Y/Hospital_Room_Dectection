@@ -87,8 +87,8 @@ class FeatureProcessor(nn.Module):
             numerical_feat
         )  # (batch_size, num_nodes, numerical_hidden_dim)
 
-        conbined_features = torch.cat(
+        combined_features = torch.cat(
             [embedded_categorical, projected_numerical], dim=-1
         )  # (batch_size, num_nodes, embedding_dim + numerical_hidden_dim)
 
-        return conbined_features
+        return combined_features

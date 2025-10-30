@@ -81,7 +81,7 @@ class AutoregressiveActor(nn.Module):
             dist2: Optional[Categorical]: Action distribution for action2, None if deterministic is
         """
 
-        batch_size, num_nodes, _ = node_embeddings.size()
+        _, num_nodes, _ = node_embeddings.size()
 
         logits1: torch.Tensor = self.first_action_head(node_embeddings).squeeze(
             -1

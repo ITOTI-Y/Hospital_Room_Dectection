@@ -149,9 +149,9 @@ class OptimizeManager:
             )
 
             result = trainer.run()
-        except Exception as e:
-            self.logger.error(f"Training failed with error: {e}")
-            raise e
+        except Exception:
+            self.logger.exception("Training failed with error")
+            raise
 
         self.logger.info(f"Training completed!, best reward: {result.best_reward}")
 

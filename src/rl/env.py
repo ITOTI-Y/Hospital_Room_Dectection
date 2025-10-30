@@ -55,11 +55,15 @@ class LayoutEnv(gym.Env):
         self.max_step = max_step
 
         # [service_time, service_weight, area, x, y, z, action_flag]
-        self.numerical_feature_dim = self.config.agent.numerical_feat_dim
         self.categorical_feature_dim = 1  # [name]
         self.fixable_features: np.ndarray = np.zeros((self.max_departments, 3), dtype=np.float32)
         self.moveable_features: np.ndarray = np.zeros((self.max_departments, 3), dtype=np.float32)
         self.action_flag_feature: np.ndarray = np.zeros((self.max_departments, 1), dtype=np.float32)
+        self.numerical_feature_dim = (
+            self.fixable_features.shape[1] +
+            self.moveable_features.shape[1] +
+            self.action_flag_feature.shape[1]
+        )
 
         self.pathway_generator = PathwayGenerator(self.config)
         self.cost_manager = CostManager(self.config, is_shuffle=True)
@@ -95,7 +99,7 @@ class LayoutEnv(gym.Env):
                     dtype=np.int32,
                 ),
                 "edge_weight": spaces.Box(
-                    low=0, high=1, shape=(self.E_max,), dtype=np.float32
+                    low=-1, high=1, shape=(self.E_max,), dtype=np.float32
                 ),
                 "node_mask": spaces.MultiBinary(self.max_departments),
                 "edge_mask": spaces.MultiBinary(self.E_max),
@@ -141,7 +145,7 @@ class LayoutEnv(gym.Env):
         self.current_step += 1
         self.logger.info(f"Env {self.env_id} Step {self.current_step}, Action taken: {action}")
 
-        reward: float = 0.0
+        total_reward: float = 0.0
 
         idx1: int = action[0].astype(int)
         idx2: int = action[1].astype(int)
@@ -152,10 +156,11 @@ class LayoutEnv(gym.Env):
             self.action_flag_feature[idx1, 0] += 1.0
             self.action_flag_feature[idx2, 0] += 1.0
             observation = self._get_observation()
-            done = self.current_step >= self.max_step
+            terminated = False
+            truncated = self.current_step >= self.max_step
             info = self._get_info()
             self.logger.warning(f"Invalid action: {action}, reward: {reward}")
-            return observation, reward, done, False, info
+            return observation, total_reward + reward, terminated, truncated, info
         
         dept1 = self.index_to_dept_id[idx1]
         dept2 = self.index_to_dept_id[idx2]
@@ -175,9 +180,9 @@ class LayoutEnv(gym.Env):
         travel_reward: float = cost_diff / (self.initial_cost + 1e-6) * 100.0
         self.current_cost = new_cost
 
-        reward = travel_reward + step_penalty + area_cost
+        total_reward += travel_reward + step_penalty + area_cost
 
-        self.logger.info(f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, reward: {reward}, travel_reward: {travel_reward}, area_cost: {area_cost}")
+        self.logger.info(f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, total_reward: {total_reward}, travel_reward: {travel_reward}, area_cost: {area_cost}")
         
         terminated = False
         truncated = self.current_step >= self.max_step
@@ -185,7 +190,7 @@ class LayoutEnv(gym.Env):
         observation = self._get_observation()
         info = self._get_info()
 
-        return observation.to_dict(), reward, terminated, truncated, info
+        return observation.to_dict(), total_reward, terminated, truncated, info
 
 
     def reset(self, seed: Optional[int] = None) -> tuple[Dict[str, np.ndarray], Dict]:

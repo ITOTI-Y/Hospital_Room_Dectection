@@ -62,8 +62,8 @@ def network(
     except KeyboardInterrupt:
         logger.warning("Interrupted by user")
         raise typer.Exit(code=1)
-    except Exception as e:
-        logger.exception(f"System execution error: {e}")
+    except Exception:
+        logger.exception("System execution error")
         raise typer.Exit(code=1)
 
 @app.command()
