@@ -20,9 +20,8 @@ class EmbeddingLayer(nn.Module):
         )
 
         nn.init.xavier_uniform_(self.embedding.weight)
-        if padding_idx is not None:
-            with torch.no_grad():
-                self.embedding.weight[padding_idx].fill_(0)
+        with torch.no_grad():
+            self.embedding.weight[padding_idx].fill_(0)
 
     def forward(self, categories_ids: torch.Tensor) -> torch.Tensor:
         """

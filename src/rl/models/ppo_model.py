@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import numpy as np
 from typing import Optional, List, Tuple, Literal, Dict, Union, Any
 from tianshou.data import Batch
 
@@ -25,7 +24,8 @@ class LayoutOptimizationModel(nn.Module):
         actor_dropout: float = 0.1,
         value_hidden_dim: int = 256,
         value_num_layers: int = 3,
-        value_pooling_type: Literal["mean", "max", "sum", "attention"] = "mean",
+        value_pooling_type: Literal["mean",
+                                    "max", "sum", "attention"] = "mean",
         value_dropout: float = 0.1,
         device: Optional[torch.device] = torch.device("cpu"),
     ):
@@ -96,12 +96,15 @@ class LayoutOptimizationModel(nn.Module):
         x_numerical = torch.as_tensor(
             x_numerical, device=self.device, dtype=torch.float32
         )
-        edge_index = torch.as_tensor(edge_index, device=self.device, dtype=torch.long)
+        edge_index = torch.as_tensor(
+            edge_index, device=self.device, dtype=torch.long)
         edge_weight = torch.as_tensor(
             edge_weight, device=self.device, dtype=torch.float32
         )
-        node_mask = torch.as_tensor(node_mask, device=self.device, dtype=torch.float32)
-        edge_mask = torch.as_tensor(edge_mask, device=self.device, dtype=torch.float32)
+        node_mask = torch.as_tensor(
+            node_mask, device=self.device, dtype=torch.float32)
+        edge_mask = torch.as_tensor(
+            edge_mask, device=self.device, dtype=torch.float32)
 
         return x_categorical, x_numerical, edge_index, edge_weight, node_mask, edge_mask
 
@@ -136,7 +139,7 @@ class LayoutOptimizationModel(nn.Module):
         )  # (batch_size)
 
         return value
-    
+
     def forward_actor(
             self,
             obs: Union[Dict, Batch],
@@ -152,38 +155,6 @@ class LayoutOptimizationModel(nn.Module):
         )
 
         actions = torch.stack([action1, action2], dim=-1)  # (batch_size, 2)
-        log_prob = log_prob1 + log_prob2 # (batch_size)
+        log_prob = log_prob1 + log_prob2  # (batch_size)
 
         return actions, log_prob, state
-
-    def get_action_log_prob(
-        self,
-        obs: Union[Dict, Batch],
-        action: np.ndarray,
-        **kwargs: Any,
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
-        """
-
-        Args:
-            obs (Union[Dict, Batch]): Observation from the environment.
-            action (np.ndarray): Action taken shape (batch_size, 2).
-
-        Returns:
-            log_prob (torch.Tensor): Joint log probability of action1 and action2, shape (batch_size,).
-            entropy (torch.Tensor): Sum of entropies of action1 and action2 distributions, shape (batch_size,).
-        """
-
-        node_embeddings, node_mask = self.encode_observations(obs)
-
-        actions = torch.as_tensor(action, device=self.device, dtype=torch.long)
-        action1 = actions[:, 0]
-        action2 = actions[:, 1]
-
-        _, _, log_prob, entropy = self.actor.get_log_prob_and_entropy(
-            node_embeddings=node_embeddings,
-            node_mask=node_mask,
-            action1=action1,
-            action2=action2,
-        )
-
-        return log_prob, entropy

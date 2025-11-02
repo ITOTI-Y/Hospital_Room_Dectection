@@ -43,3 +43,10 @@ torch = [
 torchaudio = [
     { index = "pytorch-cu126", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
 ]
+
+[tool.ruff]
+line_length = 88
+
+ignore = [
+    "E501", # line too long
+]

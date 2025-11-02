@@ -25,7 +25,8 @@ class OptimizeManager:
         self.max_departments = self.config.agent.max_departments
         self.max_steps = self.config.agent.max_steps
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu")
         self.logger.info(f"Using device: {self.device}")
 
     def create_env(self):
@@ -77,7 +78,7 @@ class OptimizeManager:
             f"Model created with {sum(p.numel() for p in model.parameters() if p.requires_grad)} trainable parameters."
         )
         return model
-    
+
     def run(self):
 
         self.logger.info("Starting PPO training...")
@@ -153,21 +154,23 @@ class OptimizeManager:
             self.logger.exception("Training failed with error")
             raise
 
-        self.logger.info(f"Training completed!, best reward: {result.best_reward}")
+        self.logger.info(
+            f"Training completed!, best reward: {result.best_reward}")
 
         self.save(policy=policy, file_name="final_ppo_layout_model.pth")
 
         return trainer
-    
+
     def save_best_model(self, policy):
-        best_model_path = Path(self.config.paths.model_dir) / "best_ppo_layout_model.pth"
+        best_model_path = Path(self.config.paths.model_dir) / \
+            "best_ppo_layout_model.pth"
         best_model_path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(policy.state_dict(), best_model_path)
         self.logger.info(f"best model saved to {best_model_path}")
 
     def save(self, policy: torch.nn.Module, file_name: str):
 
-        model_path = self.config.paths.model_dir / file_name
+        model_path = Path(self.config.paths.model_dir) / file_name
         model_path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(policy.state_dict(), model_path)
         self.logger.info(f"Model saved to {model_path}")
