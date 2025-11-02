@@ -1,11 +1,12 @@
+from typing import Any, Literal
+
 import torch
 import torch.nn as nn
-from typing import Optional, List, Tuple, Literal, Dict, Union, Any
 from tianshou.data import Batch
 
+from .actor import AutoregressiveActor
 from .feature_extractor import FeatureProcessor
 from .gnn_encoder import GCNEncoder
-from .actor import AutoregressiveActor
 from .value_net import ValueNet
 
 
@@ -15,8 +16,8 @@ class LayoutOptimizationModel(nn.Module):
         num_categories: int,
         embedding_dim: int,
         numerical_feat_dim: int,
-        numerical_hidden_dim: Optional[int] = None,
-        gnn_hidden_dims: List[int] = [128, 128],
+        numerical_hidden_dim: int | None = None,
+        gnn_hidden_dims: list[int] | None = None,
         gnn_output_dim: int = 256,
         gnn_num_layers: int = 3,
         gnn_dropout: float = 0.1,
@@ -24,13 +25,12 @@ class LayoutOptimizationModel(nn.Module):
         actor_dropout: float = 0.1,
         value_hidden_dim: int = 256,
         value_num_layers: int = 3,
-        value_pooling_type: Literal["mean",
-                                    "max", "sum", "attention"] = "mean",
+        value_pooling_type: Literal["mean", "max", "sum", "attention"] = "mean",
         value_dropout: float = 0.1,
-        device: Optional[torch.device] = torch.device("cpu"),
+        device: torch.device | None = None,
     ):
         super().__init__()
-        self.device: Optional[torch.device] = device
+        self.device: torch.device | None = device
 
         self.feature_processor = FeatureProcessor(
             num_categories=num_categories,
@@ -42,7 +42,7 @@ class LayoutOptimizationModel(nn.Module):
 
         self.gnn_encoder = GCNEncoder(
             input_dim=self.feature_processor.output_dim,
-            hidden_dims=gnn_hidden_dims,
+            hidden_dims=gnn_hidden_dims or [128, 128],
             output_dim=gnn_output_dim,
             num_layers=gnn_num_layers,
             dropout=gnn_dropout,
@@ -66,8 +66,8 @@ class LayoutOptimizationModel(nn.Module):
 
     def _prepare_inputs(
         self,
-        obs: Union[Dict, Batch],
-    ) -> Tuple[
+        obs: dict | Batch,
+    ) -> tuple[
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
@@ -96,22 +96,19 @@ class LayoutOptimizationModel(nn.Module):
         x_numerical = torch.as_tensor(
             x_numerical, device=self.device, dtype=torch.float32
         )
-        edge_index = torch.as_tensor(
-            edge_index, device=self.device, dtype=torch.long)
+        edge_index = torch.as_tensor(edge_index, device=self.device, dtype=torch.long)
         edge_weight = torch.as_tensor(
             edge_weight, device=self.device, dtype=torch.float32
         )
-        node_mask = torch.as_tensor(
-            node_mask, device=self.device, dtype=torch.float32)
-        edge_mask = torch.as_tensor(
-            edge_mask, device=self.device, dtype=torch.float32)
+        node_mask = torch.as_tensor(node_mask, device=self.device, dtype=torch.float32)
+        edge_mask = torch.as_tensor(edge_mask, device=self.device, dtype=torch.float32)
 
         return x_categorical, x_numerical, edge_index, edge_weight, node_mask, edge_mask
 
     def encode_observations(
         self,
-        obs: Union[Dict, Batch],
-    ) -> Tuple[torch.Tensor, torch.Tensor]:
+        obs: dict | Batch,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         x_categorical, x_numerical, edge_index, edge_weight, node_mask, edge_mask = (
             self._prepare_inputs(obs)
         )
@@ -129,7 +126,7 @@ class LayoutOptimizationModel(nn.Module):
         return node_embeddings, node_mask
 
     def forward(
-        self, obs: Union[Dict, Batch], state: Optional[Any] = None, **kwargs
+        self, obs: dict | Batch, state: Any | None = None
     ) -> torch.Tensor:
         node_embeddings, node_mask = self.encode_observations(obs)
 
@@ -141,11 +138,8 @@ class LayoutOptimizationModel(nn.Module):
         return value
 
     def forward_actor(
-            self,
-            obs: Union[Dict, Batch],
-            state: Optional[Any] = None,
-            **kwargs
-    ) -> Tuple[torch.Tensor, torch.Tensor, Any]:
+        self, obs: dict | Batch, state: Any | None = None, **kwargs
+    ) -> tuple[torch.Tensor, torch.Tensor, Any]:
         node_embeddings, node_mask = self.encode_observations(obs)
 
         action1, action2, log_prob1, log_prob2, _, _ = self.actor(

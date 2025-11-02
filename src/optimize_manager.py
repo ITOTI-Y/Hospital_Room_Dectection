@@ -1,17 +1,18 @@
-import torch
 from pathlib import Path
+
+import torch
 from loguru import logger
-from torch.utils.tensorboard import SummaryWriter
 from tianshou.data import Collector, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
 from tianshou.trainer import OnpolicyTrainer
 from tianshou.utils import TensorboardLogger
+from torch.utils.tensorboard import SummaryWriter
 
-from src.pipeline import PathwayGenerator, CostManager
 from src.config.config_loader import ConfigLoader
+from src.pipeline import CostManager, PathwayGenerator
 from src.rl.env import LayoutEnv
-from src.rl.models.ppo_model import LayoutOptimizationModel
 from src.rl.models.policy import LayoutPolicy
+from src.rl.models.ppo_model import LayoutOptimizationModel
 
 
 class OptimizeManager:
@@ -25,8 +26,7 @@ class OptimizeManager:
         self.max_departments = self.config.agent.max_departments
         self.max_steps = self.config.agent.max_steps
 
-        self.device = torch.device(
-            "cuda" if torch.cuda.is_available() else "cpu")
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.logger.info(f"Using device: {self.device}")
 
     def create_env(self):
@@ -80,7 +80,6 @@ class OptimizeManager:
         return model
 
     def run(self):
-
         self.logger.info("Starting PPO training...")
 
         train_envs, test_envs = self.create_env()
@@ -116,7 +115,7 @@ class OptimizeManager:
             env=train_envs,
             buffer=VectorReplayBuffer(
                 total_size=self.config.agent.buffer_size,
-                buffer_num=len(train_envs),
+                buffer_num=train_envs.num_envs,
             ),
             exploration_noise=False,
         )
@@ -126,9 +125,7 @@ class OptimizeManager:
             env=test_envs,
         )
 
-        writer = SummaryWriter(
-            log_dir=self.config.paths.tensorboard_dir
-        )
+        writer = SummaryWriter(log_dir=self.config.paths.tensorboard_dir)
 
         tensorboard_logger = TensorboardLogger(writer)
 
@@ -154,22 +151,22 @@ class OptimizeManager:
             self.logger.exception("Training failed with error")
             raise
 
-        self.logger.info(
-            f"Training completed!, best reward: {result.best_reward}")
-
+        self.logger.info(f"Training completed!, best reward: {result.best_reward}")
         self.save(policy=policy, file_name="final_ppo_layout_model.pth")
+        writer.flush()
+        writer.close()
 
         return trainer
 
     def save_best_model(self, policy):
-        best_model_path = Path(self.config.paths.model_dir) / \
-            "best_ppo_layout_model.pth"
+        best_model_path = (
+            Path(self.config.paths.model_dir) / "best_ppo_layout_model.pth"
+        )
         best_model_path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(policy.state_dict(), best_model_path)
         self.logger.info(f"best model saved to {best_model_path}")
 
     def save(self, policy: torch.nn.Module, file_name: str):
-
         model_path = Path(self.config.paths.model_dir) / file_name
         model_path.parent.mkdir(parents=True, exist_ok=True)
         torch.save(policy.state_dict(), model_path)

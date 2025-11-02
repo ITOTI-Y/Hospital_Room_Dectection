@@ -1,15 +1,14 @@
 import torch
 import torch.nn as nn
+from torch_geometric.data import Batch, Data
 from torch_geometric.nn import GCNConv
-from torch_geometric.data import Data, Batch
-from typing import Optional, List
 
 
 class GCNEncoder(nn.Module):
     def __init__(
         self,
         input_dim: int,
-        hidden_dims: List[int],
+        hidden_dims: list[int],
         output_dim: int,
         num_layers: int = 3,
         dropout: float = 0.1,
@@ -25,7 +24,7 @@ class GCNEncoder(nn.Module):
                 f"Length of hidden_dim must be {num_layers - 1}, got {len(hidden_dims)}"
             )
 
-        self.dims: List[int] = [input_dim] + hidden_dims + [output_dim]
+        self.dims: list[int] = [input_dim, *hidden_dims, output_dim]
 
         self.convs = nn.ModuleList()
         self.layer_norms = nn.ModuleList()
@@ -73,7 +72,7 @@ class GCNEncoder(nn.Module):
         self,
         x: torch.Tensor,
         edge_index: torch.Tensor,
-        edge_weight: Optional[torch.Tensor] = None,
+        edge_weight: torch.Tensor | None = None,
     ) -> torch.Tensor:
         for i, conv in enumerate(self.convs):
             identity = x
@@ -98,7 +97,7 @@ class GCNEncoder(nn.Module):
         node_mask: torch.Tensor,
         edge_mask: torch.Tensor,
     ) -> torch.Tensor:
-        batch_size, num_nodes, feat_dim = x.size()
+        batch_size, num_nodes, _ = x.size()
 
         data_list = []
         for i in range(batch_size):

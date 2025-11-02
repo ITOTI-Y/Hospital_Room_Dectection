@@ -1,5 +1,6 @@
 import uuid
 from dataclasses import dataclass
+from typing import ClassVar
 
 import gymnasium as gym
 import numpy as np
@@ -44,7 +45,7 @@ class GraphObservation:
 
 
 class LayoutEnv(gym.Env):
-    metadata = {"render.modes": ["human"]}
+    metadata: ClassVar[dict[str, list[str]]] = {"render_modes": ["human"]}
 
     def __init__(self, config: ConfigLoader, max_departments: int, max_step: int):
         super().__init__()
@@ -96,13 +97,13 @@ class LayoutEnv(gym.Env):
                 ),
                 "x_categorical": spaces.Box(
                     low=0,
-                    high=self.num_total_slot - 1,
+                    high=self.max_departments - 1,
                     shape=(self.max_departments,),
                     dtype=np.int32,
                 ),
                 "edge_index": spaces.Box(
                     low=0,
-                    high=self.max_departments - 1,
+                    high=-1,
                     shape=(2, self.E_max),
                     dtype=np.int32,
                 ),
@@ -179,7 +180,7 @@ class LayoutEnv(gym.Env):
             truncated = self.current_step >= self.max_step
             info = self._get_info()
             self.logger.warning(f"Invalid action: {action}, reward: {reward}")
-            return observation, total_reward + reward, terminated, truncated, info
+            return observation.to_dict(), total_reward + reward, terminated, truncated, info
 
         dept1 = self.index_to_dept_id[idx1]
         dept2 = self.index_to_dept_id[idx2]

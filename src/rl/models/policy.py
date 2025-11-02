@@ -1,36 +1,37 @@
-import torch
+from typing import Any
+
 import numpy as np
-from typing import Any, Dict, Optional, Union
-from tianshou.data.stats import SequenceSummaryStats
-from tianshou.policy.modelfree.a2c import A2CTrainingStats
-from tianshou.data import Batch, ReplayBuffer, to_torch_as
-from tianshou.policy import A2CPolicy
+import torch
 from gymnasium import Space
 from loguru import logger
+from tianshou.data import Batch, ReplayBuffer, to_torch_as
+from tianshou.data.stats import SequenceSummaryStats
+from tianshou.policy import A2CPolicy
+from tianshou.policy.modelfree.a2c import A2CTrainingStats
 
 from .ppo_model import LayoutOptimizationModel
 
+
 class LayoutPolicy(A2CPolicy):
-    
     def __init__(
-            self,
-            model: LayoutOptimizationModel,
-            optim: torch.optim.Optimizer,
-            action_space: Space,
-            discount_factor: float,
-            gae_lambda: float,
-            vf_coef: float,
-            ent_coef: float,
-            max_grad_norm: float,
-            value_clip: bool,
-            advantage_normalization: bool,
-            recompute_advantage: bool,
-            dual_clip: Optional[float],
-            reward_normalization: bool,
-            eps_clip: float,
-            max_batchsize: int,
-            deterministic_eval: bool,
-            **kwargs: Any,
+        self,
+        model: LayoutOptimizationModel,
+        optim: torch.optim.Optimizer,
+        action_space: Space,
+        discount_factor: float,
+        gae_lambda: float,
+        vf_coef: float,
+        ent_coef: float,
+        max_grad_norm: float,
+        value_clip: bool,
+        advantage_normalization: bool,
+        recompute_advantage: bool,
+        dual_clip: float | None,
+        reward_normalization: bool,
+        eps_clip: float,
+        max_batchsize: int,
+        deterministic_eval: bool,
+        **kwargs: Any,
     ):
         def dummy_dist_fn(logits: torch.Tensor):
             return torch.distributions.Categorical(logits=logits)
@@ -67,12 +68,11 @@ class LayoutPolicy(A2CPolicy):
         self.logger = logger.bind(module=__name__)
 
     def forward(
-            self,
-            batch: Batch,
-            state: Optional[Union[Dict, Batch, torch.Tensor]] = None,
-            **kwargs: Any,
+        self,
+        batch: Batch,
+        state: dict | Batch | torch.Tensor | None = None,
+        **kwargs: Any,
     ) -> Batch:
-        
         node_embeddings, node_mask = self.model.encode_observations(batch.obs)
 
         deterministic = kwargs.get("deterministic", False)
@@ -88,7 +88,7 @@ class LayoutPolicy(A2CPolicy):
         value = self.model.critic(
             node_embeddings=node_embeddings,
             node_mask=node_mask,
-        ).flatten() # (batch_size,)
+        ).flatten()  # (batch_size,)
 
         actions = torch.stack([action1, action2], dim=-1)  # (batch_size, 2)
 
@@ -104,37 +104,36 @@ class LayoutPolicy(A2CPolicy):
         )
 
     def process_fn(
-            self,
-            batch: Batch,
-            buffer: ReplayBuffer,
-            indices: np.ndarray,
+        self,
+        batch: Batch,
+        buffer: ReplayBuffer,
+        indices: np.ndarray,
     ):
         if self._recompute_adv:
             self._buffer, self._indices = buffer, indices
 
-        batch = self._compute_returns(batch, buffer, indices) # type: ignore
+        batch = self._compute_returns(batch, buffer, indices)  # type: ignore
 
         batch.act = to_torch_as(batch.act, batch.v_s)
 
         old_log_prob = []
         with torch.no_grad():
-            for minibatch in batch.split(self._max_batchsize, shuffle=False, merge_last=True): # type: ignore
+            for minibatch in batch.split(
+                self._max_batchsize, shuffle=False, merge_last=True
+            ):  # type: ignore
                 result = self(minibatch)
                 old_log_prob.append(result.logp)
 
         batch.logp_old = torch.cat(old_log_prob, dim=0)
 
         return batch
-    
 
     def learn(
-            self,
-            batch: Batch,
-            batch_size: int,
-            repeat: int,
-            **kwargs: Any,
+        self,
+        batch: Batch,
+        batch_size: int,
+        repeat: int,
     ):
-        
         losses, clip_losses, vf_losses, ent_losses = [], [], [], []
 
         for step in range(repeat):
@@ -142,7 +141,6 @@ class LayoutPolicy(A2CPolicy):
                 batch = self._compute_returns(batch, self._buffer, self._indices)  # type: ignore
 
             for minibatch in batch.split(batch_size, shuffle=True, merge_last=True):
-
                 result = self(minibatch)
 
                 if self._adv_norm:
@@ -152,21 +150,17 @@ class LayoutPolicy(A2CPolicy):
                 log_prob = result.logp
                 ratio = (log_prob - minibatch.logp_old).exp().float()
 
-                ratio = ratio.reshape(ratio.size(0), -1).transpose(0, 1) # (1, batch_size)
+                ratio = ratio  # (batch_size,)
                 surr1 = ratio * minibatch.adv
-                surr2 = ratio.clamp(
-                    1.0 - self._eps_clip,
-                    1.0 + self._eps_clip
-                ) * minibatch.adv
+                surr2 = (
+                    ratio.clamp(1.0 - self._eps_clip, 1.0 + self._eps_clip)
+                    * minibatch.adv
+                )
 
                 if self._dual_clip:
                     clip1 = torch.min(surr1, surr2)
                     clip2 = torch.max(clip1, self._dual_clip * minibatch.adv)
-                    clip_loss = -torch.where(
-                        minibatch.adv < 0,
-                        clip2,
-                        clip1
-                    ).mean()
+                    clip_loss = -torch.where(minibatch.adv < 0, clip2, clip1).mean()
                 else:
                     clip_loss = -torch.min(surr1, surr2).mean()
 
@@ -174,8 +168,7 @@ class LayoutPolicy(A2CPolicy):
 
                 if self._value_clip:
                     v_clip = minibatch.v_s + (value - minibatch.v_s).clamp(
-                        -self._eps_clip,
-                        self._eps_clip
+                        -self._eps_clip, self._eps_clip
                     )
                     vf1 = (minibatch.returns - value).pow(2)
                     vf2 = (minibatch.returns - v_clip).pow(2)
@@ -193,7 +186,7 @@ class LayoutPolicy(A2CPolicy):
                 if self._grad_norm:
                     torch.nn.utils.clip_grad_norm_(
                         self.model.parameters(),
-                        max_norm=self._grad_norm # type: ignore
+                        max_norm=self._grad_norm,  # type: ignore
                     )
 
                 self.optim.step()
@@ -202,7 +195,7 @@ class LayoutPolicy(A2CPolicy):
                 vf_losses.append(vf_loss.item())
                 ent_losses.append(ent_loss.item())
                 losses.append(loss.item())
-        
+
         return A2CTrainingStats(
             loss=SequenceSummaryStats.from_sequence(losses),
             actor_loss=SequenceSummaryStats.from_sequence(clip_losses),

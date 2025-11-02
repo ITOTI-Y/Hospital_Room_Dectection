@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from typing import Optional
 
 
 class EmbeddingLayer(nn.Module):
@@ -50,7 +49,7 @@ class FeatureProcessor(nn.Module):
         num_categories: int,
         embedding_dim: int,
         numerical_feat_dim: int,
-        numerical_hidden_dim: Optional[int] = None,
+        numerical_hidden_dim: int | None = None,
         padding_idx: int = -1,
     ):
         super().__init__()
@@ -77,7 +76,6 @@ class FeatureProcessor(nn.Module):
         categorical_feat: torch.Tensor,
         numerical_feat: torch.Tensor,
     ) -> torch.Tensor:
-        
         embedded_categorical = self.embedding_layer(
             categorical_feat
         )  # (batch_size, num_nodes, embedding_dim)

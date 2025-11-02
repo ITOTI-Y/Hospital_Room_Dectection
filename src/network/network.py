@@ -3,27 +3,31 @@ Orchestrates the construction of a single-floor network graph.
 """
 
 from __future__ import annotations
+
+from collections.abc import Sequence
 from pathlib import Path
-import numpy as np
-import networkx as nx
-from loguru import logger
-from typing import Tuple, List, Optional, Dict, TYPE_CHECKING, Sequence
-from scipy.spatial import KDTree
+from typing import TYPE_CHECKING
+
 import cv2
+import networkx as nx
+import numpy as np
+from loguru import logger
+from scipy.spatial import KDTree
 
 if TYPE_CHECKING:
     from .node_creators import BaseNodeCreator
 
 from src.config import graph_config
-from .graph_manager import GraphManager
 from src.utils.processor import ImageProcessor
+
+from .graph_manager import GraphManager
 from .node_creators import (
     BaseNodeCreator,
+    ConnectionNodeCreator,
+    OutsideNodeCreator,
+    PedestrianNodeCreator,
     RoomNodeCreator,
     VerticalNodeCreator,
-    PedestrianNodeCreator,
-    OutsideNodeCreator,
-    ConnectionNodeCreator,
 )
 
 logger = logger.bind(module=__name__)
@@ -58,15 +62,15 @@ class Network:
 
         self._outside_node_creator = OutsideNodeCreator(self)
 
-        self._current_image_data: Optional[np.ndarray] = None
-        self._id_map: Optional[np.ndarray] = None
-        self._image_height: Optional[int] = None
-        self._image_width: Optional[int] = None
-        self._mask_cache: Dict[str, np.ndarray] = {}
+        self._current_image_data: np.ndarray | None = None
+        self._id_map: np.ndarray | None = None
+        self._image_height: int | None = None
+        self._image_width: int | None = None
+        self._mask_cache: dict[str, np.ndarray] = {}
 
     def _get_mask(
         self,
-        identifier: str | List[str],
+        identifier: str | list[str],
         is_category: bool,
         apply_morphology: bool = True,
     ) -> np.ndarray:
@@ -298,7 +302,7 @@ class Network:
         z_level: float = 0.0,
         process_outside_nodes: bool = False,
         floor_num: int = 0,
-    ) -> Tuple[nx.Graph, int, int, int]:
+    ) -> tuple[nx.Graph, int, int, int]:
         """
         Executes the full network generation pipeline.
         Args:

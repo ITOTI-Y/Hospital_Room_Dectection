@@ -1,16 +1,17 @@
 # src/utils/logger.py
 
-import sys
-from typing import Any, Optional
 import json
 import pathlib
 import pickle
+import sys
+from typing import Any
+
 import numpy as np
 from loguru import logger
 
 
 class NpEncoder(json.JSONEncoder):
-    """自定义JSON编码器，以处理Numpy数据类型和路径对象。"""
+    """Custom JSON encoder to handle Numpy data types and path objects."""
 
     def default(self, obj: Any) -> Any:
         if isinstance(obj, np.integer):
@@ -19,22 +20,17 @@ class NpEncoder(json.JSONEncoder):
             return float(obj)
         if isinstance(obj, np.ndarray):
             return obj.tolist()
-        if isinstance(obj, (pathlib.Path, pathlib.PosixPath, pathlib.WindowsPath)):
+        if isinstance(obj, pathlib.Path):
             return str(obj)
-        return super(NpEncoder, self).default(obj)
+        return super().default(obj)
 
 
-def setup_logger(
-    log_file: Optional[pathlib.Path] = None, level: str = "INFO"
-) -> None:
-    """配置loguru日志记录器。
+def setup_logger(log_file: pathlib.Path | None = None, level: str = "INFO") -> None:
+    """Configure loguru logger.
 
     Args:
-        log_file (Optional[pathlib.Path]): 可选的日志文件路径。
-        level (str): 日志记录级别，默认为"INFO"。
-
-    Returns:
-        None
+        log_file (pathlib.Path | None): Optional log file path.
+        level (str): Log level, default is "INFO".
     """
 
     logger.remove()
@@ -81,24 +77,24 @@ def setup_logger(
 
 
 def save_json(data: dict, path: pathlib.Path):
-    """使用自定义编码器将字典保存为JSON文件。"""
+    """Save dictionary to JSON file using custom encoder."""
     with open(path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2, cls=NpEncoder)
 
 
 def load_json(path: pathlib.Path) -> dict:
-    """从JSON文件加载字典。"""
-    with open(path, "r", encoding="utf-8") as f:
+    """Load dictionary from JSON file."""
+    with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
 def save_pickle(data: Any, path: pathlib.Path):
-    """将任何Python对象序列化为pickle文件。"""
+    """Serialize any Python object to pickle file."""
     with open(path, "wb") as f:
         pickle.dump(data, f)
 
 
 def load_pickle(path: pathlib.Path) -> Any:
-    """从pickle文件加载Python对象。"""
+    """Load Python object from pickle file."""
     with open(path, "rb") as f:
         return pickle.load(f)

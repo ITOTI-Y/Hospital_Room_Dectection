@@ -1,11 +1,12 @@
 """Manages the network graph structure, node storage, and ID generation."""
 
 import itertools
+from collections.abc import Iterator
+from typing import Any
+
 import networkx as nx
 import numpy as np
 from loguru import logger
-from typing import Dict, Optional, List, Tuple, Any
-from networkx.classes.reportviews import NodeDataView
 
 from src.config import graph_config
 
@@ -32,7 +33,7 @@ class GraphManager:
     def get_current_id_value(self) -> int:
         """Gets the next ID value without consuming it."""
         current_value = next(self._id_counter)
-        self._id_counter = itertools.chain([current_value], self._id_counter)
+        self._id_counter = itertools.count(start=current_value)
         return current_value
 
     def add_node(self, node_id: int, **attrs: Any) -> None:
@@ -93,13 +94,13 @@ class GraphManager:
         """Alias for add_edge."""
         self.add_edge(node1_id, node2_id, **attrs)
 
-    def get_node_attributes(self, node_id: int) -> Optional[Dict[str, Any]]:
+    def get_node_attributes(self, node_id: int) -> dict[str, Any] | None:
         """Gets the attribute dictionary of a node."""
         if self._graph.has_node(node_id):
             return self._graph.nodes[node_id]
         return None
 
-    def get_all_nodes_data(self) -> NodeDataView:
+    def get_all_nodes_data(self) -> Iterator:
         """Returns an iterator over all nodes and their data."""
         return self._graph.nodes(data=True)
 
@@ -113,7 +114,7 @@ class GraphManager:
 
     def get_nodes_by_attribute(
         self, attr_name: str, attr_value: Any
-    ) -> List[Tuple[int, Dict[str, Any]]]:
+    ) -> list[tuple[int, dict[str, Any]]]:
         """Gets a list of nodes matching a specific attribute value."""
         return [
             (n, d)

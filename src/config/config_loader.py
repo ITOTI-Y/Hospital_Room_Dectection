@@ -27,4 +27,7 @@ class ConfigLoader:
             setattr(cls, config_name, config_data)
 
     def __getattr__(self, name):
-        return None
+        raise AttributeError(
+            f"Config '{name}' not found"
+            f"Available configs: {[key for key in self.__class__.__dict__ if not key.startswith('_')]}"
+        )

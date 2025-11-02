@@ -55,7 +55,7 @@ class CostManager:
     def _load_slots_information(self) -> None:
         df = pd.read_csv(self.config.paths.slots_csv)  # type: ignore
         for _, row in df[["name", "id", "area"]].iterrows():
-            name_id = row["name"] + "_" + str(row["id"])
+            name_id = row["name"].astype(str) + "_" + str(row["id"])
             self.name_id_to_area[name_id] = float(row["area"])
             self.id_to_area[int(row["id"])] = float(row["area"])
         df["service_weight"] = 0.0
@@ -63,11 +63,11 @@ class CostManager:
 
     def _load_node_definitions(self) -> None:
         self.node_def = self.config.graph_config.node_definitions  # type: ignore
-        self.cname_to_name = {v["cname"]: k for k, v in self.node_def.items()}
+        self.cname_to_name = {v["cname"]: k for k, v in self.node_def.items()}  # type: ignore
 
     def _load_adjacency_preferences(self) -> None:
         if adjacency_preferences := self.config.constraints.adjacency_preferences:  # type: ignore
-            for pref in adjacency_preferences:
+            for pref in adjacency_preferences:  # type: ignore
                 depts: list[str] = []
                 dept_names = [self.cname_to_name[i] for i in pref.depts]
                 for i in dept_names:
@@ -345,7 +345,8 @@ class CostEngine:
         name_id_weights = [
             (self.id_to_name_id[int(id1)], self.id_to_name_id[int(id2)], weight)
             for id1, id2, weight in id_weights
-            if id1 in self.slots["id"].values and id2 in self.slots["id"].values
+            if int(id1) in set(self.slots["id"].astype(int).values)
+            and int(id2) in set(self.slots["id"].astype(int).values)
         ]
         return name_id_weights
 
