@@ -1,14 +1,14 @@
-import gymnasium as gym
-import numpy as np
 import uuid
 from dataclasses import dataclass
+
+import gymnasium as gym
+import numpy as np
 from gymnasium import spaces
-from sklearn.preprocessing import StandardScaler
-from typing import Dict, Optional
 from loguru import logger
+from sklearn.preprocessing import StandardScaler
 
 from src.config.config_loader import ConfigLoader
-from src.pipeline import PathwayGenerator, CostManager
+from src.pipeline import CostManager, PathwayGenerator
 
 
 @dataclass
@@ -20,7 +20,7 @@ class GraphObservation:
     node_mask: np.ndarray  # Shape: (max_departments,)
     edge_mask: np.ndarray  # Shape: (E_max,)
 
-    def to_dict(self) -> Dict[str, np.ndarray]:
+    def to_dict(self) -> dict[str, np.ndarray]:
         return {
             "x_numerical": self.x_numerical,
             "x_categorical": self.x_categorical,
@@ -59,23 +59,26 @@ class LayoutEnv(gym.Env):
         # [service_time, service_weight, area, x, y, z, action_flag]
         self.categorical_feature_dim = 1  # [name]
         self.fixable_features: np.ndarray = np.zeros(
-            (self.max_departments, 3), dtype=np.float32)
+            (self.max_departments, 3), dtype=np.float32
+        )
         self.moveable_features: np.ndarray = np.zeros(
-            (self.max_departments, 3), dtype=np.float32)
+            (self.max_departments, 3), dtype=np.float32
+        )
         self.action_flag_feature: np.ndarray = np.zeros(
-            (self.max_departments, 1), dtype=np.float32)
+            (self.max_departments, 1), dtype=np.float32
+        )
         self.numerical_feature_dim = (
-            self.fixable_features.shape[1] +
-            self.moveable_features.shape[1] +
-            self.action_flag_feature.shape[1]
+            self.fixable_features.shape[1]
+            + self.moveable_features.shape[1]
+            + self.action_flag_feature.shape[1]
         )
 
         self.pathway_generator = PathwayGenerator(self.config)
         self.cost_manager = CostManager(self.config, is_shuffle=True)
 
-        self.norm_numerical_feature: Optional[np.ndarray] = None
-        self.index_to_dept_id: Dict[int, str] = {}
-        self.dept_id_to_index: Dict[str, int] = {}
+        self.norm_numerical_feature: np.ndarray | None = None
+        self.index_to_dept_id: dict[int, str] = {}
+        self.dept_id_to_index: dict[str, int] = {}
         self.num_total_slot: int = 0
         self.num_total_travel_node: int = 0
         self.scaler: StandardScaler = StandardScaler()
@@ -118,7 +121,7 @@ class LayoutEnv(gym.Env):
         self.current_cost = 0.0
         self.initial_cost = 0.0
 
-        self.last_failed_action: Optional[np.ndarray] = None
+        self.last_failed_action: np.ndarray | None = None
 
     def _precompute_normalization_stats(self) -> None:
         pathways = self.pathway_generator.generate_all()
@@ -131,20 +134,26 @@ class LayoutEnv(gym.Env):
             ["pos_x", "pos_y", "pos_z"]
         ].to_numpy()
 
-        self.fixable_features[:len(fixable_features)] = fixable_features
-        self.moveable_features[:len(moveable_features)] = moveable_features
+        self.fixable_features[: len(fixable_features)] = fixable_features
+        self.moveable_features[: len(moveable_features)] = moveable_features
 
-        self.scaler.fit(np.concatenate(
-            [self.fixable_features, self.moveable_features, self.action_flag_feature], axis=1))
+        self.scaler.fit(
+            np.concatenate(
+                [
+                    self.fixable_features,
+                    self.moveable_features,
+                    self.action_flag_feature,
+                ],
+                axis=1,
+            )
+        )
 
     def _precompute_categorical_features(self):
         slots_name_ids = self.cost_manager.slots_name_id
         self.num_total_travel_node = len(self.cost_manager.travel_times.index)
         self.num_total_slot = len(slots_name_ids)
-        self.index_to_dept_id = {i: name for i,
-                                 name in enumerate(slots_name_ids)}
-        self.dept_id_to_index = {name: i for i,
-                                 name in enumerate(slots_name_ids)}
+        self.index_to_dept_id = dict(enumerate(slots_name_ids))
+        self.dept_id_to_index = {name: i for i, name in enumerate(slots_name_ids)}
 
     def _compute_numerical_features(self):
         pass
@@ -152,7 +161,8 @@ class LayoutEnv(gym.Env):
     def step(self, action: np.ndarray):
         self.current_step += 1
         self.logger.info(
-            f"Env {self.env_id} Step {self.current_step}, Action taken: {action}")
+            f"Env {self.env_id} Step {self.current_step}, Action taken: {action}"
+        )
 
         total_reward: float = 0.0
 
@@ -160,7 +170,7 @@ class LayoutEnv(gym.Env):
         idx2: int = action[1].astype(int)
 
         if idx1 >= self.num_total_slot or idx2 >= self.num_total_slot or idx1 == idx2:
-            reward: float = self.config.constraints.invalid_action
+            reward: float = self.config.constraints.invalid_action  # type: ignore
             self.last_failed_action = action.astype(dtype=int)
             self.action_flag_feature[idx1, 0] += 1.0
             self.action_flag_feature[idx2, 0] += 1.0
@@ -184,7 +194,7 @@ class LayoutEnv(gym.Env):
             self.action_flag_feature[:, 0] = 0.0
         area_cost = self.cost_engine.area_compatibility_cost
 
-        step_penalty: float = self.config.constraints.step_penalty
+        step_penalty: float = self.config.constraints.step_penalty  # type: ignore
         cost_diff: float = previous_cost - new_cost
         travel_reward: float = cost_diff / (self.initial_cost + 1e-6) * 100.0
         self.current_cost = new_cost
@@ -192,7 +202,8 @@ class LayoutEnv(gym.Env):
         total_reward += travel_reward + step_penalty + area_cost
 
         self.logger.info(
-            f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, total_reward: {total_reward}, travel_reward: {travel_reward}, area_cost: {area_cost}")
+            f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, total_reward: {total_reward}, travel_reward: {travel_reward}, area_cost: {area_cost}"
+        )
 
         terminated = False
         truncated = self.current_step >= self.max_step
@@ -202,7 +213,7 @@ class LayoutEnv(gym.Env):
 
         return observation.to_dict(), total_reward, terminated, truncated, info
 
-    def reset(self, seed: Optional[int] = None) -> tuple[Dict[str, np.ndarray], Dict]:
+    def reset(self, seed: int | None = None) -> tuple[dict[str, np.ndarray], dict]:
         super().reset(seed=seed)
         self.logger.info("Resetting environment")
 
@@ -225,23 +236,32 @@ class LayoutEnv(gym.Env):
         return observation.to_dict(), info
 
     def _get_observation(self) -> GraphObservation:
-        x_categorical = np.ones((self.max_departments,),
-                                dtype=np.int32) * self.PADDING_IDX
+        x_categorical = (
+            np.ones((self.max_departments,), dtype=np.int32) * self.PADDING_IDX
+        )
         node_mask = np.zeros((self.max_departments,), dtype=np.int32)
 
-        shuffled_indexes = [self.dept_id_to_index[slot_id]
-                            for slot_id in self.cost_engine.layout.values()]
+        shuffled_indexes = [
+            self.dept_id_to_index[slot_id]
+            for slot_id in self.cost_engine.layout.values()
+        ]
         moveable_feature = np.zeros_like(self.moveable_features)
-        moveable_feature[: self.num_total_slot,
-                         :] = self.moveable_features[shuffled_indexes]
+        moveable_feature[: self.num_total_slot, :] = self.moveable_features[
+            shuffled_indexes
+        ]
 
-        x_norm_numerical = self.scaler.transform(
-            np.concatenate((self.fixable_features, moveable_feature,
-                           self.action_flag_feature), axis=1).astype(np.float32)
+        x_norm_numerical = np.asarray(
+            self.scaler.transform(
+                np.concatenate(
+                    (self.fixable_features, moveable_feature, self.action_flag_feature),
+                    axis=1,
+                )
+            ),
+            dtype=np.float32,
         )
 
         x_categorical[: self.num_total_slot] = np.array(
-            [i for i in self.index_to_dept_id.keys()]
+            list(self.index_to_dept_id.keys())
         )
         node_mask[: self.num_total_slot] = 1
 
@@ -265,10 +285,10 @@ class LayoutEnv(gym.Env):
             edge_index=edge_index,
             edge_weight=edge_weight,
             node_mask=node_mask,
-            edge_mask=edge_mask
+            edge_mask=edge_mask,
         )
 
-    def _get_info(self) -> Dict:
+    def _get_info(self) -> dict:
         return {
             "current_cost": self.current_cost,
             "initial_cost": self.initial_cost,
@@ -280,6 +300,8 @@ class LayoutEnv(gym.Env):
         if mode == "human":
             print(f"Step: {self.current_step}")
             print(
-                f"Current Total Travel Cost: {self.current_cost:.2f} (Initial: {self.initial_cost:.2f})")
+                f"Current Total Travel Cost: {self.current_cost:.2f} (Initial: {self.initial_cost:.2f})"
+            )
             print(
-                f"Improvement: {(self.initial_cost - self.current_cost) / (self.initial_cost + 1e-6) * 100:.2f}%")
+                f"Improvement: {(self.initial_cost - self.current_cost) / (self.initial_cost + 1e-6) * 100:.2f}%"
+            )

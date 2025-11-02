@@ -45,8 +45,27 @@ torchaudio = [
 ]
 
 [tool.ruff]
-line_length = 88
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "W",
+    "F",
+    "I",
+    "B",
+    "C4",
+    "UP",
+    "SIM",
+    "N",
+]
 
 ignore = [
-    "E501", # line too long
+    "E501", # Line too long
+    "N805"
 ]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
