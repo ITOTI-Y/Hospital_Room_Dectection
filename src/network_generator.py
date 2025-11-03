@@ -1,13 +1,14 @@
 from pathlib import Path
-from typing import Dict, Optional, Any
-from loguru import logger
-import networkx as nx
+from typing import Any
 
+import networkx as nx
+from loguru import logger
+
+from src.analysis.slots_exporter import export_slots_to_csv
+from src.analysis.travel_time import calculate_room_travel_times
 from src.config.config_loader import ConfigLoader
 from src.network.super_network import SuperNetwork
 from src.plotting.plotter import PlotlyPlotter
-from src.analysis.travel_time import calculate_room_travel_times
-from src.analysis.slots_exporter import export_slots_to_csv
 
 logger = logger.bind(module=__name__)
 
@@ -23,8 +24,8 @@ class NetworkGenerator:
         """
         self.config = config
         self.paths = config.paths
-        self.super_network: Optional[SuperNetwork] = None
-        self.super_graph: Optional[nx.Graph] = None
+        self.super_network: SuperNetwork | None = None
+        self.super_graph: nx.Graph | None = None
 
         logger.info("NetworkGenerator initialized.")
         logger.info(f"Results will be saved to: {self.paths.network_dir}")
@@ -32,9 +33,9 @@ class NetworkGenerator:
 
     def generate_network(
         self,
-        image_dir: Optional[Path] = None,
+        image_dir: Path | None = None,
         base_floor: int = 0,
-        num_processes: Optional[int] = None,
+        num_processes: int | None = None,
     ) -> bool:
         """
         Generates the multi-floor hospital network from floor annotation images.
@@ -189,7 +190,7 @@ class NetworkGenerator:
             logger.exception("Error occurred while exporting SLOT nodes")
             return False
 
-    def get_network_info(self) -> Dict[str, Any]:
+    def get_network_info(self) -> dict[str, Any]:
         """
         Gets basic information about the generated network.
 
@@ -210,7 +211,7 @@ class NetworkGenerator:
 
     def run_complete_generation(
         self,
-        image_dir: Optional[Path] = None,
+        image_dir: Path | None = None,
         visualization_filename: str = "hospital_network_3d.html",
         travel_times_filename: str = "hospital_travel_times.csv",
         slots_filename: str = "slots.csv",

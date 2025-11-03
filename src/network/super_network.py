@@ -8,23 +8,25 @@ graphs and handles the vertical connections between floors.
 
 import os
 from pathlib import Path
+from typing import Any
+
 import networkx as nx
 import numpy as np
 from joblib import Parallel, delayed
 from loguru import logger
-from typing import List, Dict, Tuple, Optional, Any
 from scipy.spatial import KDTree
 
 from src.config import graph_config
-from .network import Network
+
 from .floor_manager import FloorManager
+from .network import Network
 
 logger = logger.bind(module=__name__)
 
 
 def _process_floor_worker(
-    task_args: Tuple[Path, float, int, bool, int],
-) -> Tuple[Optional[nx.Graph], Optional[int], Optional[int], int, Path, float, int]:
+    task_args: tuple[Path, float, int, bool, int],
+) -> tuple[nx.Graph | None, int | None, int | None, int, Path, float, int]:
     """Processes a single floor's network generation in a worker process.
 
     Args:
@@ -67,7 +69,7 @@ def _process_floor_worker(
 class SuperNetwork:
     """Orchestrates the creation of a multi-floor network graph."""
 
-    def __init__(self, num_processes: Optional[int] = None, base_floor: int = 0):
+    def __init__(self, num_processes: int | None = None, base_floor: int = 0):
         """Initializes the SuperNetwork.
 
         Args:
@@ -78,8 +80,8 @@ class SuperNetwork:
         """
         self.s_config = graph_config.get_super_network_config()
         self.super_graph: nx.Graph = nx.Graph()
-        self.designated_ground_floor_number: Optional[int] = None
-        self.designated_ground_floor_z: Optional[float] = None
+        self.designated_ground_floor_number: int | None = None
+        self.designated_ground_floor_z: float | None = None
         self.num_processes: int = (
             num_processes if num_processes is not None else (os.cpu_count() or 1)
         )
@@ -92,13 +94,13 @@ class SuperNetwork:
         self.vertical_connection_tolerance: int = self.s_config.get(
             "default_vertical_connection_tolerance", 0
         )
-        self.floor_z_map: Dict[int, float] = {}
-        self.path_to_floor_map: Dict[Path, int] = {}
-        self.width: Optional[int] = None
-        self.height: Optional[int] = None
+        self.floor_z_map: dict[int, float] = {}
+        self.path_to_floor_map: dict[Path, int] = {}
+        self.width: int | None = None
+        self.height: int | None = None
 
     def _should_process_outside_nodes(
-        self, floor_num: int, designated_ground_floor_num: Optional[int]
+        self, floor_num: int, designated_ground_floor_num: int | None
     ) -> bool:
         """Determines if outside nodes should be processed for a specific floor."""
         generate_outside = self.s_config.get("generate_outside_nodes", False)
@@ -114,9 +116,9 @@ class SuperNetwork:
 
     def _prepare_floor_data(
         self,
-        image_file_paths: List[Path],
-        z_levels_override: Optional[List[float]] = None,
-    ) -> List[Tuple[Path, float, bool, int]]:
+        image_file_paths: list[Path],
+        z_levels_override: list[float] | None = None,
+    ) -> list[tuple[Path, float, bool, int]]:
         """Determines floor numbers and Z-levels for each image path."""
         self.path_to_floor_map, floor_to_path_map = (
             self.floor_manager.auto_assign_floors(image_file_paths)
@@ -126,7 +128,7 @@ class SuperNetwork:
             sorted_paths = sorted(
                 self.path_to_floor_map.keys(), key=lambda p: self.path_to_floor_map[p]
             )
-            path_to_z = {path: z for path, z in zip(sorted_paths, z_levels_override)}
+            path_to_z = dict(zip(sorted_paths, z_levels_override, strict=True))
             self.floor_z_map = {
                 self.path_to_floor_map[p]: z for p, z in path_to_z.items()
             }
@@ -170,15 +172,13 @@ class SuperNetwork:
 
     def run(
         self,
-        image_file_paths: List[Path],
-        z_levels_override: Optional[List[float]] = None,
-        force_vertical_tolerance: Optional[int] = None,
+        image_file_paths: list[Path],
+        z_levels_override: list[float] | None = None,
+        force_vertical_tolerance: int | None = None,
     ) -> nx.Graph:
         """Builds the multi-floor network."""
         self.super_graph.clear()
-        floor_run_data = self._prepare_floor_data(
-            [p for p in image_file_paths], z_levels_override
-        )
+        floor_run_data = self._prepare_floor_data(image_file_paths, z_levels_override)
         if not floor_run_data:
             logger.warning("No floor data to process.")
             return self.super_graph
@@ -193,7 +193,7 @@ class SuperNetwork:
         logger.info(
             f"Processing {len(tasks)} floors using {self.num_processes} processes..."
         )
-        results: List[Any] = []
+        results: list[Any] = []
         if self.num_processes > 1 and len(tasks) > 1:
             results = list(
                 Parallel(n_jobs=self.num_processes)(
@@ -277,7 +277,7 @@ class SuperNetwork:
             logger.info("No vertical nodes found to connect between floors.")
             return
 
-        nodes_by_name: Dict[str, List[Dict[str, Any]]] = {}
+        nodes_by_name: dict[str, list[dict[str, Any]]] = {}
         for node_id, data in all_vertical_nodes:
             data["id"] = node_id
             nodes_by_name.setdefault(data.get("name", "unknown"), []).append(data)
@@ -288,7 +288,7 @@ class SuperNetwork:
         connected_pairs_count = 0
         z_diff_threshold = self.s_config.get("z_level_diff_threshold", 1.0)
 
-        for node_name, nodes in nodes_by_name.items():
+        for _, nodes in nodes_by_name.items():
             if len(nodes) < 2:
                 continue
 
@@ -302,18 +302,21 @@ class SuperNetwork:
 
             for i, j in pairs:
                 node_i, node_j = nodes[i], nodes[j]
-                if abs(node_i["pos_z"] - node_j["pos_z"]) > z_diff_threshold:
-                    if not self.super_graph.has_edge(node_i["id"], node_j["id"]):
-                        time_per_floor = node_i.get(
-                            "time_per_floor", 10.0
-                        )  # Default to 10s if not specified
-                        self.super_graph.add_edge(
-                            node_i["id"],
-                            node_j["id"],
-                            type="vertical_connection",
-                            weight=time_per_floor,
-                        )
-                        connected_pairs_count += 1
+                if abs(
+                    node_i["pos_z"] - node_j["pos_z"]
+                ) > z_diff_threshold and not self.super_graph.has_edge(
+                    node_i["id"], node_j["id"]
+                ):
+                    time_per_floor = node_i.get(
+                        "time_per_floor", 10.0
+                    )
+                    self.super_graph.add_edge(
+                        node_i["id"],
+                        node_j["id"],
+                        type="vertical_connection",
+                        weight=time_per_floor,
+                    )
+                    connected_pairs_count += 1
 
         logger.info(
             f"Inter-floor connections made for {connected_pairs_count} pairs of vertical nodes."

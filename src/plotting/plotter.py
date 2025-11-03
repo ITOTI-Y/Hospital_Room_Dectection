@@ -4,11 +4,12 @@ Defines plotter classes for visualizing network graphs using Matplotlib and Plot
 
 import abc
 import pathlib
-from loguru import logger
+from typing import Any
+
 import networkx as nx
 import numpy as np
 import plotly.graph_objects as go
-from typing import Dict, Any, List, Optional
+from loguru import logger
 
 from src.config import graph_config
 
@@ -29,7 +30,7 @@ class BasePlotter(abc.ABC):
         self.super_network_config = graph_config.get_super_network_config()
 
     def _validate_node_coordinates(
-        self, node_data: Dict[str, Any], node_id: Any
+        self, node_data: dict[str, Any], node_id: Any
     ) -> bool:
         """
         Validates node coordinates from the graph attributes.
@@ -44,13 +45,13 @@ class BasePlotter(abc.ABC):
         except (TypeError, AttributeError):
             return False
 
-    def _get_edge_style_config(self) -> Dict[str, Dict[str, Any]]:
+    def _get_edge_style_config(self) -> dict[str, dict[str, Any]]:
         """
         Gets edge style configuration from the plotter config.
         """
         return self.plotter_config.get("edge_styles", {})
 
-    def _classify_edge_type(self, start_node: Dict, end_node: Dict) -> str:
+    def _classify_edge_type(self, start_node: dict, end_node: dict) -> str:
         """
         Classifies the edge type based on node properties.
         """
@@ -81,14 +82,14 @@ class BasePlotter(abc.ABC):
     def plot(
         self,
         graph: nx.Graph,
-        output_path: Optional[pathlib.Path] = None,
+        output_path: pathlib.Path | None = None,
         title: str = "Network Graph",
         # For Plotly layout, original image width
-        graph_width: Optional[int] = None,
+        graph_width: int | None = None,
         # For Plotly layout, original image height
-        graph_height: Optional[int] = None,
+        graph_height: int | None = None,
         # For SuperNetwork floor labels
-        floor_z_map: Optional[Dict[int, float]] = None,
+        floor_z_map: dict[int, float] | None = None,
     ):
         """
         Abstract method to plot the graph.
@@ -111,12 +112,12 @@ class PlotlyPlotter(BasePlotter):
 
     def _create_floor_selection_controls(
         self,
-        all_z_levels: List[float],
+        all_z_levels: list[float],
         min_z: float,
         max_z: float,
-        floor_z_map_for_labels: Optional[Dict[int, float]] = None,
+        floor_z_map_for_labels: dict[int, float] | None = None,
         base_floor_for_labels: int = 0,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Creates slider controls for selecting and viewing individual floors or all floors.
         Args:
@@ -130,11 +131,11 @@ class PlotlyPlotter(BasePlotter):
             return {"sliders": []}
 
         # Create floor labels. Try to map Z-levels back to "human-readable" floor numbers.
-        z_to_floor_label_map: Dict[float, str] = {}
+        z_to_floor_label_map: dict[float, str] = {}
         if floor_z_map_for_labels:
             # Invert floor_z_map_for_labels to map z -> floor_num for easier lookup
             # Handle potential multiple floors at the same Z (unlikely with good input)
-            z_to_floor_num: Dict[float, List[int]] = {}
+            z_to_floor_num: dict[float, list[int]] = {}
             for fn, z_val in floor_z_map_for_labels.items():
                 z_to_floor_num.setdefault(z_val, []).append(fn)
 
@@ -158,10 +159,10 @@ class PlotlyPlotter(BasePlotter):
         for z_level in all_z_levels:
             label = z_to_floor_label_map.get(z_level, f"Z={z_level:.1f}")
             slider_steps.append(
-                dict(
-                    label=label,
-                    method="relayout",
-                    args=[
+                {
+                    "label": label,
+                    "method": "relayout",
+                    "args": [
                         {
                             "scene.zaxis.range": [
                                 z_level
@@ -173,15 +174,15 @@ class PlotlyPlotter(BasePlotter):
                             ]
                         }
                     ],  # View single floor
-                )
+                }
             )
 
         # Add a step to show all floors
         slider_steps.append(
-            dict(
-                label="All Floors",
-                method="relayout",
-                args=[
+            {
+                "label": "All Floors",
+                "method": "relayout",
+                "args": [
                     {
                         "scene.zaxis.range": [
                             min_z
@@ -191,33 +192,33 @@ class PlotlyPlotter(BasePlotter):
                         ]
                     }
                 ],  # View all
-            )
+            }
         )
 
         sliders = [
-            dict(
-                active=len(all_z_levels),  # Default to "All Floors"
-                currentvalue={"prefix": "Current Display: "},
-                pad={"t": 50},
-                steps=slider_steps,
-                name="Floor Selection",
-            )
+            {
+                "active": len(all_z_levels),  # Default to "All Floors"
+                "currentvalue": {"prefix": "Current Display: "},
+                "pad": {"t": 50},
+                "steps": slider_steps,
+                "name": "Floor Selection",
+            }
         ]
         return {"sliders": sliders}
 
     def plot(
         self,
         graph: nx.Graph,
-        output_path: Optional[str] = None,
+        output_path: str | None = None,
         title: str = "3D Network Graph",
-        graph_width: Optional[int] = None,
-        floor_z_map: Optional[Dict[int, float]] = None,
+        graph_width: int | None = None,
+        floor_z_map: dict[int, float] | None = None,
     ):
         if not graph.nodes:
             logger.warning("PlotlyPlotter: Graph has no nodes to plot.")
             return
 
-        nodes_by_name: Dict[str, Dict[str, list]] = {}
+        nodes_by_name: dict[str, dict[str, list]] = {}
         all_z_coords = [data.get("pos_z", 0) for _, data in graph.nodes(data=True)]
 
         # Group nodes by their 'name' for creating traces
@@ -251,7 +252,7 @@ class PlotlyPlotter(BasePlotter):
 
             hover_label = f"ID: {node_id}<br>Name: {name}<br>CName: {data.get('cname', 'N/A')}<br>Code: {data.get('code', 'N/A')}<br>Pos: ({x:.1f}, {y:.1f}, {z:.1f})"
             if name == "Door":
-                door_type = data.get('door_type', 'N/A')
+                door_type = data.get("door_type", "N/A")
                 hover_label += f"<br>Door Type: {door_type}"
             nodes_by_name[name]["hover_text"].append(hover_label)
 
@@ -270,11 +271,11 @@ class PlotlyPlotter(BasePlotter):
                     y=data["y"],
                     z=data["z"],
                     mode="markers",
-                    marker=dict(
-                        size=data["sizes"],
-                        color=self._get_node_color(name),
-                        opacity=self.plotter_config.get("node_opacity", 0.8),
-                    ),
+                    marker={
+                        "size": data["sizes"],
+                        "color": self._get_node_color(name),
+                        "opacity": self.plotter_config.get("node_opacity", 0.8),
+                    },
                     text=data["hover_text"],
                     hoverinfo="text",
                     name=name,
@@ -333,32 +334,38 @@ class PlotlyPlotter(BasePlotter):
             title=title,
             showlegend=True,
             hovermode="closest",
-            margin=dict(b=20, l=5, r=5, t=40),
-            scene=dict(
-                xaxis=dict(
-                    title="X",
-                ),
-                yaxis=dict(title="Y"),
-                zaxis=dict(title="Z (Floor)"),
-                aspectmode="manual",
-                aspectratio=dict(
-                    x=aspect_ratio["x"], y=aspect_ratio["y"], z=aspect_ratio["z"]
-                ),
-                camera=dict(
-                    eye=dict(x=camera_eye["x"], y=camera_eye["y"], z=camera_eye["z"])
-                ),
-            ),
-            legend=dict(
-                orientation="v",
-                x=0.02,
-                y=1.0,
-                xanchor="left",
-                yanchor="top",
-                bgcolor="rgba(255, 255, 255, 0.7)",
-            ),
+            margin={"b": 20, "l": 5, "r": 5, "t": 40},
+            scene={
+                "xaxis": {
+                    "title": "X",
+                },
+                "yaxis": {"title": "Y"},
+                "zaxis": {"title": "Z (Floor)"},
+                "aspectmode": "manual",
+                "aspectratio": {
+                    "x": aspect_ratio["x"],
+                    "y": aspect_ratio["y"],
+                    "z": aspect_ratio["z"],
+                },
+                "camera": {
+                    "eye": {
+                        "x": camera_eye["x"],
+                        "y": camera_eye["y"],
+                        "z": camera_eye["z"],
+                    }
+                },
+            },
+            legend={
+                "orientation": "v",
+                "x": 0.02,
+                "y": 1.0,
+                "xanchor": "left",
+                "yanchor": "top",
+                "bgcolor": "rgba(255, 255, 255, 0.7)",
+            },
         )
 
-        unique_z = sorted(list(set(z for z in all_z_coords if z is not None)))
+        unique_z = sorted({z for z in all_z_coords if z is not None})
         if len(unique_z) > 1:
             min_z, max_z = min(unique_z), max(unique_z)
             layout.update(

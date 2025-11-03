@@ -1,12 +1,15 @@
 """Defines strategies for creating different types of nodes in the network."""
 
 from __future__ import annotations
+
 import abc
+from collections.abc import Iterable
+from typing import TYPE_CHECKING, Any, cast
+
 import cv2
 import numpy as np
 from loguru import logger
 from scipy.spatial import KDTree
-from typing import Dict, Tuple, Any, Optional, Iterable, TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from .network import Network
@@ -19,7 +22,7 @@ logger = logger.bind(module=__name__)
 class BaseNodeCreator(abc.ABC):
     """Abstract base class for node creators."""
 
-    def __init__(self, network: "Network"):
+    def __init__(self, network: Network):
         self.network = network
         self.image_processor = network.image_processor
         self.graph_manager = network.graph_manager
@@ -28,7 +31,7 @@ class BaseNodeCreator(abc.ABC):
         self.special_ids = graph_config.get_special_ids()
         self.super_network_config = graph_config.get_super_network_config()
 
-    def _get_node_properties(self, name: str) -> Dict[str, Any]:
+    def _get_node_properties(self, name: str) -> dict[str, Any]:
         return self.node_defs.get(name, {})
 
     def _create_mask_for_node(
@@ -37,8 +40,8 @@ class BaseNodeCreator(abc.ABC):
         name: str,
         apply_morphology: bool = True,
         morphology_operation: str = "close_open",
-        morphology_kernel_size: Optional[Tuple[int, int]] = None,
-    ) -> Optional[np.ndarray]:
+        morphology_kernel_size: tuple[int, int] | None = None,
+    ) -> np.ndarray | None:
         node_props = self._get_node_properties(name)
         color_rgb = node_props.get("rgb")
         if not color_rgb:
@@ -51,10 +54,13 @@ class BaseNodeCreator(abc.ABC):
         mask = mask.astype(np.uint8) * 255
 
         if apply_morphology:
-            kernel_size: Tuple[int, int] = cast(Tuple[int, int], self.geometry_config.get("morphology_kernel_size", (5, 5)))
+            kernel_size: tuple[int, int] = cast(
+                tuple[int, int],
+                self.geometry_config.get("morphology_kernel_size", (5, 5)),
+            )
             if not isinstance(kernel_size, Iterable):
                 kernel_size = (int(kernel_size), int(kernel_size))
-            kernel_size: Tuple[int, int] = morphology_kernel_size or kernel_size
+            kernel_size: tuple[int, int] = morphology_kernel_size or kernel_size
             mask = self.image_processor.apply_morphology(
                 mask, operation=morphology_operation, kernel_size=kernel_size
             )
@@ -210,7 +216,7 @@ class MeshBasedNodeCreator(BaseNodeCreator):
 
             valid_x, valid_y = grid_x[valid_indices], grid_y[valid_indices]
             node_ids, positions = [], []
-            for vx, vy in zip(valid_x, valid_y):
+            for vx, vy in zip(valid_x, valid_y, strict=True):
                 node_id = self.graph_manager.generate_node_id()
                 self.graph_manager.add_node(
                     node_id,
@@ -346,15 +352,11 @@ class ConnectionNodeCreator(BaseNodeCreator):
                     continue
 
                 component_mask = (labels == i).astype(np.uint8) * 255
-                dilated_mask = cv2.dilate(
-                    component_mask, dilation_kernel, iterations=1
-                )
+                dilated_mask = cv2.dilate(component_mask, dilation_kernel, iterations=1)
 
                 # Check for collisions
                 collides_outdoor = np.any(cv2.bitwise_and(dilated_mask, outdoor_mask))
-                collides_corridor = np.any(
-                    cv2.bitwise_and(dilated_mask, corridor_mask)
-                )
+                collides_corridor = np.any(cv2.bitwise_and(dilated_mask, corridor_mask))
                 collides_other_connector = np.any(
                     cv2.bitwise_and(dilated_mask, other_connector_mask)
                 )

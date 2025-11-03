@@ -7,12 +7,12 @@ them as `pathlib.Path` objects. It supports variable interpolation to
 avoid path repetition.
 """
 
-import yaml
 from pathlib import Path
-from typing import Dict, Optional
 
-_paths_cache: Optional[Dict[str, Path]] = None
-_project_root: Optional[Path] = None
+import yaml
+
+_paths_cache: dict[str, Path] | None = None
+_project_root: Path | None = None
 
 
 def get_project_root() -> Path:
@@ -73,7 +73,7 @@ def _load_paths():
     if not config_path.exists():
         raise FileNotFoundError(f"Paths configuration file not found at {config_path}")
 
-    with open(config_path, "r", encoding="utf-8") as f:
+    with open(config_path, encoding="utf-8") as f:
         raw_paths = yaml.safe_load(f)
 
     # Simple interpolation for variables like {data_dir}

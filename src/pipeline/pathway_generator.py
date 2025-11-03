@@ -1,11 +1,12 @@
 import random
-from typing import Dict, Any, List, Tuple
+from typing import Any
+
 from loguru import logger
 
 from src.config.config_loader import ConfigLoader
 
-class PathwayGenerator:
 
+class PathwayGenerator:
     def __init__(self, config: ConfigLoader):
         self.process_id = 1
         self.paths = config.paths
@@ -16,9 +17,8 @@ class PathwayGenerator:
         self.logger = logger.bind(module=self.__class__.__name__)
         self.logger.info("PathwayGenerator initialized")
 
-
-    def generate_all(self) -> Dict[str, Dict[str, Any]]:
-        pathways: Dict[str, Dict[str, Any]] = {}
+    def generate_all(self) -> dict[str, dict[str, Any]]:
+        pathways: dict[str, dict[str, Any]] = {}
         count = 0
         while count < self.pathways_number:
             full_sequence_str, final_pathway = self.generate()
@@ -28,13 +28,12 @@ class PathwayGenerator:
             count += 1
         return pathways
 
-
-    def generate(self) -> Tuple[str, Dict[str, Any]]:
+    def generate(self) -> tuple[str, dict[str, Any]]:
         rule_weights = [rule.base_weight for rule in self.meta_rules]
         chosen_rule = random.choices(self.meta_rules, weights=rule_weights, k=1)[0]
 
-        generated_sequence: List[str] = []
-        context: Dict[str, str] = {}
+        generated_sequence: list[str] = []
+        context: dict[str, str] = {}
 
         for step in chosen_rule.structure:
             self._parse_step(step, context, generated_sequence)
@@ -61,7 +60,9 @@ class PathwayGenerator:
 
         return full_sequence_str, final_pathway
 
-    def _parse_step(self, step: Any, context: Dict[str, Any], generated_sequence: List[str]):
+    def _parse_step(
+        self, step: Any, context: dict[str, Any], generated_sequence: list[str]
+    ):
         step_type = step.type
 
         if step_type == "primary_department":

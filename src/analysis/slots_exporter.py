@@ -1,10 +1,11 @@
 """Exports service time information for SLOT nodes to a CSV file."""
 
-import pandas as pd
-import networkx as nx
 import logging
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import Any
+
+import networkx as nx
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ def export_slots_to_csv(
         logger.warning("Graph is empty. Cannot export slots.")
         return
 
-    slot_nodes: List[Dict[str, Any]] = []
+    slot_nodes: list[dict[str, Any]] = []
     for node_id, data in graph.nodes(data=True):
         if data.get("category") == "SLOT":
             node_data = data.copy()
@@ -43,5 +44,5 @@ def export_slots_to_csv(
         # The columns will be dynamically determined by the keys in the node data
         df.to_csv(output_path, index=False, encoding="utf-8")
         logger.info(f"Successfully exported {len(df)} slots to {output_path}")
-    except IOError as e:
+    except OSError as e:
         logger.error(f"Failed to write slots CSV to {output_path}: {e}")
