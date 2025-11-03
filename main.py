@@ -1,17 +1,19 @@
-from pathlib import Path
-import typer
 from datetime import datetime
-from typing import Optional
-from typing_extensions import Annotated
+from pathlib import Path
+from typing import Annotated
+
+import typer
 from loguru import logger
 
+from src.config import config_loader
 from src.network_generator import NetworkGenerator
 from src.optimize_manager import OptimizeManager
 from src.utils.logger import setup_logger
-from src.config import config_loader
 
 config = config_loader.ConfigLoader()
-setup_logger(log_file=Path(config.paths.log_dir) / f"{datetime.now():%Y-%m-%d_%H-%M-%S}.log")
+setup_logger(
+    log_file=Path(config.paths.log_dir) / f"{datetime.now():%Y-%m-%d_%H-%M-%S}.log"
+)
 
 logger = logger.bind(module=__name__)
 app = typer.Typer()
@@ -20,7 +22,7 @@ app = typer.Typer()
 @app.command()
 def network(
     image_dir: Annotated[
-        Optional[Path],
+        Path | None,
         typer.Option(
             "--image-dir",
             "-i",
@@ -33,16 +35,21 @@ def network(
         ),
     ] = None,
     vis_output: Annotated[
-        str, typer.Option("--vis-output", "-v", help="Network visualization output filename")
+        str,
+        typer.Option(
+            "--vis-output", "-v", help="Network visualization output filename"
+        ),
     ] = "hospital_network_3d.html",
     travel_times_output: Annotated[
-        str, typer.Option("--travel-times-output", "-t", help="Travel times matrix output filename")
+        str,
+        typer.Option(
+            "--travel-times-output", "-t", help="Travel times matrix output filename"
+        ),
     ] = "hospital_travel_times.csv",
     slots_output: Annotated[
         str, typer.Option("--slots-output", "-s", help="SLOT nodes output filename")
     ] = "slots.csv",
 ):
-
     generator = NetworkGenerator(config)
 
     try:
@@ -59,17 +66,19 @@ def network(
             logger.error("System execution failed")
             raise typer.Exit(code=1)
 
-    except KeyboardInterrupt:
+    except KeyboardInterrupt as e:
         logger.warning("Interrupted by user")
-        raise typer.Exit(code=1)
-    except Exception:
+        raise typer.Exit(code=1) from e
+    except Exception as e:
         logger.exception("System execution error")
-        raise typer.Exit(code=1)
+        raise typer.Exit(code=1) from e
+
 
 @app.command()
 def train():
     optimize_manager = OptimizeManager(config)
     optimize_manager.run()
+
 
 if __name__ == "__main__":
     app()

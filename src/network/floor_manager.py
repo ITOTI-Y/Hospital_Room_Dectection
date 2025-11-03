@@ -2,9 +2,9 @@
 Manages floor detection from filenames and Z-level calculations for SuperNetwork.
 """
 
-import re
 import pathlib
-from typing import List, Dict, Tuple, Optional
+import re
+
 from loguru import logger
 
 logger = logger.bind(module=__name__)
@@ -32,13 +32,15 @@ class FloorManager:
             r"([Bb])-?(\d+)": lambda m: -int(m.group(2)),
             # -1F, -2f -> negative
             r"-(\d+)[Ff]": lambda m: -int(m.group(1)),
-            r"([Ll])(\d+)": lambda m: int(m.group(2)) - 1,  # L1, l2 -> positive, 1-based to 0-based
-            r"(\d+)[Ff]": lambda m: int(m.group(1)) - 1,  # 1F, 2f -> positive, 1-based to 0-based
+            r"([Ll])(\d+)": lambda m: int(m.group(2))
+            - 1,  # L1, l2 -> positive, 1-based to 0-based
+            r"(\d+)[Ff]": lambda m: int(m.group(1))
+            - 1,  # 1F, 2f -> positive, 1-based to 0-based
             # Add more general patterns if needed, like just a number if no prefix/suffix
             # r'_(\d+)_': lambda m: int(m.group(1)) # Example: floor_1_plan.png
         }
 
-    def detect_floor_from_filename(self, file_path: pathlib.Path) -> Optional[int]:
+    def detect_floor_from_filename(self, file_path: pathlib.Path) -> int | None:
         """
         Detects the floor number from a filename.
 
@@ -59,8 +61,8 @@ class FloorManager:
         return None
 
     def auto_assign_floors(
-        self, image_paths: List[pathlib.Path]
-    ) -> Tuple[Dict[pathlib.Path, int], Dict[int, pathlib.Path]]:
+        self, image_paths: list[pathlib.Path]
+    ) -> tuple[dict[pathlib.Path, int], dict[int, pathlib.Path]]:
         """
         Assigns floor numbers to a list of image paths.
 
@@ -76,9 +78,9 @@ class FloorManager:
                 - floor_to_path_map (Dict[int, pathlib.Path]): Maps floor number to image path.
                                                                (Assumes one image per floor for this map)
         """
-        path_to_floor_map: Dict[pathlib.Path, int] = {}
-        detected_floors: Dict[pathlib.Path, int] = {}
-        undetected_paths: List[pathlib.Path] = []
+        path_to_floor_map: dict[pathlib.Path, int] = {}
+        detected_floors: dict[pathlib.Path, int] = {}
+        undetected_paths: list[pathlib.Path] = []
 
         for p_path in image_paths:
             floor = self.detect_floor_from_filename(p_path)
@@ -120,7 +122,7 @@ class FloorManager:
                     current_assigned_floor += 1
                 path_to_floor_map[p_path] = current_assigned_floor
 
-        floor_to_path_map: Dict[int, pathlib.Path] = {
+        floor_to_path_map: dict[int, pathlib.Path] = {
             v: k for k, v in path_to_floor_map.items()
         }
 
@@ -133,8 +135,8 @@ class FloorManager:
         return path_to_floor_map, floor_to_path_map
 
     def calculate_z_levels(
-        self, floor_to_path_map: Dict[int, pathlib.Path]
-    ) -> Dict[int, float]:
+        self, floor_to_path_map: dict[int, pathlib.Path]
+    ) -> dict[int, float]:
         """
         Calculates the Z-coordinate for each floor.
 
@@ -154,7 +156,7 @@ class FloorManager:
         if 0 not in sorted_floor_numbers:
             revision_num = 1
 
-        z_levels: Dict[int, float] = {
+        z_levels: dict[int, float] = {
             floor_num: float(
                 (floor_num - revision_num) * self.default_floor_height
                 if floor_num > 0

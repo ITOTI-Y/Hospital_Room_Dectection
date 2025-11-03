@@ -2,11 +2,13 @@
 Calculates travel times between specified room-like nodes in the graph.
 """
 
-import pathlib
-import networkx as nx
 import logging
+import pathlib
+from collections.abc import Hashable
+from typing import Any
+
+import networkx as nx
 import pandas as pd
-from typing import Dict, Hashable, Any
 
 logger = logging.getLogger(__name__)
 
@@ -15,7 +17,7 @@ def calculate_room_travel_times(
     graph: nx.Graph,
     output_dir: pathlib.Path,
     output_filename: str = "hospital_travel_times.csv",
-) -> Dict[Hashable, Any]:
+) -> dict[Hashable, Any]:
     """
     Calculates shortest travel times between all pairs of service locations.
 
@@ -81,7 +83,7 @@ def calculate_room_travel_times(
     try:
         df.to_csv(csv_file_path, float_format="%.2f")
         logger.info(f"Travel times matrix saved to {csv_file_path}")
-    except IOError as e:
+    except OSError as e:
         logger.error(f"Failed to write travel times CSV to {csv_file_path}: {e}")
 
     return df.to_dict()

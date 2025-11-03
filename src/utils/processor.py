@@ -1,10 +1,10 @@
 from pathlib import Path
+
 import cv2
-from loguru import logger
 import numpy as np
+from loguru import logger
 from PIL import Image
 from scipy.spatial import KDTree
-from typing import Tuple, Optional
 
 from src.config import graph_config, path_manager
 
@@ -21,9 +21,9 @@ class ImageProcessor:
         """
         Initializes the ImageProcessor.
         """
-        self._current_image_data: Optional[np.ndarray] = None
-        self._image_height: Optional[int] = None
-        self._image_width: Optional[int] = None
+        self._current_image_data: np.ndarray | None = None
+        self._image_height: int | None = None
+        self._image_width: int | None = None
         # Caching config lookups
         self.node_defs = graph_config.get_node_definitions()
         self.rgb_map = {
@@ -51,10 +51,10 @@ class ImageProcessor:
         """
         try:
             img = Image.open(image_path).convert("RGB")
-        except FileNotFoundError:
-            raise FileNotFoundError(f"Image file not found: {image_path}")
-        except IOError:
-            raise IOError(f"Could not open or read image file: {image_path}")
+        except FileNotFoundError as e:
+            raise FileNotFoundError(f"Image file not found: {image_path}") from e
+        except OSError as e:
+            raise OSError(f"Could not open or read image file: {image_path}") from e
 
         self._current_image_data = np.asarray(img, dtype=np.uint8)
         if self._current_image_data is None:
@@ -63,7 +63,7 @@ class ImageProcessor:
         self._image_height, self._image_width = self._current_image_data.shape[:2]
         return self._current_image_data.copy()
 
-    def get_image_dimensions(self) -> Tuple[int, int]:
+    def get_image_dimensions(self) -> tuple[int, int]:
         """
         Returns the dimensions of the last loaded image.
 
@@ -106,7 +106,7 @@ class ImageProcessor:
         self,
         mask: np.ndarray,
         operation: str = "close_open",
-        kernel_size: Optional[Tuple[int, int]] = None,
+        kernel_size: tuple[int, int] | None = None,
     ) -> np.ndarray:
         """
         Applies morphological operations to a binary mask.
