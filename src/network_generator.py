@@ -1,16 +1,15 @@
 from pathlib import Path
 from typing import Dict, Optional, Any
+from loguru import logger
 import networkx as nx
 
-from src.utils.logger import setup_logger
 from src.config.config_loader import ConfigLoader
 from src.network.super_network import SuperNetwork
 from src.plotting.plotter import PlotlyPlotter
 from src.analysis.travel_time import calculate_room_travel_times
 from src.analysis.slots_exporter import export_slots_to_csv
 
-logger = setup_logger(__name__)
-
+logger = logger.bind(module=__name__)
 
 class NetworkGenerator:
     """
@@ -84,8 +83,8 @@ class NetworkGenerator:
 
             return True
 
-        except Exception as e:
-            logger.error(f"Error occurred while generating network: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Error occurred while generating network")
             return False
 
     def visualize_network(
@@ -121,8 +120,8 @@ class NetworkGenerator:
             logger.info(f"Network visualization saved to: {plot_output_path}")
             return True
 
-        except Exception as e:
-            logger.error(f"Error occurred while visualizing network: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Error occurred while visualizing network")
             return False
 
     def calculate_travel_times(
@@ -156,8 +155,8 @@ class NetworkGenerator:
             logger.info(f"Travel times matrix saved to: {travel_times_path}")
             return True
 
-        except Exception as e:
-            logger.error(f"Error occurred while calculating travel times: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Error occurred while calculating travel times")
             return False
 
     def export_slots(self, output_filename: str = "slots.csv") -> bool:
@@ -186,8 +185,8 @@ class NetworkGenerator:
             slots_path = network_path / output_filename
             logger.info(f"SLOT Nodes exported to: {slots_path}")
             return True
-        except Exception as e:
-            logger.error(f"Error occurred while exporting SLOT nodes: {e}", exc_info=True)
+        except Exception:
+            logger.exception("Error occurred while exporting SLOT nodes")
             return False
 
     def get_network_info(self) -> Dict[str, Any]:

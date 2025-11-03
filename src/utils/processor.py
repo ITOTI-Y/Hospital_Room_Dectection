@@ -1,8 +1,6 @@
-"""Handles image loading, preprocessing, and basic morphological operations."""
-
 from pathlib import Path
 import cv2
-from src.utils.logger import setup_logger
+from loguru import logger
 import numpy as np
 from PIL import Image
 from scipy.spatial import KDTree
@@ -10,7 +8,7 @@ from typing import Tuple, Optional
 
 from src.config import graph_config, path_manager
 
-logger = setup_logger(__name__)
+logger = logger.bind(module=__name__)
 
 
 class ImageProcessor:

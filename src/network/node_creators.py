@@ -4,16 +4,16 @@ from __future__ import annotations
 import abc
 import cv2
 import numpy as np
-from src.utils.logger import setup_logger
+from loguru import logger
 from scipy.spatial import KDTree
-from typing import Dict, Tuple, Any, Optional, Iterable, TYPE_CHECKING
+from typing import Dict, Tuple, Any, Optional, Iterable, TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from .network import Network
 
 from src.config import graph_config
 
-logger = setup_logger(__name__)
+logger = logger.bind(module=__name__)
 
 
 class BaseNodeCreator(abc.ABC):
@@ -51,10 +51,10 @@ class BaseNodeCreator(abc.ABC):
         mask = mask.astype(np.uint8) * 255
 
         if apply_morphology:
-            kernel_size = self.geometry_config.get("morphology_kernel_size", (5, 5))
+            kernel_size: Tuple[int, int] = cast(Tuple[int, int], self.geometry_config.get("morphology_kernel_size", (5, 5)))
             if not isinstance(kernel_size, Iterable):
                 kernel_size = (int(kernel_size), int(kernel_size))
-            kernel_size = morphology_kernel_size or kernel_size
+            kernel_size: Tuple[int, int] = morphology_kernel_size or kernel_size
             mask = self.image_processor.apply_morphology(
                 mask, operation=morphology_operation, kernel_size=kernel_size
             )

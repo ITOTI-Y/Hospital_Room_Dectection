@@ -7,15 +7,16 @@ It also builds convenient reverse mappings and helper functions to query
 node definitions by various attributes like category or RGB color.
 """
 
-import yaml
 from pathlib import Path
-from typing import Dict, Any, List, Tuple, Optional
+from typing import Any
 
-_config_cache: Optional[Dict[str, Any]] = None
-_rgb_to_name_map_cache: Optional[Dict[Tuple[int, int, int], str]] = None
+import yaml
+
+_config_cache: dict[str, Any] | None = None
+_rgb_to_name_map_cache: dict[tuple[int, int, int], str] | None = None
 
 
-def get_config() -> Dict[str, Any]:
+def get_config() -> dict[str, Any] | None:
     """
     Loads graph configuration from YAML file and caches it.
 
@@ -38,7 +39,7 @@ def get_config() -> Dict[str, Any]:
         if not config_path.exists():
             raise FileNotFoundError(f"Configuration file not found at: {config_path}")
 
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             try:
                 _config_cache = yaml.safe_load(f)
             except yaml.YAMLError as e:
@@ -47,7 +48,7 @@ def get_config() -> Dict[str, Any]:
     return _config_cache
 
 
-def get_node_definitions() -> Dict[str, Dict[str, Any]]:
+def get_node_definitions() -> dict[str, dict[str, Any]]:
     """
     Retrieves the node definitions section from the configuration.
 
@@ -56,10 +57,12 @@ def get_node_definitions() -> Dict[str, Dict[str, Any]]:
         values are dictionaries of their properties.
     """
     config = get_config()
+    if config is None:
+        return {}
     return config.get("node_definitions", {})
 
 
-def get_rgb_to_name_map() -> Dict[Tuple[int, int, int], str]:
+def get_rgb_to_name_map() -> dict[tuple[int, int, int], str]:
     """
     Creates and caches a mapping from RGB color tuples to node names.
 
@@ -80,7 +83,7 @@ def get_rgb_to_name_map() -> Dict[Tuple[int, int, int], str]:
     return _rgb_to_name_map_cache
 
 
-def get_nodes_by_category(category: str) -> List[str]:
+def get_nodes_by_category(category: str) -> list[str]:
     """
     Finds all node names belonging to a specific category.
 
@@ -98,7 +101,7 @@ def get_nodes_by_category(category: str) -> List[str]:
     ]
 
 
-def get_geometry_config() -> Dict[str, float]:
+def get_geometry_config() -> dict[str, float]:
     """
     Retrieves the geometry settings from the configuration.
 
@@ -106,10 +109,12 @@ def get_geometry_config() -> Dict[str, float]:
         A dictionary with geometry-related parameters like scale and speed.
     """
     config = get_config()
+    if config is None:
+        return {}
     return config.get("geometry", {})
 
 
-def get_super_network_config() -> Dict[str, Any]:
+def get_super_network_config() -> dict[str, Any]:
     """
     Retrieves the super_network settings from the configuration.
 
@@ -117,10 +122,12 @@ def get_super_network_config() -> Dict[str, Any]:
         A dictionary with super_network-related parameters.
     """
     config = get_config()
+    if config is None:
+        return {}
     return config.get("super_network", {})
 
 
-def get_special_ids() -> Dict[str, int]:
+def get_special_ids() -> dict[str, int]:
     """
     Retrieves the special ID mappings from the configuration.
 
@@ -128,13 +135,15 @@ def get_special_ids() -> Dict[str, int]:
         A dictionary mapping special area names to their integer IDs.
     """
     config = get_config()
+    if config is None:
+        return {}
     return config.get("special_ids", {})
 
 
-_plotter_config_cache: Optional[Dict[str, Any]] = None
+_plotter_config_cache: dict[str, Any] = {}
 
 
-def get_plotter_config() -> Dict[str, Any]:
+def get_plotter_config() -> dict[str, Any]:
     """
     Loads plotter configuration from plotter.yaml and caches it.
 
@@ -142,14 +151,14 @@ def get_plotter_config() -> Dict[str, Any]:
         A dictionary containing the plotter configuration.
     """
     global _plotter_config_cache
-    if _plotter_config_cache is None:
+    if not _plotter_config_cache:
         config_path = Path(__file__).parent.parent.parent / "configs" / "plotter.yaml"
         if not config_path.exists():
             raise FileNotFoundError(
                 f"Plotter configuration file not found at: {config_path}"
             )
 
-        with open(config_path, "r", encoding="utf-8") as f:
+        with open(config_path, encoding="utf-8") as f:
             try:
                 _plotter_config_cache = yaml.safe_load(f)
             except yaml.YAMLError as e:

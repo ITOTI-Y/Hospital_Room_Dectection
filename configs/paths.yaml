@@ -15,3 +15,7 @@ travel_times_csv: "${network_dir}/hospital_travel_times.csv"
 slots_csv: "${network_dir}/slots.csv"
 vis_html: "${network_dir}/hospital_network_3d.html"
 graph_pkl: "${network_dir}/hospital_network.pkl"
+
+# Training logs
+log_dir: "${results_dir}/logs"
+tensorboard_dir: "${results_dir}/tensorboard"

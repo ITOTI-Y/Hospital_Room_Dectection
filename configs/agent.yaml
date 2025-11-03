@@ -1,2 +1,54 @@
-learning_rate: 0.0003
-gamma: 0.99
+# Global parameters
+num_train_envs: 1
+num_test_envs: 1
+
+max_departments: 100
+max_steps: 100
+
+lr: 1e-4
+
+
+# TianShou PPO parameters
+buffer_size: 20000
+max_epoch: 100
+step_per_epoch: 32000
+repeat_per_collect: 2
+episode_per_test: 10
+batch_size: 64
+step_per_collect: 6400
+
+# Feature Extractor parameters
+embedding_dim: 32
+numerical_feat_dim: 7
+numerical_hidden_dim: 32
+
+# GNN Encoder parameters
+gnn_hidden_dims: [256, 256]
+gnn_output_dim: 256
+gnn_num_layers: 3
+gnn_dropout: 0.1
+
+# Actor parameters
+actor_hidden_dim: 256
+actor_dropout: 0.1
+
+# Critic parameters
+value_hidden_dim: 256
+value_num_layers: 2
+value_pooling_type: "mean" # Options: "mean", "max", "sum", "attention"
+value_dropout: 0.1
+
+# Policy parameters
+discount_factor: 0.99
+gae_lambda: 0.95
+vf_coef: 0.5
+ent_coef: 0.01
+max_grad_norm: 0.5
+value_clip: True
+advantage_normalization: True
+recompute_advantage: False
+dual_clip: null
+reward_normalization: True
+eps_clip: 0.2
+max_batchsize: 256
+deterministic_eval: True

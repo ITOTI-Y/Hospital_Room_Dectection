@@ -1,6 +1,7 @@
 import random
 from typing import Dict, Any, List, Tuple
-from src.utils.logger import setup_logger
+from loguru import logger
+
 from src.config.config_loader import ConfigLoader
 
 class PathwayGenerator:
@@ -12,7 +13,7 @@ class PathwayGenerator:
         self.fragments = config.pathways.training_generation.sequence_fragments
         self.meta_rules = config.pathways.training_generation.meta_rules
         self.pathways_number = config.pathways.pathways_number
-        self.logger = setup_logger(self.__class__.__name__)
+        self.logger = logger.bind(module=self.__class__.__name__)
         self.logger.info("PathwayGenerator initialized")
 
 
@@ -52,7 +53,7 @@ class PathwayGenerator:
             f"{' -> '.join(generated_sequence)} -> "
             f"{' -> '.join(final_pathway['end_nodes'])}"
         )
-        self.logger.info(
+        self.logger.debug(
             f"Generated pathway: {final_pathway['process_id']}, Full sequence: {full_sequence_str}"
         )
 

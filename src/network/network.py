@@ -3,30 +3,34 @@ Orchestrates the construction of a single-floor network graph.
 """
 
 from __future__ import annotations
+
+from collections.abc import Sequence
 from pathlib import Path
-import numpy as np
-import networkx as nx
-from src.utils.logger import setup_logger
-from typing import Tuple, List, Optional, Dict, TYPE_CHECKING, Sequence
-from scipy.spatial import KDTree
+from typing import TYPE_CHECKING
+
 import cv2
+import networkx as nx
+import numpy as np
+from loguru import logger
+from scipy.spatial import KDTree
 
 if TYPE_CHECKING:
     from .node_creators import BaseNodeCreator
 
 from src.config import graph_config
-from .graph_manager import GraphManager
 from src.utils.processor import ImageProcessor
+
+from .graph_manager import GraphManager
 from .node_creators import (
     BaseNodeCreator,
+    ConnectionNodeCreator,
+    OutsideNodeCreator,
+    PedestrianNodeCreator,
     RoomNodeCreator,
     VerticalNodeCreator,
-    PedestrianNodeCreator,
-    OutsideNodeCreator,
-    ConnectionNodeCreator,
 )
 
-logger = setup_logger(__name__)
+logger = logger.bind(module=__name__)
 
 
 class Network:
@@ -58,15 +62,15 @@ class Network:
 
         self._outside_node_creator = OutsideNodeCreator(self)
 
-        self._current_image_data: Optional[np.ndarray] = None
-        self._id_map: Optional[np.ndarray] = None
-        self._image_height: Optional[int] = None
-        self._image_width: Optional[int] = None
-        self._mask_cache: Dict[str, np.ndarray] = {}
+        self._current_image_data: np.ndarray | None = None
+        self._id_map: np.ndarray | None = None
+        self._image_height: int | None = None
+        self._image_width: int | None = None
+        self._mask_cache: dict[str, np.ndarray] = {}
 
     def _get_mask(
         self,
-        identifier: str | List[str],
+        identifier: str | list[str],
         is_category: bool,
         apply_morphology: bool = True,
     ) -> np.ndarray:
@@ -88,9 +92,7 @@ class Network:
                 raise ValueError("Category identifier must be a string.")
             target_names = graph_config.get_nodes_by_category(identifier)
         else:
-            target_names = (
-                identifier if isinstance(identifier, list) else [identifier]
-            )
+            target_names = identifier if isinstance(identifier, list) else [identifier]
 
         if not target_names:
             return np.zeros((self._image_height, self._image_width), dtype=np.uint8)
@@ -117,7 +119,9 @@ class Network:
         if apply_morphology:
             geometry_config = graph_config.get_geometry_config()
             kernel_size = geometry_config.get("morphology_kernel_size", (5, 5))
-            logger.info(f"Kernel size before conversion: {kernel_size} (type: {type(kernel_size)})")
+            logger.info(
+                f"Kernel size before conversion: {kernel_size} (type: {type(kernel_size)})"
+            )
             if isinstance(kernel_size, (float, int, str)):
                 kernel_size = (int(kernel_size), int(kernel_size))
             combined_mask = self.image_processor.apply_morphology(
@@ -155,9 +159,7 @@ class Network:
                         apply_morphology=True,
                     )
                     if outside_mask is not None:
-                        self._id_map[outside_mask != 0] = special_ids.get(
-                            "outside", -1
-                        )
+                        self._id_map[outside_mask != 0] = special_ids.get("outside", -1)
 
     def _create_all_node_types(
         self, z_level: float, process_outside_nodes: bool, floor_num: int
@@ -273,7 +275,9 @@ class Network:
                         self.graph_manager.connect_nodes_by_ids(door_id, nid)
 
                 # Connect to the nearest passageway
-                combined_passageway_nodes = corridor_nodes_list + other_connector_nodes_list
+                combined_passageway_nodes = (
+                    corridor_nodes_list + other_connector_nodes_list
+                )
                 passageway_tree, passageway_nodes_list = build_kdtree(
                     combined_passageway_nodes
                 )
@@ -298,7 +302,7 @@ class Network:
         z_level: float = 0.0,
         process_outside_nodes: bool = False,
         floor_num: int = 0,
-    ) -> Tuple[nx.Graph, int, int, int]:
+    ) -> tuple[nx.Graph, int, int, int]:
         """
         Executes the full network generation pipeline.
         Args:
@@ -312,15 +316,11 @@ class Network:
 
         self._initialize_run(image_path, process_outside_nodes)
 
-        self._create_all_node_types(
-            z_level, process_outside_nodes, floor_num
-        ) 
+        self._create_all_node_types(z_level, process_outside_nodes, floor_num)
 
         self._refine_door_connections(z_level)
 
-        logger.info(
-            f"Finished floor. Nodes: {self.graph_manager.node_count()}"
-        )
+        logger.info(f"Finished floor. Nodes: {self.graph_manager.node_count()}")
 
         if self._image_width is None or self._image_height is None:
             raise RuntimeError("Image dimensions not set.")

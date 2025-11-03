@@ -11,7 +11,7 @@ from pathlib import Path
 import networkx as nx
 import numpy as np
 from joblib import Parallel, delayed
-from src.utils.logger import setup_logger
+from loguru import logger
 from typing import List, Dict, Tuple, Optional, Any
 from scipy.spatial import KDTree
 
@@ -19,7 +19,7 @@ from src.config import graph_config
 from .network import Network
 from .floor_manager import FloorManager
 
-logger = setup_logger(__name__)
+logger = logger.bind(module=__name__)
 
 
 def _process_floor_worker(
