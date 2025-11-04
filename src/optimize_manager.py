@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from src.config.config_loader import ConfigLoader
 from src.pipeline import CostManager, PathwayGenerator
 from src.rl.env import LayoutEnv
-from src.rl.models.policy import LayoutPolicy
+from src.rl.models.policy import LayoutA2CPolicy
 from src.rl.models.ppo_model import LayoutOptimizationModel
 
 
@@ -91,7 +91,7 @@ class OptimizeManager:
             lr=self.config.agent.lr,
         )
 
-        policy = LayoutPolicy(
+        policy = LayoutA2CPolicy(
             model=model,
             optim=optim,
             action_space=train_envs.workers[0].action_space,
