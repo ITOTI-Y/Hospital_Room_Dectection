@@ -197,13 +197,14 @@ class LayoutEnv(gym.Env):
 
         step_penalty: float = self.config.constraints.step_penalty  # type: ignore
         cost_diff: float = previous_cost - new_cost
-        improvement_ratio = cost_diff / (self.initial_cost + 1e-6) * 100.0
+        improvement_ratio = cost_diff / (self.initial_cost + 1e-6)
+        travel_reward = improvement_ratio * 10
         self.current_cost = new_cost
 
         total_reward += improvement_ratio + step_penalty + area_cost
 
         self.logger.info(
-            f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, total_reward: {total_reward}, travel_reward: {improvement_ratio}, area_cost: {area_cost}"
+            f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, total_reward: {total_reward}, travel_reward: {travel_reward}, area_cost: {area_cost}"
         )
 
         terminated = False
