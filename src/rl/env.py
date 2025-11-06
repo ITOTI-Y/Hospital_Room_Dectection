@@ -47,7 +47,13 @@ class GraphObservation:
 class LayoutEnv(gym.Env):
     metadata: ClassVar[dict[str, list[str]]] = {"render_modes": ["human"]}
 
-    def __init__(self, config: ConfigLoader, max_departments: int, max_step: int):
+    def __init__(
+        self,
+        config: ConfigLoader,
+        max_departments: int,
+        max_step: int,
+        is_training: bool = True,
+    ):
         super().__init__()
         self.env_id = str(uuid.uuid4())[:8]
 
@@ -56,6 +62,7 @@ class LayoutEnv(gym.Env):
         self.max_departments = max_departments
         self.PADDING_IDX = max_departments - 1
         self.max_step = max_step
+        self.is_training = is_training
 
         # [service_time, service_weight, area, x, y, z, action_flag]
         self.categorical_feature_dim = 1  # [name]
@@ -74,7 +81,7 @@ class LayoutEnv(gym.Env):
             + self.action_flag_feature.shape[1]
         )
 
-        self.pathway_generator = PathwayGenerator(self.config)
+        self.pathway_generator = PathwayGenerator(self.config, is_training=is_training)
         self.cost_manager = CostManager(self.config, is_shuffle=True)
 
         self.norm_numerical_feature: np.ndarray | None = None
@@ -162,7 +169,7 @@ class LayoutEnv(gym.Env):
     def step(self, action: np.ndarray):
         self.current_step += 1
         self.logger.info(
-            f"Env {self.env_id} Step {self.current_step}, Action taken: {action}"
+            f"Env {self.env_id} Step {self.current_step}, Action taken: {action}, Train: {self.is_training}"
         )
 
         total_reward: float = 0.0
@@ -180,7 +187,13 @@ class LayoutEnv(gym.Env):
             truncated = self.current_step >= self.max_step
             info = self._get_info()
             self.logger.warning(f"Invalid action: {action}, reward: {reward}")
-            return observation.to_dict(), total_reward + reward, terminated, truncated, info
+            return (
+                observation.to_dict(),
+                total_reward + reward,
+                terminated,
+                truncated,
+                info,
+            )
 
         dept1 = self.index_to_dept_id[idx1]
         dept2 = self.index_to_dept_id[idx2]
