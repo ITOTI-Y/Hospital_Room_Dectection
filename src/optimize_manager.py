@@ -47,6 +47,7 @@ class OptimizeManager:
                     config=self.config,
                     max_departments=self.max_departments,
                     max_step=self.max_steps,
+                    is_training=False,
                 )
                 for _ in range(self.config.agent.num_test_envs)
             ]
@@ -115,7 +116,7 @@ class OptimizeManager:
             env=train_envs,
             buffer=VectorReplayBuffer(
                 total_size=self.config.agent.buffer_size,
-                buffer_num=train_envs.num_envs,
+                buffer_num=train_envs.env_num,
             ),
             exploration_noise=False,
         )

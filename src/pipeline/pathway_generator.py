@@ -7,13 +7,18 @@ from src.config.config_loader import ConfigLoader
 
 
 class PathwayGenerator:
-    def __init__(self, config: ConfigLoader):
+    def __init__(self, config: ConfigLoader, is_training: bool = True):
         self.process_id = 1
         self.paths = config.paths
-        self.pools = config.pathways.training_generation.department_pools
-        self.fragments = config.pathways.training_generation.sequence_fragments
-        self.meta_rules = config.pathways.training_generation.meta_rules
-        self.pathways_number = config.pathways.pathways_number
+        self.is_training = is_training
+        if is_training:
+            self.meta_rules = config.pathways.training.meta_rules
+            self.pathways_number = config.pathways.pathways_number
+        else:
+            self.meta_rules = config.pathways.evaluation.smart.meta_rules
+            self.pathways_number = len(self.meta_rules)
+        self.pools = config.pathways.training.department_pools
+        self.fragments = config.pathways.training.sequence_fragments
         self.logger = logger.bind(module=self.__class__.__name__)
         self.logger.info("PathwayGenerator initialized")
 
