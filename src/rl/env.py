@@ -201,7 +201,7 @@ class LayoutEnv(gym.Env):
         travel_reward = improvement_ratio * 10
         self.current_cost = new_cost
 
-        total_reward += improvement_ratio + step_penalty + area_cost
+        total_reward += travel_reward + step_penalty + area_cost
 
         self.logger.info(
             f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, total_reward: {total_reward}, travel_reward: {travel_reward}, area_cost: {area_cost}"
