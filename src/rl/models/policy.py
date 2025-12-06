@@ -12,7 +12,7 @@ from tianshou.policy.modelfree.a2c import A2CTrainingStats
 from .ppo_model import LayoutOptimizationModel
 
 
-class LayoutPolicy(A2CPolicy):
+class LayoutA2CPolicy(A2CPolicy):
     def __init__(
         self,
         model: LayoutOptimizationModel,

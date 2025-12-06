@@ -55,7 +55,7 @@ class CostManager:
     def _load_slots_information(self) -> None:
         df = pd.read_csv(self.config.paths.slots_csv)  # type: ignore
         for _, row in df[["name", "id", "area"]].iterrows():
-            name_id = row["name"].astype(str) + "_" + str(row["id"])
+            name_id = str(row["name"]) + "_" + str(row["id"])
             self.name_id_to_area[name_id] = float(row["area"])
             self.id_to_area[int(row["id"])] = float(row["area"])
         df["service_weight"] = 0.0

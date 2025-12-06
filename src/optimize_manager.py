@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from src.config.config_loader import ConfigLoader
 from src.pipeline import CostManager, PathwayGenerator
 from src.rl.env import LayoutEnv
-from src.rl.models.policy import LayoutPolicy
+from src.rl.models.policy import LayoutA2CPolicy
 from src.rl.models.ppo_model import LayoutOptimizationModel
 
 
@@ -47,6 +47,7 @@ class OptimizeManager:
                     config=self.config,
                     max_departments=self.max_departments,
                     max_step=self.max_steps,
+                    is_training=False,
                 )
                 for _ in range(self.config.agent.num_test_envs)
             ]
@@ -91,7 +92,7 @@ class OptimizeManager:
             lr=self.config.agent.lr,
         )
 
-        policy = LayoutPolicy(
+        policy = LayoutA2CPolicy(
             model=model,
             optim=optim,
             action_space=train_envs.workers[0].action_space,
@@ -115,7 +116,7 @@ class OptimizeManager:
             env=train_envs,
             buffer=VectorReplayBuffer(
                 total_size=self.config.agent.buffer_size,
-                buffer_num=train_envs.num_envs,
+                buffer_num=train_envs.env_num,
             ),
             exploration_noise=False,
         )
