@@ -1,6 +1,6 @@
 # Global parameters
-num_train_envs: 1
-num_test_envs: 1
+num_train_envs: 8
+num_test_envs: 16
 
 max_departments: 100
 max_steps: 100

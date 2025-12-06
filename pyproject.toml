@@ -22,7 +22,7 @@ dependencies = [
     "seaborn>=0.13.2",
     "sentence-transformers>=4.1.0",
     "snakeviz>=2.2.2",
-    "tianshou>=1.2.0",
+    "tianshou==1.2.0",
     "torch>=2.7.0",
     "torch-geometric>=2.6.1",
     "typer>=0.15.1",
@@ -30,7 +30,7 @@ dependencies = [
 
 [[tool.uv.index]]
 name = "pytorch-cu126"
-url = "https://download.pytorch.org/whl/cu126"
+url = "https://download.pytorch.org/whl/cu130"
 explicit = true
 
 [tool.uv.sources]
