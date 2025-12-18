@@ -128,8 +128,19 @@ class LayoutEnv(gym.Env):
         self.current_step = 0
         self.current_cost = 0.0
         self.initial_cost = 0.0
+        self.best_cost = 0.0  # Track best cost achieved in episode
+        self.total_swaps = 0
+        self.invalid_swaps = 0
+        self.no_change_swaps = 0
+        self.cumulative_reward = 0.0
 
         self.last_failed_action: np.ndarray | None = None
+        self.last_action: tuple[int, int] | None = None  # Track last action for repetition penalty
+
+        # Extended tracking for action history (to prevent cycling)
+        self.action_history: list[frozenset[int]] = []  # Track all actions as frozensets
+        self.action_history_window: int = 10  # Window size for repetition check
+        self.steps_without_improvement: int = 0  # For early termination
 
     def _precompute_normalization_stats(self) -> None:
         pathways = self.pathway_generator.generate_all()
@@ -166,83 +177,247 @@ class LayoutEnv(gym.Env):
     def _compute_numerical_features(self):
         pass
 
-    def step(self, action: np.ndarray):
-        self.current_step += 1
-        self.logger.info(
-            f"Env {self.env_id} Step {self.current_step}, Action taken: {action}, Train: {self.is_training}"
+    def _compute_reward(
+        self,
+        cost_diff: float,
+        is_swapable: bool,
+        is_invalid: bool,
+        action: tuple[int, int],
+    ) -> tuple[float, dict[str, float]]:
+        """Compute shaped reward for the current step.
+
+        Args:
+            cost_diff: previous_cost - new_cost (positive means improvement)
+            is_swapable: Whether the swap is valid (area compatible)
+            is_invalid: Whether the action was invalid (same dept or out of bounds)
+            action: The (idx1, idx2) action taken
+
+        Returns:
+            total_reward: The total reward for this step
+            reward_components: Dict with breakdown of reward components
+        """
+        constraints = self.config.constraints
+
+        # Get reward parameters with defaults
+        step_penalty: float = getattr(constraints, "step_penalty", -0.01)
+        invalid_penalty: float = getattr(constraints, "invalid_action", -1.0)
+        no_change_penalty: float = getattr(constraints, "no_improvement_penalty", -0.5)
+        improvement_scale: float = getattr(constraints, "improvement_scale", 100.0)
+        repetition_penalty: float = getattr(constraints, "repetition_penalty", -1.0)
+        exploration_bonus: float = getattr(constraints, "exploration_bonus", 0.1)
+
+        reward_components = {
+            "improvement": 0.0,
+            "step_penalty": step_penalty,
+            "invalid_penalty": 0.0,
+            "no_change_penalty": 0.0,
+            "area_penalty": 0.0,
+            "repetition_penalty": 0.0,
+            "exploration_bonus": 0.0,
+        }
+
+        # Invalid action penalty
+        if is_invalid:
+            reward_components["invalid_penalty"] = invalid_penalty
+            self.invalid_swaps += 1
+            total_reward = step_penalty + invalid_penalty
+            return total_reward, reward_components
+
+        # Create action set for comparison (order-independent)
+        action_set = frozenset(action)
+
+        # Calculate improvement reward
+        # Use relative improvement: cost_diff / initial_cost
+        improvement_ratio = cost_diff / (self.initial_cost + 1e-6)
+        improvement_reward = improvement_ratio * improvement_scale
+        reward_components["improvement"] = improvement_reward
+
+        # No change penalty (swap happened but no cost change)
+        if abs(cost_diff) < 1e-6:
+            reward_components["no_change_penalty"] = no_change_penalty
+            self.no_change_swaps += 1
+
+        # Extended repetition penalty: check if action was in recent history window
+        recent_history = self.action_history[-self.action_history_window:]
+        action_count_in_window = recent_history.count(action_set)
+        if action_count_in_window > 0:
+            # Stronger penalty for more repetitions
+            reward_components["repetition_penalty"] = repetition_penalty * action_count_in_window
+
+        # Exploration bonus: reward for trying new action pairs
+        if action_set not in self.action_history:
+            reward_components["exploration_bonus"] = exploration_bonus
+
+        # Add current action to history
+        self.action_history.append(action_set)
+
+        # Area incompatibility penalty (swap executed but areas don't match well)
+        if not is_swapable:
+            area_penalty = self.cost_engine.area_compatibility_cost * 0.1
+            reward_components["area_penalty"] = area_penalty
+
+        self.total_swaps += 1
+
+        total_reward = sum(reward_components.values())
+        return total_reward, reward_components
+
+    def _compute_terminal_reward(self) -> float:
+        """Compute terminal bonus/penalty based on overall episode performance."""
+        terminal_scale: float = getattr(
+            self.config.constraints, "terminal_bonus_scale", 50.0
         )
 
-        total_reward: float = 0.0
+        # Calculate overall improvement from initial state
+        total_improvement = (self.initial_cost - self.best_cost) / (
+            self.initial_cost + 1e-6
+        )
+
+        # Bonus for positive improvement, penalty for negative
+        terminal_reward = total_improvement * terminal_scale
+
+        return terminal_reward
+
+    def step(self, action: np.ndarray):
+        self.current_step += 1
 
         idx1: int = action[0].astype(int)
         idx2: int = action[1].astype(int)
 
-        if idx1 >= self.num_total_slot or idx2 >= self.num_total_slot or idx1 == idx2:
-            reward: float = self.config.constraints.invalid_action  # type: ignore
+        # Check for invalid action
+        is_invalid = (
+            idx1 >= self.num_total_slot or idx2 >= self.num_total_slot or idx1 == idx2
+        )
+
+        if is_invalid:
             self.last_failed_action = action.astype(dtype=int)
             self.action_flag_feature[idx1, 0] += 1.0
             self.action_flag_feature[idx2, 0] += 1.0
+
+            reward, components = self._compute_reward(
+                cost_diff=0.0, is_swapable=True, is_invalid=True, action=(idx1, idx2)
+            )
+            self.last_action = (idx1, idx2)
+            self.cumulative_reward += reward
+
             observation = self._get_observation()
             terminated = False
             truncated = self.current_step >= self.max_step
+
+            if truncated:
+                terminal_reward = self._compute_terminal_reward()
+                reward += terminal_reward
+                self._log_episode_end()
+
             info = self._get_info()
-            self.logger.warning(f"Invalid action: {action}, reward: {reward}")
+            info["reward_components"] = components
+
+            self.logger.debug(
+                f"Invalid action: {action}, reward: {reward:.3f}, "
+                f"components: {components}"
+            )
+
             return (
                 observation.to_dict(),
-                total_reward + reward,
+                reward,
                 terminated,
                 truncated,
                 info,
             )
 
+        # Valid action - perform swap
         dept1 = self.index_to_dept_id[idx1]
         dept2 = self.index_to_dept_id[idx2]
 
         previous_cost: float = self.current_cost
         new_cost, is_swapable = self.cost_engine.swap(dept1, dept2)
+
         if not is_swapable:
             self.last_failed_action = action.astype(dtype=int)
             self.action_flag_feature[idx1, 0] += 1.0
             self.action_flag_feature[idx2, 0] += 1.0
         else:
             self.action_flag_feature[:, 0] = 0.0
-        area_cost = self.cost_engine.area_compatibility_cost
 
-        step_penalty: float = self.config.constraints.step_penalty  # type: ignore
-        cost_diff: float = previous_cost - new_cost
-        improvement_ratio = cost_diff / (self.initial_cost + 1e-6)
-        travel_reward = improvement_ratio * 10
         self.current_cost = new_cost
+        self.best_cost = min(self.best_cost, new_cost)
 
-        total_reward += travel_reward + step_penalty + area_cost
+        cost_diff: float = previous_cost - new_cost
 
-        self.logger.info(
-            f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, total_reward: {total_reward}, travel_reward: {travel_reward}, area_cost: {area_cost}"
+        # Track steps without improvement for early termination
+        if cost_diff > 1e-6:
+            self.steps_without_improvement = 0
+        else:
+            self.steps_without_improvement += 1
+
+        reward, components = self._compute_reward(
+            cost_diff=cost_diff, is_swapable=is_swapable, is_invalid=False, action=(idx1, idx2)
         )
+        self.last_action = (idx1, idx2)
+        self.cumulative_reward += reward
 
-        terminated = False
+        # Early termination: if no improvement for too long, terminate
+        early_termination_steps: int = getattr(
+            self.config.constraints, "early_termination_steps", 20
+        )
+        terminated = self.steps_without_improvement >= early_termination_steps
         truncated = self.current_step >= self.max_step
+
+        if terminated or truncated:
+            terminal_reward = self._compute_terminal_reward()
+            reward += terminal_reward
+            components["terminal"] = terminal_reward
+            self._log_episode_end()
 
         observation = self._get_observation()
         info = self._get_info()
+        info["reward_components"] = components
 
-        return observation.to_dict(), total_reward, terminated, truncated, info
+        # Log every 10 steps for debugging
+        if self.current_step % 10 == 0:
+            self.logger.info(
+                f"Step {self.current_step}: {dept1} <-> {dept2}, "
+                f"reward: {reward:.3f}, cost: {new_cost:.1f} (change: {cost_diff:.1f})"
+            )
+
+        return observation.to_dict(), reward, terminated, truncated, info
+
+    def _log_episode_end(self):
+        """Log episode summary statistics."""
+        improvement = (self.initial_cost - self.best_cost) / (self.initial_cost + 1e-6)
+        early_term = self.steps_without_improvement >= getattr(
+            self.config.constraints, "early_termination_steps", 20
+        )
+        self.logger.info(
+            f"Episode end: total_reward={self.cumulative_reward:.2f}, "
+            f"improvement={improvement * 100:.2f}%, "
+            f"swaps={self.total_swaps}, invalid={self.invalid_swaps}, "
+            f"no_change={self.no_change_swaps}, "
+            f"unique_actions={len(set(self.action_history))}, "
+            f"early_term={early_term}"
+        )
 
     def reset(self, seed: int | None = None) -> tuple[dict[str, np.ndarray], dict]:
         super().reset(seed=seed)
-        self.logger.info("Resetting environment")
 
         pathways = self.pathway_generator.generate_all()
-        # self.cost_manager = CostManager(self.config, is_shuffle=True) # If needed to shuffle travel_matrix
         self.cost_manager.initialize(pathways=pathways)
         self.cost_engine = self.cost_manager.create_cost_engine()
 
         self.current_step = 0
         self.initial_cost = self.cost_engine.current_travel_cost
         self.current_cost = self.initial_cost
+        self.best_cost = self.initial_cost
+        self.total_swaps = 0
+        self.invalid_swaps = 0
+        self.no_change_swaps = 0
+        self.cumulative_reward = 0.0
+        self.last_action = None  # Reset action tracking
+        self.action_history = []  # Reset action history
+        self.steps_without_improvement = 0  # Reset early termination counter
+        self.action_flag_feature[:, 0] = 0.0
 
         self.logger.info(
-            f"New instance created. Active departments: {self.num_total_slot}, Initial travel cost: {self.initial_cost}"
+            f"Reset: departments={self.num_total_slot}, initial_cost={self.initial_cost:.1f}"
         )
 
         observation = self._get_observation()

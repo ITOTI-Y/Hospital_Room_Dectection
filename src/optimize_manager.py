@@ -6,6 +6,7 @@ from tianshou.data import Collector, VectorReplayBuffer
 from tianshou.env import DummyVectorEnv
 from tianshou.trainer import OnpolicyTrainer
 from tianshou.utils import TensorboardLogger
+from torch.optim.lr_scheduler import CosineAnnealingLR, StepLR
 from torch.utils.tensorboard import SummaryWriter
 
 from src.config.config_loader import ConfigLoader
@@ -80,6 +81,32 @@ class OptimizeManager:
         )
         return model
 
+    def create_scheduler(self, optim: torch.optim.Optimizer):
+        """Create learning rate scheduler based on config."""
+        agent_cfg = self.config.agent
+        scheduler_type = getattr(agent_cfg, "lr_scheduler", "none")
+
+        if scheduler_type == "step":
+            step_size = getattr(agent_cfg, "lr_decay_step", 20)
+            gamma = getattr(agent_cfg, "lr_decay_gamma", 0.5)
+            scheduler = StepLR(optim, step_size=step_size, gamma=gamma)
+            self.logger.info(
+                f"Using StepLR scheduler: step_size={step_size}, gamma={gamma}"
+            )
+        elif scheduler_type == "cosine":
+            lr_min = getattr(agent_cfg, "lr_min", 1e-6)
+            scheduler = CosineAnnealingLR(
+                optim, T_max=agent_cfg.max_epoch, eta_min=lr_min
+            )
+            self.logger.info(
+                f"Using CosineAnnealingLR scheduler: T_max={agent_cfg.max_epoch}, eta_min={lr_min}"
+            )
+        else:
+            scheduler = None
+            self.logger.info("No learning rate scheduler enabled")
+
+        return scheduler
+
     def run(self):
         self.logger.info("Starting PPO training...")
 
@@ -91,6 +118,16 @@ class OptimizeManager:
             model.parameters(),
             lr=self.config.agent.lr,
         )
+
+        # Create learning rate scheduler
+        scheduler = self.create_scheduler(optim)
+
+        # Create train_fn callback for scheduler step
+        def train_fn(epoch: int, env_step: int):
+            if scheduler is not None:
+                scheduler.step()
+                current_lr = scheduler.get_last_lr()[0]
+                self.logger.info(f"Epoch {epoch}: Learning rate = {current_lr:.2e}")
 
         policy = LayoutA2CPolicy(
             model=model,
@@ -145,6 +182,7 @@ class OptimizeManager:
                 verbose=True,
                 show_progress=True,
                 save_best_fn=self.save_best_model,
+                train_fn=train_fn,
             )
 
             result = trainer.run()

@@ -3,18 +3,22 @@ num_train_envs: 8
 num_test_envs: 16
 
 max_departments: 100
-max_steps: 100
+max_steps: 60  # Reduced from 100 to encourage efficient solutions
 
-lr: 1e-4
+lr: 5e-5  # Further reduced to prevent policy collapse
+lr_scheduler: "cosine"  # Options: "step", "cosine", "none"
+lr_decay_step: 20  # Decay every N epochs (for step scheduler)
+lr_decay_gamma: 0.5  # Decay factor (for step scheduler)
+lr_min: 1e-6  # Minimum learning rate (for cosine scheduler)
 
 
 # TianShou PPO parameters
 buffer_size: 20000
 max_epoch: 100
 step_per_epoch: 32000
-repeat_per_collect: 2
+repeat_per_collect: 2  # Reduced to prevent overfitting
 episode_per_test: 10
-batch_size: 64
+batch_size: 128  # Increased from 64 for more stable gradients
 step_per_collect: 6400
 
 # Feature Extractor parameters
@@ -42,13 +46,13 @@ value_dropout: 0.1
 discount_factor: 0.99
 gae_lambda: 0.95
 vf_coef: 0.5
-ent_coef: 0.01
+ent_coef: 0.2  # Higher entropy to prevent policy collapse
 max_grad_norm: 0.5
 value_clip: True
 advantage_normalization: True
-recompute_advantage: False
+recompute_advantage: True  # Changed to True for better advantage estimates
 dual_clip: null
-reward_normalization: True
-eps_clip: 0.2
+reward_normalization: False  # Disabled to preserve reward signal
+eps_clip: 0.05  # Smaller policy updates to prevent collapse
 max_batchsize: 256
 deterministic_eval: True

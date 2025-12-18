@@ -9,5 +9,12 @@ adjacency_preferences:
   - depts: ["采血处", "检验中心"]
     weight: 1.0
 
-invalid_action: -2.0
-step_penalty: -0.1 # Penalty for each step to encourage shorter solutions
+# Reward shaping parameters
+invalid_action: -1.0  # Reduced from -2.0
+step_penalty: -0.01  # Reduced from -0.1 to allow positive learning signal
+no_improvement_penalty: -0.3  # Reduced to prevent unstable gradients
+improvement_scale: 100.0  # Scale factor for improvement reward (was 10)
+terminal_bonus_scale: 50.0  # Bonus multiplier for final improvement
+repetition_penalty: -1.0  # Reduced from -2.0 to prevent instability
+exploration_bonus: 0.3  # Moderate exploration bonus
+early_termination_steps: 15  # Terminate episode if no improvement for N steps
