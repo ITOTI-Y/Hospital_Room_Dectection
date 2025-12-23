@@ -137,7 +137,6 @@ def run_test_episode(policy: LayoutA2CPolicy, env: LayoutEnv, case_id: int) -> d
             "reward": reward,
         }
         swap_history.append(swap_record)
-
         # Log swap
         cost_diff = (
             swap_history[-2]["current_cost"] - info["current_cost"]

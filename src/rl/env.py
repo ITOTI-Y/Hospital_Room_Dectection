@@ -20,6 +20,7 @@ class GraphObservation:
     edge_weight: np.ndarray  # Shape: (E_max,)
     node_mask: np.ndarray  # Shape: (max_departments,)
     edge_mask: np.ndarray  # Shape: (E_max,)
+    action_history_mask: np.ndarray  # Shape: (max_departments, max_departments)
 
     def to_dict(self) -> dict[str, np.ndarray]:
         return {
@@ -29,6 +30,7 @@ class GraphObservation:
             "edge_weight": self.edge_weight,
             "node_mask": self.node_mask,
             "edge_mask": self.edge_mask,
+            "action_history_mask": self.action_history_mask,
         }
 
     def __repr__(self) -> str:
@@ -40,6 +42,7 @@ class GraphObservation:
             f" edge_weight shape: {self.edge_weight.shape},\n"
             f" node_mask shape: {self.node_mask.shape},\n"
             f" edge_mask shape: {self.edge_mask.shape},\n"
+            f" action_history_mask shape: {self.action_history_mask.shape},\n"
             f")"
         )
 
@@ -119,6 +122,12 @@ class LayoutEnv(gym.Env):
                 ),
                 "node_mask": spaces.MultiBinary(self.max_departments),
                 "edge_mask": spaces.MultiBinary(self.E_max),
+                "action_history_mask": spaces.Box(
+                    low=0,
+                    high=1,
+                    shape=(self.max_departments, self.max_departments),
+                    dtype=np.float32,
+                ),
             }
         )
         self.action_space = spaces.MultiDiscrete(
@@ -141,6 +150,7 @@ class LayoutEnv(gym.Env):
         self.action_history: list[frozenset[int]] = []  # Track all actions as frozensets
         self.action_history_window: int = 10  # Window size for repetition check
         self.steps_without_improvement: int = 0  # For early termination
+        self.no_change_pairs: set[frozenset[int]] = set()  # Track pairs that resulted in no cost change
 
     def _precompute_normalization_stats(self) -> None:
         pathways = self.pathway_generator.generate_all()
@@ -236,6 +246,8 @@ class LayoutEnv(gym.Env):
         if abs(cost_diff) < 1e-6:
             reward_components["no_change_penalty"] = no_change_penalty
             self.no_change_swaps += 1
+            # Track this pair as ineffective for future masking
+            self.no_change_pairs.add(action_set)
 
         # Extended repetition penalty: check if action was in recent history window
         recent_history = self.action_history[-self.action_history_window:]
@@ -414,6 +426,7 @@ class LayoutEnv(gym.Env):
         self.last_action = None  # Reset action tracking
         self.action_history = []  # Reset action history
         self.steps_without_improvement = 0  # Reset early termination counter
+        self.no_change_pairs = set()  # Reset no-change pairs tracking
         self.action_flag_feature[:, 0] = 0.0
 
         self.logger.info(
@@ -469,6 +482,20 @@ class LayoutEnv(gym.Env):
                 edge_weight[i] = weight
                 edge_mask[i] = 1
 
+        # Generate action history mask
+        # Start with all pairs allowed (1)
+        action_history_mask = np.ones(
+            (self.max_departments, self.max_departments), dtype=np.float32
+        )
+        # Mark no-change pairs as blocked (0)
+        for pair in self.no_change_pairs:
+            pair_list = list(pair)
+            if len(pair_list) == 2:
+                idx1, idx2 = pair_list
+                if idx1 < self.max_departments and idx2 < self.max_departments:
+                    action_history_mask[idx1, idx2] = 0.0
+                    action_history_mask[idx2, idx1] = 0.0
+
         return GraphObservation(
             x_numerical=x_norm_numerical,
             x_categorical=x_categorical,
@@ -476,6 +503,7 @@ class LayoutEnv(gym.Env):
             edge_weight=edge_weight,
             node_mask=node_mask,
             edge_mask=edge_mask,
+            action_history_mask=action_history_mask,
         )
 
     def _get_info(self) -> dict:

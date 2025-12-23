@@ -142,10 +142,22 @@ class LayoutOptimizationModel(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, Any]:
         node_embeddings, node_mask = self.encode_observations(obs)
 
+        # Extract action_history_mask if provided
+        action_history_mask = None
+        if isinstance(obs, Batch) and hasattr(obs, "action_history_mask"):
+            action_history_mask = torch.as_tensor(
+                obs.action_history_mask, device=self.device, dtype=torch.float32
+            )
+        elif isinstance(obs, dict) and "action_history_mask" in obs:
+            action_history_mask = torch.as_tensor(
+                obs["action_history_mask"], device=self.device, dtype=torch.float32
+            )
+
         action1, action2, log_prob1, log_prob2, _, _ = self.actor(
             node_embeddings=node_embeddings,
             node_mask=node_mask,
             deterministic=kwargs.get("deterministic", False),
+            action_history_mask=action_history_mask,
         )
 
         actions = torch.stack([action1, action2], dim=-1)  # (batch_size, 2)
