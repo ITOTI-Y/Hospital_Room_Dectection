@@ -336,18 +336,51 @@ def _perturb_flow_dict(
 
 
 def _evaluate_policy(
-    policy: nn.Module, env: Any, flow_dict: dict[tuple[str, str], float]
+    policy: nn.Module, env: Any, flow_matrix: np.ndarray, n_episodes: int = 3, max_steps: int = 100
 ) -> float:
-    """Evaluate policy on environment with given flow.
+    """Evaluate policy on environment with given flow matrix.
 
     Args:
         policy: Policy to evaluate
         env: Environment
-        flow_dict: Flow dictionary
+        flow_matrix: Flow matrix to use
+        n_episodes: Number of evaluation episodes
+        max_steps: Maximum steps per episode
 
     Returns:
-        Final cost achieved
+        Average final cost across episodes
     """
-    # TODO: Implement proper evaluation logic
-    # This is a placeholder
-    return 0.0
+    import torch
+
+    costs = []
+
+    for _ in range(n_episodes):
+        # Reset with custom flow
+        obs, _ = env.reset(flow_matrix=flow_matrix)
+
+        done = False
+        step = 0
+
+        while not done and step < max_steps:
+            # Convert obs to tensors
+            obs_tensor = {}
+            for key, value in obs.items():
+                if isinstance(value, np.ndarray):
+                    obs_tensor[key] = torch.from_numpy(value).unsqueeze(0)
+                    if hasattr(policy, 'device') and policy.device is not None:
+                        obs_tensor[key] = obs_tensor[key].to(policy.device)
+
+            # Get action (deterministic evaluation)
+            with torch.no_grad():
+                action, _, _ = policy.forward_actor(obs_tensor, deterministic=True)
+
+            # Step environment
+            obs, reward, terminated, truncated, info = env.step(action[0].cpu().numpy())
+            done = terminated or truncated
+            step += 1
+
+        # Record final cost
+        final_cost = info.get("current_cost", env.current_cost)
+        costs.append(final_cost)
+
+    return float(np.mean(costs))

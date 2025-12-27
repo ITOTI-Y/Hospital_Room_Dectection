@@ -199,11 +199,8 @@ def _evaluate_policy_on_flow(
     costs = []
 
     for _ in range(n_episodes):
-        # Reset environment
-        obs, _ = env.reset()
-
-        # Inject flow matrix
-        obs["flow_matrix"] = _pad_flow_matrix(flow_matrix, env.max_departments)
+        # Reset environment with custom flow matrix
+        obs, _ = env.reset(flow_matrix=flow_matrix)
 
         # Run episode
         done = False
@@ -221,9 +218,6 @@ def _evaluate_policy_on_flow(
             obs, reward, terminated, truncated, info = env.step(action[0])
             done = terminated or truncated
             step += 1
-
-            # Re-inject flow matrix
-            obs["flow_matrix"] = _pad_flow_matrix(flow_matrix, env.max_departments)
 
         # Record final cost
         final_cost = info.get("current_cost", env.current_cost)

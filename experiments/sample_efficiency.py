@@ -42,18 +42,38 @@ def run_sample_efficiency_experiment(
 
     # Prepare cost function for baselines
     def cost_function(permutation: list[int]) -> float:
-        """Evaluate cost of a permutation."""
-        # Map permutation to department IDs
-        dept_ids = [env.index_to_dept_id[i] for i in permutation]
+        """Evaluate cost of a permutation.
 
-        # Calculate cost using environment's cost engine
-        layout_dict = {
-            slot_id: dept_id for slot_id, dept_id in zip(env.cost_engine.slots, dept_ids)
-        }
+        Args:
+            permutation: List of department indices in slot order
 
-        # Create temporary cost engine with this layout
-        temp_cost = env.cost_engine.current_travel_cost
-        return temp_cost
+        Returns:
+            Total travel cost for this layout
+        """
+        # Map permutation indices to department IDs
+        dept_ids = [env.index_to_dept_id[i] for i in permutation if i < env.num_total_slot]
+
+        # Create layout dict: slot_id -> dept_id
+        slots = list(env.cost_engine.slots)
+        layout_dict = {slot_id: dept_id for slot_id, dept_id in zip(slots, dept_ids)}
+
+        # Calculate cost for this layout
+        total_cost = 0.0
+        for (dept1, dept2), weight in env.cost_manager.pair_weights.items():
+            # Find slots for these departments
+            slot1, slot2 = None, None
+            for slot, dept in layout_dict.items():
+                if dept == dept1:
+                    slot1 = slot
+                if dept == dept2:
+                    slot2 = slot
+
+            if slot1 is not None and slot2 is not None:
+                # Get travel time between these slots
+                travel_time = env.cost_manager.travel_times.loc[slot1, slot2]
+                total_cost += weight * travel_time
+
+        return float(total_cost)
 
     # Initialize baseline algorithms
     sa_solver = SimulatedAnnealing(
