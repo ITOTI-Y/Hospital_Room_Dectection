@@ -47,7 +47,7 @@ class GraphObservation:
 class LayoutEnv(gym.Env):
     metadata: ClassVar[dict[str, list[str]]] = {"render_modes": ["human"]}
 
-    def __init__(self, config: ConfigLoader, max_departments: int, max_step: int):
+    def __init__(self, config: ConfigLoader, max_departments: int, max_step: int, patience: int = 50):
         super().__init__()
         self.env_id = str(uuid.uuid4())[:8]
 
@@ -56,6 +56,7 @@ class LayoutEnv(gym.Env):
         self.max_departments = max_departments
         self.PADDING_IDX = max_departments - 1
         self.max_step = max_step
+        self.patience = patience  # Early stopping: terminate if no improvement for N steps
 
         # [service_time, service_weight, area, x, y, z, action_flag]
         self.categorical_feature_dim = 1  # [name]
@@ -112,6 +113,13 @@ class LayoutEnv(gym.Env):
                 ),
                 "node_mask": spaces.MultiBinary(self.max_departments),
                 "edge_mask": spaces.MultiBinary(self.E_max),
+                # New: flow matrix for dynamic adaptation
+                "flow_matrix": spaces.Box(
+                    low=0,
+                    high=1,
+                    shape=(self.max_departments, self.max_departments),
+                    dtype=np.float32,
+                ),
             }
         )
         self.action_space = spaces.MultiDiscrete(
@@ -121,8 +129,16 @@ class LayoutEnv(gym.Env):
         self.current_step = 0
         self.current_cost = 0.0
         self.initial_cost = 0.0
+        self.best_cost = float('inf')  # Track best cost for early stopping
+        self._no_improvement_count = 0  # Count steps without improvement
 
         self.last_failed_action: np.ndarray | None = None
+
+        # Cost normalizer for reward scaling (computed on first reset)
+        self.cost_normalizer: float | None = None
+
+        # Flow matrix for dynamic adaptation (injected in reset or manually)
+        self.flow_matrix: np.ndarray | None = None
 
     def _precompute_normalization_stats(self) -> None:
         pathways = self.pathway_generator.generate_all()
@@ -159,6 +175,53 @@ class LayoutEnv(gym.Env):
     def _compute_numerical_features(self):
         pass
 
+    def _estimate_cost_scale(self) -> float:
+        """Estimate cost scale for reward normalization using travel time statistics."""
+        times = self.cost_manager.travel_times.values
+        valid_times = times[times > 0]
+        if len(valid_times) == 0:
+            return 1.0
+        # Use standard deviation of travel times scaled by number of departments
+        return float(np.std(valid_times) * self.num_total_slot)
+
+    def _extract_flow_matrix(self) -> np.ndarray:
+        """Extract normalized flow matrix from pair_weights.
+
+        Returns:
+            Flow matrix (num_total_slot, num_total_slot) with values in [0, 1]
+        """
+        n = self.num_total_slot
+        flow = np.zeros((n, n), dtype=np.float32)
+
+        for (dept1, dept2), weight in self.cost_manager.pair_weights.items():
+            if dept1 in self.dept_id_to_index and dept2 in self.dept_id_to_index:
+                i = self.dept_id_to_index[dept1]
+                j = self.dept_id_to_index[dept2]
+                flow[i, j] = weight
+                flow[j, i] = weight  # Ensure symmetry
+
+        # Normalize to [0, 1]
+        if flow.max() > 0:
+            flow = flow / flow.max()
+
+        return flow
+
+    def _update_cost_engine_with_flow(self, flow_matrix: np.ndarray) -> None:
+        """Update cost engine's pair_weights from flow matrix.
+
+        Args:
+            flow_matrix: Flow matrix (num_total_slot, num_total_slot)
+        """
+        # Update pair_weights based on flow matrix
+        for (dept1, dept2) in self.cost_manager.pair_weights.keys():
+            if dept1 in self.dept_id_to_index and dept2 in self.dept_id_to_index:
+                i = self.dept_id_to_index[dept1]
+                j = self.dept_id_to_index[dept2]
+                self.cost_manager.pair_weights[(dept1, dept2)] = flow_matrix[i, j]
+
+        # Recreate cost engine with updated weights
+        self.cost_engine = self.cost_manager.create_cost_engine()
+
     def step(self, action: np.ndarray):
         self.current_step += 1
         self.logger.info(
@@ -180,7 +243,7 @@ class LayoutEnv(gym.Env):
             truncated = self.current_step >= self.max_step
             info = self._get_info()
             self.logger.warning(f"Invalid action: {action}, reward: {reward}")
-            return observation.to_dict(), total_reward + reward, terminated, truncated, info
+            return observation, total_reward + reward, terminated, truncated, info
 
         dept1 = self.index_to_dept_id[idx1]
         dept2 = self.index_to_dept_id[idx2]
@@ -188,33 +251,59 @@ class LayoutEnv(gym.Env):
         previous_cost: float = self.current_cost
         new_cost, is_swapable = self.cost_engine.swap(dept1, dept2)
         if not is_swapable:
+            reward: float = self.config.constraints.invalid_action  # type: ignore
             self.last_failed_action = action.astype(dtype=int)
             self.action_flag_feature[idx1, 0] += 1.0
             self.action_flag_feature[idx2, 0] += 1.0
         else:
+            # Valid swap: use normalized improvement as reward
             self.action_flag_feature[:, 0] = 0.0
-        area_cost = self.cost_engine.area_compatibility_cost
+            improvement = previous_cost - new_cost
+            # Normalize by cost scale for better gradient stability
+            reward = improvement / (self.cost_normalizer + 1e-6)  # type: ignore
 
-        step_penalty: float = self.config.constraints.step_penalty  # type: ignore
-        cost_diff: float = previous_cost - new_cost
-        travel_reward: float = cost_diff / (self.initial_cost + 1e-6) * 100.0
         self.current_cost = new_cost
 
-        total_reward += travel_reward + step_penalty + area_cost
+        # Track best cost for early stopping
+        if self.current_cost < self.best_cost:
+            self.best_cost = self.current_cost
+            self._no_improvement_count = 0
+        else:
+            self._no_improvement_count += 1
+
+        total_reward += reward
 
         self.logger.info(
-            f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, total_reward: {total_reward}, travel_reward: {travel_reward}, area_cost: {area_cost}"
+            f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, reward: {reward:.4f}, current_cost: {self.current_cost:.2f}, best_cost: {self.best_cost:.2f}"
         )
 
-        terminated = False
+        # Early stopping if no improvement for patience steps
+        terminated = self._no_improvement_count >= self.patience
         truncated = self.current_step >= self.max_step
+
+        if terminated:
+            self.logger.info(f"Early stopping: no improvement for {self.patience} steps")
 
         observation = self._get_observation()
         info = self._get_info()
 
-        return observation.to_dict(), total_reward, terminated, truncated, info
+        return observation, total_reward, terminated, truncated, info
 
-    def reset(self, seed: int | None = None) -> tuple[dict[str, np.ndarray], dict]:
+    def reset(
+        self,
+        seed: int | None = None,
+        flow_matrix: np.ndarray | None = None,
+    ) -> tuple[dict[str, np.ndarray], dict]:
+        """Reset environment with optional custom flow matrix.
+
+        Args:
+            seed: Random seed
+            flow_matrix: Optional custom flow matrix for dynamic adaptation.
+                         If None, uses default flow from pathways.
+
+        Returns:
+            Tuple of (observation, info)
+        """
         super().reset(seed=seed)
         self.logger.info("Resetting environment")
 
@@ -223,9 +312,25 @@ class LayoutEnv(gym.Env):
         self.cost_manager.initialize(pathways=pathways)
         self.cost_engine = self.cost_manager.create_cost_engine()
 
+        # Handle custom flow matrix injection
+        if flow_matrix is not None:
+            self.logger.info("Injecting custom flow matrix")
+            self.flow_matrix = flow_matrix[:self.num_total_slot, :self.num_total_slot]
+            self._update_cost_engine_with_flow(self.flow_matrix)
+        else:
+            # Extract default flow from pathways
+            self.flow_matrix = self._extract_flow_matrix()
+
         self.current_step = 0
         self.initial_cost = self.cost_engine.current_travel_cost
         self.current_cost = self.initial_cost
+        self.best_cost = self.initial_cost
+        self._no_improvement_count = 0
+
+        # Compute cost normalizer on first reset
+        if self.cost_normalizer is None:
+            self.cost_normalizer = self._estimate_cost_scale()
+            self.logger.info(f"Cost normalizer initialized: {self.cost_normalizer:.2f}")
 
         self.logger.info(
             f"New instance created. Active departments: {self.num_total_slot}, Initial travel cost: {self.initial_cost}"
@@ -234,9 +339,14 @@ class LayoutEnv(gym.Env):
         observation = self._get_observation()
         info = self._get_info()
 
-        return observation.to_dict(), info
+        return observation, info
 
-    def _get_observation(self) -> GraphObservation:
+    def _get_observation(self) -> dict[str, np.ndarray]:
+        """Get observation including flow matrix for dynamic adaptation.
+
+        Returns:
+            Dictionary observation with all required fields
+        """
         x_categorical = (
             np.ones((self.max_departments,), dtype=np.int32) * self.PADDING_IDX
         )
@@ -280,14 +390,21 @@ class LayoutEnv(gym.Env):
                 edge_weight[i] = weight
                 edge_mask[i] = 1
 
-        return GraphObservation(
-            x_numerical=x_norm_numerical,
-            x_categorical=x_categorical,
-            edge_index=edge_index,
-            edge_weight=edge_weight,
-            node_mask=node_mask,
-            edge_mask=edge_mask,
-        )
+        # Add flow matrix to observation
+        padded_flow = np.zeros((self.max_departments, self.max_departments), dtype=np.float32)
+        if self.flow_matrix is not None:
+            n = min(self.flow_matrix.shape[0], self.max_departments)
+            padded_flow[:n, :n] = self.flow_matrix[:n, :n]
+
+        return {
+            "x_numerical": x_norm_numerical,
+            "x_categorical": x_categorical,
+            "edge_index": edge_index,
+            "edge_weight": edge_weight,
+            "node_mask": node_mask,
+            "edge_mask": edge_mask,
+            "flow_matrix": padded_flow,
+        }
 
     def _get_info(self) -> dict:
         return {
