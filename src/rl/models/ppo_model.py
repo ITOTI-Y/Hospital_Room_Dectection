@@ -6,6 +6,7 @@ from tianshou.data import Batch
 
 from .actor import AutoregressiveActor
 from .feature_extractor import FeatureProcessor
+from .flow_encoder import FlowAwareGCNEncoder
 from .gnn_encoder import GCNEncoder
 from .value_net import ValueNet
 
@@ -28,9 +29,14 @@ class LayoutOptimizationModel(nn.Module):
         value_pooling_type: Literal["mean", "max", "sum", "attention"] = "mean",
         value_dropout: float = 0.1,
         device: torch.device | None = None,
+        # New parameters for flow-aware encoding
+        use_flow_aware: bool = False,
+        flow_attention_heads: int = 4,
     ):
         super().__init__()
         self.device: torch.device | None = device
+        self.use_flow_aware = use_flow_aware
+        self.num_categories = num_categories
 
         self.feature_processor = FeatureProcessor(
             num_categories=num_categories,
@@ -40,13 +46,26 @@ class LayoutOptimizationModel(nn.Module):
             padding_idx=num_categories - 1,
         )
 
-        self.gnn_encoder = GCNEncoder(
-            input_dim=self.feature_processor.output_dim,
-            hidden_dims=gnn_hidden_dims or [128, 128],
-            output_dim=gnn_output_dim,
-            num_layers=gnn_num_layers,
-            dropout=gnn_dropout,
-        )
+        # Choose encoder based on use_flow_aware flag
+        if use_flow_aware:
+            self.gnn_encoder = FlowAwareGCNEncoder(
+                input_dim=self.feature_processor.output_dim,
+                hidden_dims=gnn_hidden_dims or [128, 128],
+                output_dim=gnn_output_dim,
+                max_departments=num_categories,
+                num_layers=gnn_num_layers,
+                dropout=gnn_dropout,
+                n_attention_heads=flow_attention_heads,
+                use_flow_attention=True,
+            )
+        else:
+            self.gnn_encoder = GCNEncoder(
+                input_dim=self.feature_processor.output_dim,
+                hidden_dims=gnn_hidden_dims or [128, 128],
+                output_dim=gnn_output_dim,
+                num_layers=gnn_num_layers,
+                dropout=gnn_dropout,
+            )
 
         self.actor = AutoregressiveActor(
             node_hidden_dim=gnn_output_dim,
@@ -74,6 +93,7 @@ class LayoutOptimizationModel(nn.Module):
         torch.Tensor,
         torch.Tensor,
         torch.Tensor,
+        torch.Tensor | None,
     ]:
         if isinstance(obs, Batch):
             x_categorical = obs.x_categorical
@@ -82,6 +102,7 @@ class LayoutOptimizationModel(nn.Module):
             edge_weight = obs.edge_weight
             node_mask = obs.node_mask
             edge_mask = obs.edge_mask
+            flow_matrix = getattr(obs, "flow_matrix", None)
         else:
             x_categorical = obs["x_categorical"]
             x_numerical = obs["x_numerical"]
@@ -89,6 +110,7 @@ class LayoutOptimizationModel(nn.Module):
             edge_weight = obs["edge_weight"]
             node_mask = obs["node_mask"]
             edge_mask = obs["edge_mask"]
+            flow_matrix = obs.get("flow_matrix", None)
 
         x_categorical = torch.as_tensor(
             x_categorical, device=self.device, dtype=torch.long
@@ -103,25 +125,42 @@ class LayoutOptimizationModel(nn.Module):
         node_mask = torch.as_tensor(node_mask, device=self.device, dtype=torch.float32)
         edge_mask = torch.as_tensor(edge_mask, device=self.device, dtype=torch.float32)
 
-        return x_categorical, x_numerical, edge_index, edge_weight, node_mask, edge_mask
+        # Process flow_matrix if available
+        if flow_matrix is not None:
+            flow_matrix = torch.as_tensor(
+                flow_matrix, device=self.device, dtype=torch.float32
+            )
+
+        return x_categorical, x_numerical, edge_index, edge_weight, node_mask, edge_mask, flow_matrix
 
     def encode_observations(
         self,
         obs: dict | Batch,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        x_categorical, x_numerical, edge_index, edge_weight, node_mask, edge_mask = (
+        x_categorical, x_numerical, edge_index, edge_weight, node_mask, edge_mask, flow_matrix = (
             self._prepare_inputs(obs)
         )
 
         node_features = self.feature_processor(x_categorical, x_numerical)
 
-        node_embeddings = self.gnn_encoder.forward_batch(
-            x=node_features,
-            edge_index=edge_index,
-            edge_weight=edge_weight,
-            node_mask=node_mask,
-            edge_mask=edge_mask,
-        )
+        # Use flow-aware encoding if available and enabled
+        if self.use_flow_aware and flow_matrix is not None:
+            node_embeddings = self.gnn_encoder.forward_batch(
+                x=node_features,
+                edge_index=edge_index,
+                edge_weight=edge_weight,
+                node_mask=node_mask,
+                edge_mask=edge_mask,
+                flow_matrix=flow_matrix,
+            )
+        else:
+            node_embeddings = self.gnn_encoder.forward_batch(
+                x=node_features,
+                edge_index=edge_index,
+                edge_weight=edge_weight,
+                node_mask=node_mask,
+                edge_mask=edge_mask,
+            )
 
         return node_embeddings, node_mask
 

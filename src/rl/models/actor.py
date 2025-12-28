@@ -9,7 +9,7 @@ class AutoregressiveActor(nn.Module):
         node_hidden_dim: int,
         actor_hidden_dim: int,
         dropout: float = 0.1,
-        eval_temperature: float = 0.3,
+        eval_temperature: float = 0.5,
     ):
         """
         Autoregression Policy Network, used to select two departments to swap.
@@ -18,7 +18,7 @@ class AutoregressiveActor(nn.Module):
             node_hidden_dim (int): GNN output dimension
             actor_hidden_dim (int): Actor MLP hidden dimension
             dropout (float, optional): Dropout rate
-            eval_temperature (float, optional): Temperature for evaluation sampling (lower = more deterministic)
+            eval_temperature (float, optional): Temperature for evaluation sampling (higher = more exploration)
         """
 
         super().__init__()

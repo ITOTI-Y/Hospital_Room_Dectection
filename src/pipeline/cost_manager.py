@@ -369,6 +369,57 @@ class CostEngine:
         self._sort_np_matrices()
         self._previous_swap = None
 
+    def get_layout_snapshot(self) -> dict[str, str]:
+        """Get a snapshot of the current layout for later restoration."""
+        return copy.deepcopy(self._layout)
+
+    def restore_layout(self, layout: dict[str, str]) -> float:
+        """Restore layout from a snapshot and return the new cost.
+
+        Args:
+            layout: A layout snapshot from get_layout_snapshot()
+
+        Returns:
+            The travel cost after restoration
+        """
+        # Reset to initial state first
+        self._layout = copy.deepcopy(self.initial_layout)
+        self._slot_layout = {v: k for k, v in self._layout.items()}
+        self._precompute_np_times()
+
+        # Apply the target layout by swapping
+        # Find which departments need to be swapped
+        for dept, target_slot in layout.items():
+            current_slot = self._layout[dept]
+            if current_slot != target_slot:
+                # Find which department is currently in target_slot
+                dept_in_target = self._slot_layout[target_slot]
+                # Swap them
+                self._perform_swap_internal(dept, dept_in_target)
+
+        self._sort_np_matrices()
+        return self.current_travel_cost
+
+    def _perform_swap_internal(self, dept1: str, dept2: str) -> None:
+        """Internal swap without sorting (for batch operations)."""
+        slot1 = self._layout[dept1]
+        slot2 = self._layout[dept2]
+
+        d_id1: int = self.name_id_to_id.get(dept1, -1)
+        d_id2: int = self.name_id_to_id.get(dept2, -1)
+
+        mask_id1 = self.np_times[:, :2] == d_id1
+        mask_id2 = self.np_times[:, :2] == d_id2
+
+        self.np_times[:, :2][mask_id1] = d_id2
+        self.np_times[:, :2][mask_id2] = d_id1
+
+        self._layout[dept1] = slot2
+        self._layout[dept2] = slot1
+
+        self._slot_layout[slot1] = dept2
+        self._slot_layout[slot2] = dept1
+
     def swap(self, dept1: str, dept2: str) -> tuple[float, bool]:
         slot1 = self._layout[dept1]
         slot2 = self._layout[dept2]

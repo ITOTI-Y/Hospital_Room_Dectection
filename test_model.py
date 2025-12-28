@@ -36,6 +36,9 @@ def load_model(config, model_path: Path, device: torch.device) -> LayoutA2CPolic
         value_pooling_type=agent_cfg.value_pooling_type,
         value_dropout=agent_cfg.value_dropout,
         device=device,
+        # Flow-aware encoding parameters
+        use_flow_aware=getattr(agent_cfg, "use_flow_aware", False),
+        flow_attention_heads=getattr(agent_cfg, "flow_attention_heads", 4),
     )
 
     # Create a dummy optimizer for policy initialization
@@ -150,34 +153,38 @@ def run_test_episode(policy: LayoutA2CPolicy, env: LayoutEnv, case_id: int) -> d
         )
 
     # Calculate final results
-    final_cost = info["current_cost"]
+    # After episode ends, rollback should have been applied
+    final_cost = info["current_cost"]  # This should now equal best_cost after rollback
+    best_cost = info.get("best_cost", env.best_cost)
+    best_step = info.get("best_step", env.best_step)
     improvement = (initial_cost - final_cost) / initial_cost * 100
-    best_cost = env.best_cost
     best_improvement = (initial_cost - best_cost) / initial_cost * 100
 
     logger.info(f"{'-' * 60}")
     logger.info("\nResults Summary:")
     logger.info(f"  Initial cost:     {initial_cost:.2f}")
-    logger.info(f"  Final cost:       {final_cost:.2f}")
-    logger.info(f"  Best cost:        {best_cost:.2f}")
-    logger.info(f"  Improvement:      {improvement:.2f}%")
-    logger.info(f"  Best improvement: {best_improvement:.2f}%")
+    logger.info(f"  Final cost:       {final_cost:.2f} (after rollback)")
+    logger.info(f"  Best cost:        {best_cost:.2f} (achieved at step {best_step})")
+    logger.info(f"  Final improvement: {improvement:.2f}%")
     logger.info(f"  Total reward:     {total_reward:.2f}")
     logger.info(f"  Total swaps:      {env.total_swaps}")
     logger.info(f"  Invalid swaps:    {env.invalid_swaps}")
     logger.info(f"  No-change swaps:  {env.no_change_swaps}")
+    logger.info(f"  Unique actions:   {len(set(env.action_history))}")
 
     return {
         "case_id": case_id,
         "initial_cost": initial_cost,
         "final_cost": final_cost,
         "best_cost": best_cost,
+        "best_step": best_step,
         "improvement": improvement,
         "best_improvement": best_improvement,
         "total_reward": total_reward,
         "total_swaps": env.total_swaps,
         "invalid_swaps": env.invalid_swaps,
         "no_change_swaps": env.no_change_swaps,
+        "unique_actions": len(set(env.action_history)),
         "swap_history": swap_history,
     }
 
@@ -185,7 +192,8 @@ def run_test_episode(policy: LayoutA2CPolicy, env: LayoutEnv, case_id: int) -> d
 def main():
     """Main test function."""
     config = config_loader.ConfigLoader()
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    # Force CPU to avoid CUDA memory issues
+    device = torch.device("cpu")
     logger.info(f"Using device: {device}")
 
     # Load best model
@@ -196,9 +204,10 @@ def main():
 
     policy, _ = load_model(config, model_path, device)
 
-    # Run 2 test cases
+    # Run 10 test cases for comprehensive evaluation
+    num_test_cases = 10
     results = []
-    for case_id in range(1, 3):
+    for case_id in range(1, num_test_cases + 1):
         # Create fresh environment for each test
         env = LayoutEnv(
             config=config,
@@ -214,22 +223,26 @@ def main():
     logger.info("OVERALL TEST SUMMARY")
     logger.info(f"{'=' * 60}")
 
-    avg_improvement = np.mean([r["improvement"] for r in results])
-    avg_best_improvement = np.mean([r["best_improvement"] for r in results])
-    avg_no_change = np.mean([r["no_change_swaps"] for r in results])
+    improvements = [r["improvement"] for r in results]
+    no_changes = [r["no_change_swaps"] for r in results]
+    unique_actions = [r["unique_actions"] for r in results]
+    best_steps = [r["best_step"] for r in results]
 
     for r in results:
         logger.info(
-            f"Case #{r['case_id']}: "
-            f"Improvement={r['improvement']:.2f}%, "
-            f"Best={r['best_improvement']:.2f}%, "
-            f"No-change={r['no_change_swaps']}"
+            f"Case #{r['case_id']:2d}: "
+            f"Improvement={r['improvement']:6.2f}% (best at step {r['best_step']:2d}), "
+            f"No-change={r['no_change_swaps']:2d}, "
+            f"Unique={r['unique_actions']:2d}"
         )
 
-    logger.info("\nAverages:")
-    logger.info(f"  Improvement:      {avg_improvement:.2f}%")
-    logger.info(f"  Best improvement: {avg_best_improvement:.2f}%")
-    logger.info(f"  No-change swaps:  {avg_no_change:.1f}")
+    logger.info(f"\n{'=' * 60}")
+    logger.info("STATISTICS")
+    logger.info(f"{'=' * 60}")
+    logger.info(f"  Improvement:  mean={np.mean(improvements):6.2f}%, std={np.std(improvements):5.2f}%, min={np.min(improvements):6.2f}%, max={np.max(improvements):6.2f}%")
+    logger.info(f"  No-change:    mean={np.mean(no_changes):5.1f}, std={np.std(no_changes):4.1f}")
+    logger.info(f"  Unique acts:  mean={np.mean(unique_actions):5.1f}, std={np.std(unique_actions):4.1f}")
+    logger.info(f"  Best step:    mean={np.mean(best_steps):5.1f}, std={np.std(best_steps):4.1f}")
 
 
 if __name__ == "__main__":

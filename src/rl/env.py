@@ -21,6 +21,7 @@ class GraphObservation:
     node_mask: np.ndarray  # Shape: (max_departments,)
     edge_mask: np.ndarray  # Shape: (E_max,)
     action_history_mask: np.ndarray  # Shape: (max_departments, max_departments)
+    flow_matrix: np.ndarray  # Shape: (max_departments, max_departments) - patient flow demands
 
     def to_dict(self) -> dict[str, np.ndarray]:
         return {
@@ -31,6 +32,7 @@ class GraphObservation:
             "node_mask": self.node_mask,
             "edge_mask": self.edge_mask,
             "action_history_mask": self.action_history_mask,
+            "flow_matrix": self.flow_matrix,
         }
 
     def __repr__(self) -> str:
@@ -43,6 +45,7 @@ class GraphObservation:
             f" node_mask shape: {self.node_mask.shape},\n"
             f" edge_mask shape: {self.edge_mask.shape},\n"
             f" action_history_mask shape: {self.action_history_mask.shape},\n"
+            f" flow_matrix shape: {self.flow_matrix.shape},\n"
             f")"
         )
 
@@ -128,6 +131,12 @@ class LayoutEnv(gym.Env):
                     shape=(self.max_departments, self.max_departments),
                     dtype=np.float32,
                 ),
+                "flow_matrix": spaces.Box(
+                    low=0,
+                    high=1,
+                    shape=(self.max_departments, self.max_departments),
+                    dtype=np.float32,
+                ),
             }
         )
         self.action_space = spaces.MultiDiscrete(
@@ -138,6 +147,8 @@ class LayoutEnv(gym.Env):
         self.current_cost = 0.0
         self.initial_cost = 0.0
         self.best_cost = 0.0  # Track best cost achieved in episode
+        self.best_layout: dict[str, str] | None = None  # Track best layout for rollback
+        self.best_step = 0  # Track which step achieved best cost
         self.total_swaps = 0
         self.invalid_swaps = 0
         self.no_change_swaps = 0
@@ -151,6 +162,16 @@ class LayoutEnv(gym.Env):
         self.action_history_window: int = 10  # Window size for repetition check
         self.steps_without_improvement: int = 0  # For early termination
         self.no_change_pairs: set[frozenset[int]] = set()  # Track pairs that resulted in no cost change
+
+        # Cost normalization for stable rewards
+        self.cost_normalizer: float = 1.0
+        self._estimate_cost_normalizer()
+
+        # Flow matrix for dynamic adaptation
+        self.flow_matrix: np.ndarray = np.zeros(
+            (self.max_departments, self.max_departments), dtype=np.float32
+        )
+        self.custom_flow_matrix: np.ndarray | None = None  # For external flow injection
 
     def _precompute_normalization_stats(self) -> None:
         pathways = self.pathway_generator.generate_all()
@@ -183,6 +204,64 @@ class LayoutEnv(gym.Env):
         self.num_total_slot = len(slots_name_ids)
         self.index_to_dept_id = dict(enumerate(slots_name_ids))
         self.dept_id_to_index = {name: i for i, name in enumerate(slots_name_ids)}
+
+    def _estimate_cost_normalizer(self) -> None:
+        """
+        Estimate cost scale for reward normalization.
+
+        Uses travel time statistics to create a reasonable normalizer
+        that keeps rewards in a stable range across different layouts.
+        """
+        travel_times = self.cost_manager.travel_times.values
+        valid_times = travel_times[travel_times > 0]
+
+        if len(valid_times) > 0:
+            # Use std * num_slots as normalizer
+            # This gives a sense of "expected cost variance"
+            self.cost_normalizer = float(np.std(valid_times) * self.num_total_slot)
+        else:
+            self.cost_normalizer = 1.0
+
+        # Ensure normalizer is not too small
+        self.cost_normalizer = max(self.cost_normalizer, 100.0)
+        self.logger.debug(f"Cost normalizer set to: {self.cost_normalizer:.2f}")
+
+    def _extract_flow_matrix(self) -> np.ndarray:
+        """
+        Extract normalized flow matrix from pair_weights.
+
+        The flow matrix represents patient flow demands between departments,
+        enabling the model to adapt to changing patient patterns.
+        """
+        n = self.num_total_slot
+        flow = np.zeros((self.max_departments, self.max_departments), dtype=np.float32)
+
+        pair_weights = self.cost_manager.pair_weights
+        for (d1, d2), weight in pair_weights.items():
+            if d1 in self.dept_id_to_index and d2 in self.dept_id_to_index:
+                i, j = self.dept_id_to_index[d1], self.dept_id_to_index[d2]
+                flow[i, j] = weight
+                flow[j, i] = weight  # Symmetric
+
+        # Normalize to [0, 1]
+        max_flow = flow.max()
+        if max_flow > 0:
+            flow = flow / max_flow
+
+        return flow
+
+    def set_flow_matrix(self, flow_matrix: np.ndarray) -> None:
+        """
+        Set custom flow matrix for dynamic adaptation experiments.
+
+        Args:
+            flow_matrix: (max_departments, max_departments) normalized flow matrix
+        """
+        self.custom_flow_matrix = flow_matrix.astype(np.float32)
+
+    def get_flow_matrix(self) -> np.ndarray:
+        """Get the current flow matrix."""
+        return self.flow_matrix.copy()
 
     def _compute_numerical_features(self):
         pass
@@ -351,7 +430,12 @@ class LayoutEnv(gym.Env):
             self.action_flag_feature[:, 0] = 0.0
 
         self.current_cost = new_cost
-        self.best_cost = min(self.best_cost, new_cost)
+
+        # Track best cost and save layout snapshot
+        if new_cost < self.best_cost:
+            self.best_cost = new_cost
+            self.best_layout = self.cost_engine.get_layout_snapshot()
+            self.best_step = self.current_step
 
         cost_diff: float = previous_cost - new_cost
 
@@ -378,6 +462,9 @@ class LayoutEnv(gym.Env):
             terminal_reward = self._compute_terminal_reward()
             reward += terminal_reward
             components["terminal"] = terminal_reward
+            # Only rollback during evaluation, not training
+            if not self.is_training:
+                self._rollback_to_best()
             self._log_episode_end()
 
         observation = self._get_observation()
@@ -405,11 +492,40 @@ class LayoutEnv(gym.Env):
             f"swaps={self.total_swaps}, invalid={self.invalid_swaps}, "
             f"no_change={self.no_change_swaps}, "
             f"unique_actions={len(set(self.action_history))}, "
-            f"early_term={early_term}"
+            f"early_term={early_term}, "
+            f"best_step={self.best_step}"
         )
 
-    def reset(self, seed: int | None = None) -> tuple[dict[str, np.ndarray], dict]:
+    def _rollback_to_best(self) -> None:
+        """Rollback to the best layout achieved during the episode."""
+        if self.best_layout is not None and self.current_cost > self.best_cost:
+            cost_before_rollback = self.current_cost
+            self.current_cost = self.cost_engine.restore_layout(self.best_layout)
+            self.logger.info(
+                f"Rollback: step {self.current_step} -> step {self.best_step}, "
+                f"cost {cost_before_rollback:.1f} -> {self.current_cost:.1f} "
+                f"(saved {cost_before_rollback - self.current_cost:.1f})"
+            )
+
+    def reset(
+        self,
+        seed: int | None = None,
+        options: dict | None = None,
+    ) -> tuple[dict[str, np.ndarray], dict]:
+        """
+        Reset the environment.
+
+        Args:
+            seed: Random seed
+            options: Optional dict with:
+                - flow_matrix: Custom flow matrix for adaptation experiments
+        """
         super().reset(seed=seed)
+
+        # Extract flow_matrix from options if provided
+        flow_matrix = None
+        if options is not None:
+            flow_matrix = options.get("flow_matrix")
 
         pathways = self.pathway_generator.generate_all()
         self.cost_manager.initialize(pathways=pathways)
@@ -419,6 +535,8 @@ class LayoutEnv(gym.Env):
         self.initial_cost = self.cost_engine.current_travel_cost
         self.current_cost = self.initial_cost
         self.best_cost = self.initial_cost
+        self.best_layout = self.cost_engine.get_layout_snapshot()  # Save initial layout as best
+        self.best_step = 0
         self.total_swaps = 0
         self.invalid_swaps = 0
         self.no_change_swaps = 0
@@ -428,6 +546,15 @@ class LayoutEnv(gym.Env):
         self.steps_without_improvement = 0  # Reset early termination counter
         self.no_change_pairs = set()  # Reset no-change pairs tracking
         self.action_flag_feature[:, 0] = 0.0
+
+        # Extract or use custom flow matrix
+        if flow_matrix is not None:
+            self.flow_matrix = flow_matrix.astype(np.float32)
+            self.custom_flow_matrix = flow_matrix.astype(np.float32)
+        elif self.custom_flow_matrix is not None:
+            self.flow_matrix = self.custom_flow_matrix
+        else:
+            self.flow_matrix = self._extract_flow_matrix()
 
         self.logger.info(
             f"Reset: departments={self.num_total_slot}, initial_cost={self.initial_cost:.1f}"
@@ -504,12 +631,15 @@ class LayoutEnv(gym.Env):
             node_mask=node_mask,
             edge_mask=edge_mask,
             action_history_mask=action_history_mask,
+            flow_matrix=self.flow_matrix,
         )
 
     def _get_info(self) -> dict:
         return {
             "current_cost": self.current_cost,
             "initial_cost": self.initial_cost,
+            "best_cost": self.best_cost,
+            "best_step": self.best_step,
             "step": self.current_step,
             "num_departments": self.num_total_slot,
         }

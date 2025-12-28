@@ -1,6 +1,6 @@
 # Global parameters
-num_train_envs: 4  # Reduced from 8 for memory efficiency with FlowAwareGCN
-num_test_envs: 8   # Reduced from 16 for memory efficiency
+num_train_envs: 8
+num_test_envs: 16
 
 max_departments: 100
 max_steps: 60  # Reduced from 100 to encourage efficient solutions
@@ -13,13 +13,13 @@ lr_min: 1e-5  # Minimum learning rate (for cosine scheduler)
 
 
 # TianShou PPO parameters
-buffer_size: 10000  # Reduced from 20000 for memory efficiency
+buffer_size: 20000
 max_epoch: 100
 step_per_epoch: 32000
 repeat_per_collect: 2  # V3 value
-episode_per_test: 8  # Reduced from 16
+episode_per_test: 16
 batch_size: 128  # V3 value
-step_per_collect: 3200  # Reduced from 6400
+step_per_collect: 6400
 
 # Early stopping and evaluation parameters
 early_stop_patience: 15  # Stop if no improvement for N epochs
@@ -35,10 +35,6 @@ gnn_hidden_dims: [256, 256]
 gnn_output_dim: 256
 gnn_num_layers: 3
 gnn_dropout: 0.1
-
-# Flow-aware encoding (for dynamic adaptation)
-use_flow_aware: true  # Enable flow-aware GNN encoder
-flow_attention_heads: 4  # Number of attention heads for flow attention
 
 # Actor parameters
 actor_hidden_dim: 256
