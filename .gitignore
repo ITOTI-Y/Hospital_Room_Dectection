@@ -167,3 +167,5 @@ docs/_dev/
 # TensorBoard files
 events.* 
 *.pth
+
+.claude/*

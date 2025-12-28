@@ -1,7 +1,7 @@
 pathways_number: 40
 
 
-training_generation:
+training:
   # 1. 可互换的科室分组
   department_pools:
     DiagnosticImaging: ["放射科", "超声科"]
@@ -41,7 +41,7 @@ training_generation:
       structure:
         - { type: primary_department, from_pool: SurgicalDepts }
         - { type: optional, probability: 0.9, step: { type: fragment, fragment_name: "SurgicalPreOp" } }
-        - { type: repeat, target: primary_department } 
+        - { type: repeat, target: primary_department }
 
     - id: GYN_PEDS_VISIT
       description: "妇产儿科流程"
@@ -72,13 +72,737 @@ training_generation:
       structure:
         - { type: primary_department, from_pool: PrimaryCare }
 
-# ===================================================================
-# Part 2: Fixed Scenarios for Evaluation (Evaluation Phase)
-# ===================================================================
-evaluation_scenarios:
+evaluation:
   smart:
     description: "智慧医院流程评估场景"
-    file_path: "data/process_smart.json"
+    # 智能流程：无需挂号收费，直接就诊
+    meta_rules:
+      - id: GENERAL_PRACTICE
+        description: "全科流程"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "全科" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "心血管内科" }
+          - { type: fixed, name: "全科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: MEDICAL_CHECKUP_PROCESS
+        description: "体检流程"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "体检科" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "心血管内科" }
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "体检科" }
+
+      - id: PEDIATRIC_PROCESS
+        description: "儿科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "儿科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: TRADITIONAL_CHINESE_MEDICINE_PROCESS
+        description: "中医科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "中医科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: RESPIRATORY_PROCESS
+        description: "呼吸科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "呼吸内科" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "呼吸内科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: KIDNEY_PROCESS
+        description: "肾内科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "肾内科" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "肾内科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: KIDNEY_DIALYSIS_PROCESS
+        description: "肾透析"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "肾内科" }
+          - { type: fixed, name: "透析中心" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: ORTHOPEDIC_PROCESS
+        description: "骨科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "骨科" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "骨科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: CARDIOVASCULAR_PROCESS
+        description: "心血管内科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "心血管内科" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "心血管内科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: NEUROLOGY_PROCESS
+        description: "神经科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "神经内科" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "神经内科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: DIGESTIVE_PROCESS
+        description: "消化内科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "消化内科" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "消化内科" }
+          - { type: fixed, name: "内镜中心" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: ENDOSCOPY_PROCESS
+        description: "内镜中心"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "内镜中心" }
+          - { type: fixed, name: "消化内科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: ONCOLOGY_PROCESS
+        description: "肿瘤科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "肿瘤科" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "病理科" }
+          - { type: fixed, name: "肿瘤科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: UROLOGY_PROCESS
+        description: "泌尿外科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "泌尿外科" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "泌尿外科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: BURN_SURGERY_PROCESS
+        description: "烧伤整形科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "烧伤整形科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: THYROID_SURGERY_PROCESS
+        description: "甲状腺外科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "甲状腺外科" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "甲状腺外科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: LIVER_BILIARY_PANCREAS_SURGERY_PROCESS
+        description: "肝胆胰外科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "肝胆胰外科" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "肝胆胰外科" }
+          - { type: fixed, name: "内镜中心" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: LIVER_BILIARY_PANCREAS_ENDOSCOPY_PROCESS
+        description: "肝胆内镜"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "内镜中心" }
+          - { type: fixed, name: "肝胆胰外科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: REPRODUCTIVE_MEDICINE_PROCESS
+        description: "生殖医学科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "生殖医学科" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "生殖医学科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: PRENATAL_DIAGNOSIS_PROCESS
+        description: "产前诊断门诊"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "产前诊断门诊" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "产前诊断门诊" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: OBSTETRICS_PROCESS
+        description: "产科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "产科" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "产科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: GYNECOLOGY_PROCESS
+        description: "妇科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "妇科" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "妇科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: DERMATOLOGY_PROCESS
+        description: "皮肤科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "皮肤科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: LASER_PROCESS
+        description: "综合激光科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "综合激光科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: EYE_PROCESS
+        description: "眼科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "眼科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: ENT_PROCESS
+        description: "耳鼻喉科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "耳鼻喉科" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "耳鼻喉科" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: ORAL_PROCESS_1
+        description: "口腔一区"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "口腔一区" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "口腔一区" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: ORAL_PROCESS_2
+        description: "口腔科二区"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "口腔二区" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "口腔二区" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: EMERGENCY_PROCESS
+        description: "急诊科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "内诊药房" }
+
   traditional:
     description: "传统医院流程评估场景"
-    file_path: "data/process_traditional.json"
+    # 传统流程：包含多次挂号收费环节
+    meta_rules:
+      - id: GENERAL_PRACTICE
+        description: "全科流程"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "全科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "心血管内科" }
+          - { type: fixed, name: "全科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: PHYSICAL_EXAM
+        description: "体检流程"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "体检科" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "心血管内科" }
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "体检科" }
+
+      - id: PEDIATRICS_ROUTINE
+        description: "儿科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "儿科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: TCM_ROUTINE
+        description: "中医科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "中医科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: RESPIRATORY_ROUTINE
+        description: "呼吸科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "呼吸内科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "呼吸内科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: NEPHROLOGY_ROUTINE
+        description: "肾内科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "肾内科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "肾内科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: RENAL_DIALYSIS
+        description: "肾透析"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "肾内科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "透析中心" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: ORTHOPEDICS_ROUTINE
+        description: "骨科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "骨科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "骨科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: CARDIOLOGY_ROUTINE
+        description: "心血管内科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "心血管内科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "心血管内科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: NEUROLOGY_ROUTINE
+        description: "神经科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "神经内科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "神经内科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: GASTROENTEROLOGY_ROUTINE
+        description: "消化内科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "消化内科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "消化内科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内镜中心" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: GI_ENDOSCOPY
+        description: "消化内镜"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内镜中心" }
+          - { type: fixed, name: "消化内科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: ONCOLOGY_ROUTINE
+        description: "肿瘤科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "肿瘤科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "病理科" }
+          - { type: fixed, name: "肿瘤科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: UROLOGY_ROUTINE
+        description: "泌尿外科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "泌尿外科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "泌尿外科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: BURN_PLASTIC_SURGERY
+        description: "烧伤整形科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "烧伤整形科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: THYROID_SURGERY
+        description: "甲状腺外科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "甲状腺外科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "甲状腺外科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: HEPATOBILIARY_SURGERY
+        description: "肝胆胰外科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "肝胆胰外科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "肝胆胰外科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内镜中心" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: HEPATOBILIARY_ENDOSCOPY
+        description: "肝胆内镜"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内镜中心" }
+          - { type: fixed, name: "肝胆胰外科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: REPRODUCTIVE_MEDICINE
+        description: "生殖医学科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "生殖医学科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "生殖医学科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: PRENATAL_DIAGNOSIS
+        description: "产前诊断门诊"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "产前诊断门诊" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "产前诊断门诊" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: OBSTETRICS_ROUTINE
+        description: "产科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "产科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "产科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: GYNECOLOGY_ROUTINE
+        description: "妇科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "妇科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "采血处" }
+          - { type: fixed, name: "检验中心" }
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "妇科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: DERMATOLOGY_ROUTINE
+        description: "皮肤科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "皮肤科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: LASER_THERAPY
+        description: "综合激光科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "综合激光科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: OPHTHALMOLOGY_ROUTINE
+        description: "眼科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "眼科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: ENT_ROUTINE
+        description: "耳鼻喉科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "耳鼻喉科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "耳鼻喉科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: DENTISTRY_AREA1_ROUTINE
+        description: "口腔一区"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "口腔一区" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "口腔一区" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: DENTISTRY_AREA2_ROUTINE
+        description: "口腔科二区"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "口腔二区" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "口腔二区" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
+
+      - id: EMERGENCY_ROUTINE
+        description: "急诊科"
+        base_weight: 1.0
+        start_nodes: ["门"]
+        end_nodes: ["门"]
+        structure:
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "超声科" }
+          - { type: fixed, name: "放射科" }
+          - { type: fixed, name: "挂号收费" }
+          - { type: fixed, name: "内诊药房" }
