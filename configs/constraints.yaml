@@ -2,11 +2,11 @@
 area_compatibility_tolerance: 0.15
 
 adjacency_preferences:
-  - depts: ["静配中心", "ICU"]
+  - depts: ["PIVAS", "ICU"]
     weight: 1.0
-  - depts: ["中心供应室", "内镜中心"]
+  - depts: ["CSSD", "EndoscopyCenter"]
     weight: 1.0
-  - depts: ["采血处", "检验中心"]
+  - depts: ["BloodCollection", "ClinicalLaboratory"]
     weight: 1.0
 
 invalid_action: -2.0
