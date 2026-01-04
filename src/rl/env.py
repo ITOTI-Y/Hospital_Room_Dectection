@@ -1,6 +1,6 @@
 import uuid
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import Any, ClassVar
 
 import gymnasium as gym
 import numpy as np
@@ -228,7 +228,9 @@ class LayoutEnv(gym.Env):
 
         return observation.to_dict(), total_reward, terminated, truncated, info
 
-    def reset(self, seed: int | None = None) -> tuple[dict[str, np.ndarray], dict]:
+    def reset(
+        self, *, seed: int | None = None, options: dict[str, Any] | None = None
+    ) -> tuple[dict[str, np.ndarray], dict]:
         super().reset(seed=seed)
         self.logger.info("Resetting environment")
 

@@ -1,28 +1,9 @@
 # src/utils/logger.py
 
-import json
 import pathlib
-import pickle
 import sys
-from typing import Any
 
-import numpy as np
 from loguru import logger
-
-
-class NpEncoder(json.JSONEncoder):
-    """Custom JSON encoder to handle Numpy data types and path objects."""
-
-    def default(self, obj: Any) -> Any:
-        if isinstance(obj, np.integer):
-            return int(obj)
-        if isinstance(obj, np.floating):
-            return float(obj)
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        if isinstance(obj, pathlib.Path):
-            return str(obj)
-        return super().default(obj)
 
 
 def setup_logger(log_file: pathlib.Path | None = None, level: str = "INFO") -> None:
@@ -74,27 +55,3 @@ def setup_logger(log_file: pathlib.Path | None = None, level: str = "INFO") -> N
             diagnose=True,
             enqueue=True,
         )
-
-
-def save_json(data: dict, path: pathlib.Path):
-    """Save dictionary to JSON file using custom encoder."""
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2, cls=NpEncoder)
-
-
-def load_json(path: pathlib.Path) -> dict:
-    """Load dictionary from JSON file."""
-    with open(path, encoding="utf-8") as f:
-        return json.load(f)
-
-
-def save_pickle(data: Any, path: pathlib.Path):
-    """Serialize any Python object to pickle file."""
-    with open(path, "wb") as f:
-        pickle.dump(data, f)
-
-
-def load_pickle(path: pathlib.Path) -> Any:
-    """Load Python object from pickle file."""
-    with open(path, "rb") as f:
-        return pickle.load(f)

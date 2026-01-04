@@ -4,6 +4,7 @@ Defines plotter classes for visualizing network graphs using Matplotlib and Plot
 
 import abc
 import pathlib
+from pathlib import Path
 from typing import Any
 
 import networkx as nx
@@ -82,7 +83,7 @@ class BasePlotter(abc.ABC):
     def plot(
         self,
         graph: nx.Graph,
-        output_path: pathlib.Path | None = None,
+        output_path: Path | str | None = None,
         title: str = "Network Graph",
         # For Plotly layout, original image width
         graph_width: int | None = None,
@@ -209,9 +210,10 @@ class PlotlyPlotter(BasePlotter):
     def plot(
         self,
         graph: nx.Graph,
-        output_path: str | None = None,
+        output_path: Path | str | None = None,
         title: str = "3D Network Graph",
         graph_width: int | None = None,
+        graph_height: int | None = None,
         floor_z_map: dict[int, float] | None = None,
     ):
         if not graph.nodes:
