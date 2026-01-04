@@ -19,9 +19,9 @@ class ConfigLoader:
 
     @classmethod
     def _load_configs(cls) -> Any:
-        config_dir = Path(__file__).parent.parent.parent / "configs"
+        config_dir = Path(__file__).parent.parent.parent / 'configs'
 
-        for config_path in config_dir.glob("*.yaml"):
+        for config_path in config_dir.glob('*.yaml'):
             config_name = config_path.stem
             config_data = OmegaConf.load(config_path)
             setattr(cls, config_name, config_data)
@@ -29,5 +29,5 @@ class ConfigLoader:
     def __getattr__(self, name):
         raise AttributeError(
             f"Config '{name}' not found"
-            f"Available configs: {[key for key in self.__class__.__dict__ if not key.startswith('_')]}"
+            f'Available configs: {[key for key in self.__class__.__dict__ if not key.startswith("_")]}'
         )

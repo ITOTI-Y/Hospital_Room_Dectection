@@ -10,22 +10,22 @@ from torch_geometric.nn.aggr import AttentionalAggregation
 class GlobalPooling(nn.Module):
     def __init__(
         self,
-        pooling_type: Literal["mean", "max", "sum", "attention"] = "mean",
+        pooling_type: Literal['mean', 'max', 'sum', 'attention'] = 'mean',
         hidden_dim: int | None = None,
     ):
         super().__init__()
-        self.pooling_type: Literal["mean", "max", "sum", "attention"] = pooling_type
+        self.pooling_type: Literal['mean', 'max', 'sum', 'attention'] = pooling_type
 
-        if pooling_type == "mean":
+        if pooling_type == 'mean':
             self.pool = global_mean_pool
-        elif pooling_type == "max":
+        elif pooling_type == 'max':
             self.pool = global_max_pool
-        elif pooling_type == "sum":
+        elif pooling_type == 'sum':
             self.pool = global_add_pool
-        elif pooling_type == "attention":
+        elif pooling_type == 'attention':
             if hidden_dim is None:
-                logger.error("hidden_dim must be provided for attention pooling")
-                raise ValueError("hidden_dim must be provided for attention pooling")
+                logger.error('hidden_dim must be provided for attention pooling')
+                raise ValueError('hidden_dim must be provided for attention pooling')
             gate_nn = nn.Sequential(
                 nn.Linear(hidden_dim, hidden_dim // 2),
                 nn.Tanh(),
@@ -72,7 +72,7 @@ class ValueNet(nn.Module):
         node_embedding_dim: int,
         value_hidden_dim: int = 256,
         num_layers: int = 3,
-        pooling_type: Literal["mean", "max", "sum", "attention"] = "mean",
+        pooling_type: Literal['mean', 'max', 'sum', 'attention'] = 'mean',
         dropout: float = 0.1,
     ):
         super().__init__()
@@ -83,7 +83,7 @@ class ValueNet(nn.Module):
 
         self.global_pooling = GlobalPooling(
             pooling_type=pooling_type,
-            hidden_dim=node_embedding_dim if pooling_type == "attention" else None,
+            hidden_dim=node_embedding_dim if pooling_type == 'attention' else None,
         )
 
         layers = []
@@ -110,7 +110,7 @@ class ValueNet(nn.Module):
         linears = [m for m in self.value_head.modules() if isinstance(m, nn.Linear)]
         for i, module in enumerate(linears):
             is_last = i == len(linears) - 1
-            gain = 1.0 if is_last else nn.init.calculate_gain("relu")
+            gain = 1.0 if is_last else nn.init.calculate_gain('relu')
             nn.init.orthogonal_(module.weight, gain=gain)
             if module.bias is not None:
                 nn.init.zeros_(module.bias)

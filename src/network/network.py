@@ -76,20 +76,20 @@ class Network:
     ) -> np.ndarray:
         """Generates and caches a combined mask for a category or a list of node names."""
         if isinstance(identifier, list):
-            key = "_".join(sorted(identifier))
+            key = '_'.join(sorted(identifier))
         else:
             key = identifier
-        cache_key = f"{key}_{is_category}_{apply_morphology}"
+        cache_key = f'{key}_{is_category}_{apply_morphology}'
 
         if cache_key in self._mask_cache:
             return self._mask_cache[cache_key]
 
         if self._image_height is None or self._image_width is None:
-            raise RuntimeError("Image dimensions not set. Call _initialize_run first.")
+            raise RuntimeError('Image dimensions not set. Call _initialize_run first.')
 
         if is_category:
             if not isinstance(identifier, str):
-                raise ValueError("Category identifier must be a string.")
+                raise ValueError('Category identifier must be a string.')
             target_names = graph_config.get_nodes_by_category(identifier)
         else:
             target_names = identifier if isinstance(identifier, list) else [identifier]
@@ -104,7 +104,7 @@ class Network:
 
         for name in target_names:
             node_props = node_defs.get(name, {})
-            color_rgb = node_props.get("rgb")
+            color_rgb = node_props.get('rgb')
             if not color_rgb or self._current_image_data is None:
                 continue
 
@@ -118,14 +118,14 @@ class Network:
 
         if apply_morphology:
             geometry_config = graph_config.get_geometry_config()
-            kernel_size = geometry_config.get("morphology_kernel_size", (5, 5))
+            kernel_size = geometry_config.get('morphology_kernel_size', (5, 5))
             logger.info(
-                f"Kernel size before conversion: {kernel_size} (type: {type(kernel_size)})"
+                f'Kernel size before conversion: {kernel_size} (type: {type(kernel_size)})'
             )
             if isinstance(kernel_size, (float, int, str)):
                 kernel_size = (int(kernel_size), int(kernel_size))
             combined_mask = self.image_processor.apply_morphology(
-                combined_mask, operation="close_open", kernel_size=kernel_size
+                combined_mask, operation='close_open', kernel_size=kernel_size
             )
 
         self._mask_cache[cache_key] = combined_mask
@@ -144,13 +144,13 @@ class Network:
         special_ids = graph_config.get_special_ids()
         self._id_map = np.full(
             (self._image_height, self._image_width),
-            special_ids.get("background", -2),
+            special_ids.get('background', -2),
             dtype=np.int32,
         )
 
         if process_outside_nodes:
             s_config = graph_config.get_super_network_config()
-            outside_types = s_config.get("outside_types", [])
+            outside_types = s_config.get('outside_types', [])
             if outside_types:
                 for outside_type_name in outside_types:
                     outside_mask = self._outside_node_creator._create_mask_for_node(
@@ -159,7 +159,7 @@ class Network:
                         apply_morphology=True,
                     )
                     if outside_mask is not None:
-                        self._id_map[outside_mask != 0] = special_ids.get("outside", -1)
+                        self._id_map[outside_mask != 0] = special_ids.get('outside', -1)
 
     def _create_all_node_types(
         self, z_level: float, process_outside_nodes: bool, floor_num: int
@@ -167,19 +167,19 @@ class Network:
         """Iterates through node creators to populate the graph."""
         if self._current_image_data is None or self._id_map is None:
             raise RuntimeError(
-                "Network run not initialized properly. Call _initialize_run first."
+                'Network run not initialized properly. Call _initialize_run first.'
             )
 
         # Execute creators in the predefined order
         for creator in self._node_creators:
-            logger.info(f"Running creator: {creator.__class__.__name__}")
+            logger.info(f'Running creator: {creator.__class__.__name__}')
             creator.create_nodes(
                 self._current_image_data, self._id_map, z_level, floor_num
             )
 
         if process_outside_nodes:
             logger.info(
-                f"Running creator: {self._outside_node_creator.__class__.__name__}"
+                f'Running creator: {self._outside_node_creator.__class__.__name__}'
             )
             self._outside_node_creator.create_nodes(
                 self._current_image_data, self._id_map, z_level, floor_num
@@ -200,9 +200,9 @@ class Network:
         door_nodes = [
             (nid, data)
             for nid, data in all_nodes
-            if data.get("category") == "CONNECTOR"
-            and data.get("name") == "Door"
-            and data.get("pos_z") == z_level
+            if data.get('category') == 'CONNECTOR'
+            and data.get('name') == 'Door'
+            and data.get('pos_z') == z_level
         ]
 
         if not door_nodes:
@@ -213,7 +213,7 @@ class Network:
             if not nodes:
                 return None, []
             positions = np.array(
-                [(n_data["pos_x"], n_data["pos_y"]) for _, n_data in nodes]
+                [(n_data['pos_x'], n_data['pos_y']) for _, n_data in nodes]
             )
             return KDTree(positions), nodes
 
@@ -221,24 +221,24 @@ class Network:
         corridor_nodes = [
             (nid, data)
             for nid, data in all_nodes
-            if data.get("name") == "Corridor" and data.get("pos_z") == z_level
+            if data.get('name') == 'Corridor' and data.get('pos_z') == z_level
         ]
         corridor_tree, corridor_nodes_list = build_kdtree(corridor_nodes)
 
         room_nodes = [
             (nid, data)
             for nid, data in all_nodes
-            if data.get("category") in ["FIXED", "SLOT"]
-            and data.get("pos_z") == z_level
+            if data.get('category') in ['FIXED', 'SLOT']
+            and data.get('pos_z') == z_level
         ]
         room_tree, room_nodes_list = build_kdtree(room_nodes)
 
         other_connector_nodes = [
             (nid, data)
             for nid, data in all_nodes
-            if data.get("category") == "CONNECTOR"
-            and data.get("name") != "Door"
-            and data.get("pos_z") == z_level
+            if data.get('category') == 'CONNECTOR'
+            and data.get('name') != 'Door'
+            and data.get('pos_z') == z_level
         ]
         other_connector_tree, other_connector_nodes_list = build_kdtree(
             other_connector_nodes
@@ -247,16 +247,16 @@ class Network:
         nodes_to_remove = []
 
         for door_id, door_data in door_nodes:
-            door_type = door_data.get("door_type")
-            door_pos = (door_data["pos_x"], door_data["pos_y"])
+            door_type = door_data.get('door_type')
+            door_pos = (door_data['pos_x'], door_data['pos_y'])
 
-            if door_type == "EXTERIOR":
+            if door_type == 'EXTERIOR':
                 if corridor_tree:
                     _, idx = corridor_tree.query(door_pos)
                     nearest_node_id, _ = corridor_nodes_list[idx]
                     self.graph_manager.connect_nodes_by_ids(door_id, nearest_node_id)
 
-            elif door_type == "INTERIOR":
+            elif door_type == 'INTERIOR':
                 if corridor_tree:
                     _, idx = corridor_tree.query(door_pos)
                     nearest_node_id, _ = corridor_nodes_list[idx]
@@ -266,12 +266,12 @@ class Network:
                     nearest_node_id, _ = other_connector_nodes_list[idx]
                     self.graph_manager.connect_nodes_by_ids(door_id, nearest_node_id)
 
-            elif door_type == "ROOM":
+            elif door_type == 'ROOM':
                 # Connect to the colliding room node(s)
-                colliding_ids = door_data.get("colliding_node_ids", [])
+                colliding_ids = door_data.get('colliding_node_ids', [])
                 for nid in colliding_ids:
                     node_data = self.graph_manager.get_node_attributes(nid)
-                    if node_data and node_data.get("category") in ["FIXED", "SLOT"]:
+                    if node_data and node_data.get('category') in ['FIXED', 'SLOT']:
                         self.graph_manager.connect_nodes_by_ids(door_id, nid)
 
                 # Connect to the nearest passageway
@@ -294,7 +294,7 @@ class Network:
         for node_id in nodes_to_remove:
             self.graph_manager.remove_node(node_id)
         if nodes_to_remove:
-            logger.info(f"Removed {len(nodes_to_remove)} doors with null door_type.")
+            logger.info(f'Removed {len(nodes_to_remove)} doors with null door_type.')
 
     def run(
         self,
@@ -311,7 +311,7 @@ class Network:
                                    but no actual outside mesh nodes are generated by OutsideNodeCreator.
         """
         logger.info(
-            f"Processing floor: {image_path} at z={z_level}, process_outside_nodes={process_outside_nodes}"
+            f'Processing floor: {image_path} at z={z_level}, process_outside_nodes={process_outside_nodes}'
         )
 
         self._initialize_run(image_path, process_outside_nodes)
@@ -320,10 +320,10 @@ class Network:
 
         self._refine_door_connections(z_level)
 
-        logger.info(f"Finished floor. Nodes: {self.graph_manager.node_count()}")
+        logger.info(f'Finished floor. Nodes: {self.graph_manager.node_count()}')
 
         if self._image_width is None or self._image_height is None:
-            raise RuntimeError("Image dimensions not set.")
+            raise RuntimeError('Image dimensions not set.')
 
         return (
             self.graph_manager.get_graph_copy(),

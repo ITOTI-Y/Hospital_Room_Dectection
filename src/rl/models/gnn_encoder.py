@@ -21,7 +21,7 @@ class GCNEncoder(nn.Module):
 
         if len(hidden_dims) != num_layers - 1:
             raise ValueError(
-                f"Length of hidden_dim must be {num_layers - 1}, got {len(hidden_dims)}"
+                f'Length of hidden_dim must be {num_layers - 1}, got {len(hidden_dims)}'
             )
 
         self.dims: list[int] = [input_dim, *hidden_dims, output_dim]
@@ -59,7 +59,7 @@ class GCNEncoder(nn.Module):
 
     def _reset_parameters(self):
         for conv in self.convs:
-            if hasattr(conv, "lin") and isinstance(conv.lin, nn.Linear):
+            if hasattr(conv, 'lin') and isinstance(conv.lin, nn.Linear):
                 nn.init.xavier_uniform_(conv.lin.weight)
                 if conv.lin.bias is not None:
                     nn.init.zeros_(conv.lin.bias)

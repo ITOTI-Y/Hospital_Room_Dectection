@@ -75,7 +75,7 @@ class LayoutA2CPolicy(A2CPolicy):
     ) -> Batch:
         node_embeddings, node_mask = self.model.encode_observations(batch.obs)
 
-        deterministic = kwargs.get("deterministic", False)
+        deterministic = kwargs.get('deterministic', False)
         if self.deterministic_eval and not self.training:
             deterministic = True
 

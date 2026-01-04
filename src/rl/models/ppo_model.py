@@ -25,7 +25,7 @@ class LayoutOptimizationModel(nn.Module):
         actor_dropout: float = 0.1,
         value_hidden_dim: int = 256,
         value_num_layers: int = 3,
-        value_pooling_type: Literal["mean", "max", "sum", "attention"] = "mean",
+        value_pooling_type: Literal['mean', 'max', 'sum', 'attention'] = 'mean',
         value_dropout: float = 0.1,
         device: torch.device | None = None,
     ):
@@ -83,12 +83,12 @@ class LayoutOptimizationModel(nn.Module):
             node_mask = obs.node_mask
             edge_mask = obs.edge_mask
         else:
-            x_categorical = obs["x_categorical"]
-            x_numerical = obs["x_numerical"]
-            edge_index = obs["edge_index"]
-            edge_weight = obs["edge_weight"]
-            node_mask = obs["node_mask"]
-            edge_mask = obs["edge_mask"]
+            x_categorical = obs['x_categorical']
+            x_numerical = obs['x_numerical']
+            edge_index = obs['edge_index']
+            edge_weight = obs['edge_weight']
+            node_mask = obs['node_mask']
+            edge_mask = obs['edge_mask']
 
         x_categorical = torch.as_tensor(
             x_categorical, device=self.device, dtype=torch.long
@@ -125,9 +125,7 @@ class LayoutOptimizationModel(nn.Module):
 
         return node_embeddings, node_mask
 
-    def forward(
-        self, obs: dict | Batch, state: Any | None = None
-    ) -> torch.Tensor:
+    def forward(self, obs: dict | Batch, state: Any | None = None) -> torch.Tensor:
         node_embeddings, node_mask = self.encode_observations(obs)
 
         value = self.critic.get_value(
@@ -145,7 +143,7 @@ class LayoutOptimizationModel(nn.Module):
         action1, action2, log_prob1, log_prob2, _, _ = self.actor(
             node_embeddings=node_embeddings,
             node_mask=node_mask,
-            deterministic=kwargs.get("deterministic", False),
+            deterministic=kwargs.get('deterministic', False),
         )
 
         actions = torch.stack([action1, action2], dim=-1)  # (batch_size, 2)

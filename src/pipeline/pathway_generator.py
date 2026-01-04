@@ -20,7 +20,7 @@ class PathwayGenerator:
         self.pools = config.pathways.training.department_pools
         self.fragments = config.pathways.training.sequence_fragments
         self.logger = logger.bind(module=self.__class__.__name__)
-        self.logger.info("PathwayGenerator initialized")
+        self.logger.info('PathwayGenerator initialized')
 
     def generate_all(self) -> dict[str, dict[str, Any]]:
         pathways: dict[str, dict[str, Any]] = {}
@@ -44,21 +44,21 @@ class PathwayGenerator:
             self._parse_step(step, context, generated_sequence)
 
         final_pathway = {
-            "process_id": f"PROC_GEN_{chosen_rule['id']}_{self.process_id}",
-            "description": f"Programmatic Generation: {chosen_rule['description']}",
-            "core_sequence": generated_sequence,
-            "start_nodes": chosen_rule.start_nodes,
-            "end_nodes": chosen_rule.end_nodes,
-            "base_weight": chosen_rule.base_weight,
+            'process_id': f'PROC_GEN_{chosen_rule["id"]}_{self.process_id}',
+            'description': f'Programmatic Generation: {chosen_rule["description"]}',
+            'core_sequence': generated_sequence,
+            'start_nodes': chosen_rule.start_nodes,
+            'end_nodes': chosen_rule.end_nodes,
+            'base_weight': chosen_rule.base_weight,
         }
 
         full_sequence_str = (
-            f"{' -> '.join(final_pathway['start_nodes'])} -> "
-            f"{' -> '.join(generated_sequence)} -> "
-            f"{' -> '.join(final_pathway['end_nodes'])}"
+            f'{" -> ".join(final_pathway["start_nodes"])} -> '
+            f'{" -> ".join(generated_sequence)} -> '
+            f'{" -> ".join(final_pathway["end_nodes"])}'
         )
         self.logger.debug(
-            f"Generated pathway: {final_pathway['process_id']}, Full sequence: {full_sequence_str}"
+            f'Generated pathway: {final_pathway["process_id"]}, Full sequence: {full_sequence_str}'
         )
 
         self.process_id += 1
@@ -70,7 +70,7 @@ class PathwayGenerator:
     ):
         step_type = step.type
 
-        if step_type == "primary_department":
+        if step_type == 'primary_department':
             from_pool_value = step.from_pool
             department_list = []
             if isinstance(from_pool_value, str) and from_pool_value in self.pools:
@@ -80,31 +80,31 @@ class PathwayGenerator:
 
             if department_list:
                 dept = random.choice(department_list)
-                context["primary_department"] = dept
+                context['primary_department'] = dept
                 generated_sequence.append(dept)
 
-        elif step_type == "fixed":
+        elif step_type == 'fixed':
             dept_name = step.name
             if dept_name:
                 generated_sequence.append(dept_name)
 
-        elif step_type == "pool":
+        elif step_type == 'pool':
             pool_name = step.pool_name
             if pool_name in self.pools:
                 generated_sequence.append(random.choice(self.pools[pool_name]))
 
-        elif step_type == "optional":
+        elif step_type == 'optional':
             if random.random() < step.probability:
                 self._parse_step(step.step, context, generated_sequence)
 
-        elif step_type == "fragment":
+        elif step_type == 'fragment':
             fragment_name = step.fragment_name
             if fragment_name in self.fragments:
                 fragment_steps = self.fragments[fragment_name]
                 for frag_step in fragment_steps:
                     self._parse_step(frag_step, context, generated_sequence)
 
-        elif step_type == "repeat":
+        elif step_type == 'repeat':
             target = step.target
             if target in context:
                 generated_sequence.append(context[target])

@@ -39,11 +39,11 @@ class BaseNodeCreator(abc.ABC):
         image_data: np.ndarray,
         name: str,
         apply_morphology: bool = True,
-        morphology_operation: str = "close_open",
+        morphology_operation: str = 'close_open',
         morphology_kernel_size: tuple[int, int] | None = None,
     ) -> np.ndarray | None:
         node_props = self._get_node_properties(name)
-        color_rgb = node_props.get("rgb")
+        color_rgb = node_props.get('rgb')
         if not color_rgb:
             logger.warning(f"Color for node '{name}' not found.")
             return None
@@ -56,7 +56,7 @@ class BaseNodeCreator(abc.ABC):
         if apply_morphology:
             kernel_size: tuple[int, int] = cast(
                 tuple[int, int],
-                self.geometry_config.get("morphology_kernel_size", (5, 5)),
+                self.geometry_config.get('morphology_kernel_size', (5, 5)),
             )
             if not isinstance(kernel_size, Iterable):
                 kernel_size = (int(kernel_size), int(kernel_size))
@@ -91,9 +91,9 @@ class RoomNodeCreator(BaseNodeCreator):
         floor_num: int,
     ):
         target_names = graph_config.get_nodes_by_category(
-            "SLOT"
-        ) + graph_config.get_nodes_by_category("FIXED")
-        area_threshold = self.geometry_config.get("area_threshold", 60)
+            'SLOT'
+        ) + graph_config.get_nodes_by_category('FIXED')
+        area_threshold = self.geometry_config.get('area_threshold', 60)
 
         for name in target_names:
             mask = self._create_mask_for_node(processed_image_data, name)
@@ -116,11 +116,11 @@ class RoomNodeCreator(BaseNodeCreator):
                 self.graph_manager.add_node(
                     node_id,
                     name=name,
-                    cname=node_props.get("cname"),
-                    rgb=node_props.get("rgb"),
-                    code=node_props.get("code"),
-                    service_time=node_props.get("service_time", 0),
-                    category=node_props.get("category"),
+                    cname=node_props.get('cname'),
+                    rgb=node_props.get('rgb'),
+                    code=node_props.get('code'),
+                    service_time=node_props.get('service_time', 0),
+                    category=node_props.get('category'),
                     pos_x=centroid_x,
                     pos_y=centroid_y,
                     pos_z=z_level,
@@ -139,8 +139,8 @@ class VerticalNodeCreator(BaseNodeCreator):
         z_level: float,
         floor_num: int,
     ):
-        target_names = self.super_network_config.get("vertical_types", [])
-        area_threshold = self.geometry_config.get("area_threshold", 60)
+        target_names = self.super_network_config.get('vertical_types', [])
+        area_threshold = self.geometry_config.get('area_threshold', 60)
 
         for name in target_names:
             mask = self._create_mask_for_node(processed_image_data, name)
@@ -163,12 +163,12 @@ class VerticalNodeCreator(BaseNodeCreator):
                 self.graph_manager.add_node(
                     node_id,
                     name=name,
-                    cname=node_props.get("cname"),
-                    rgb=node_props.get("rgb"),
-                    code=node_props.get("code"),
-                    service_time=node_props.get("service_time", 0),
-                    time_per_floor=node_props.get("time_per_floor"),
-                    category=node_props.get("category"),
+                    cname=node_props.get('cname'),
+                    rgb=node_props.get('rgb'),
+                    code=node_props.get('code'),
+                    service_time=node_props.get('service_time', 0),
+                    time_per_floor=node_props.get('time_per_floor'),
+                    category=node_props.get('category'),
                     pos_x=centroid_x,
                     pos_y=centroid_y,
                     pos_z=z_level,
@@ -191,8 +191,8 @@ class MeshBasedNodeCreator(BaseNodeCreator):
     ):
         id_map[mask != 0] = id_map_value
         retval, labels, stats, _ = self._find_connected_components(mask, connectivity=8)
-        grid_size = self.geometry_config.get("grid_size", 40) * multiplier
-        area_threshold = self.geometry_config.get("area_threshold", 60)
+        grid_size = self.geometry_config.get('grid_size', 40) * multiplier
+        area_threshold = self.geometry_config.get('area_threshold', 60)
         node_props = self._get_node_properties(name)
 
         for i in range(1, retval):
@@ -221,11 +221,11 @@ class MeshBasedNodeCreator(BaseNodeCreator):
                 self.graph_manager.add_node(
                     node_id,
                     name=name,
-                    cname=node_props.get("cname"),
-                    rgb=node_props.get("rgb"),
-                    code=node_props.get("code"),
-                    service_time=node_props.get("service_time", 0),
-                    category=node_props.get("category"),
+                    cname=node_props.get('cname'),
+                    rgb=node_props.get('rgb'),
+                    code=node_props.get('code'),
+                    service_time=node_props.get('service_time', 0),
+                    category=node_props.get('category'),
                     pos_x=vx,
                     pos_y=vy,
                     pos_z=z_level,
@@ -255,13 +255,13 @@ class PedestrianNodeCreator(MeshBasedNodeCreator):
         z_level: float,
         floor_num: int,
     ):
-        target_names = graph_config.get_nodes_by_category("PATH")
+        target_names = graph_config.get_nodes_by_category('PATH')
         for name in target_names:
             mask = self._create_mask_for_node(processed_image_data, name)
             if mask is None:
                 continue
             self._create_mesh_nodes_for_mask(
-                mask, name, id_map, self.special_ids.get("pedestrian", -3), z_level, 1
+                mask, name, id_map, self.special_ids.get('pedestrian', -3), z_level, 1
             )
 
 
@@ -276,18 +276,18 @@ class OutsideNodeCreator(MeshBasedNodeCreator):
         floor_num: int,
     ):
         ground_floor_num = self.super_network_config.get(
-            "ground_floor_number_for_outside"
+            'ground_floor_number_for_outside'
         )
         if floor_num != ground_floor_num:
             return
 
-        target_names = self.super_network_config.get("outside_types", [])
+        target_names = self.super_network_config.get('outside_types', [])
         for name in target_names:
             mask = self._create_mask_for_node(processed_image_data, name)
             if mask is None:
                 continue
             self._create_mesh_nodes_for_mask(
-                mask, name, id_map, self.special_ids.get("outside", -1), z_level, 1
+                mask, name, id_map, self.special_ids.get('outside', -1), z_level, 1
             )
 
 
@@ -303,24 +303,24 @@ class ConnectionNodeCreator(BaseNodeCreator):
     ):
         door_names = [
             t
-            for t in graph_config.get_nodes_by_category("CONNECTOR")
-            if t not in self.super_network_config.get("vertical_types", [])
+            for t in graph_config.get_nodes_by_category('CONNECTOR')
+            if t not in self.super_network_config.get('vertical_types', [])
         ]
         if not door_names:
             return
 
         # Get masks for collision detection
-        corridor_mask = self.network._get_mask("Corridor", is_category=False)
-        outdoor_mask = self.network._get_mask("Outdoor", is_category=False)
+        corridor_mask = self.network._get_mask('Corridor', is_category=False)
+        outdoor_mask = self.network._get_mask('Outdoor', is_category=False)
 
-        room_categories = ["FIXED", "SLOT"]
+        room_categories = ['FIXED', 'SLOT']
         room_mask = np.zeros_like(corridor_mask)
         for cat in room_categories:
             room_mask = cv2.bitwise_or(
                 room_mask, self.network._get_mask(cat, is_category=True)
             )
 
-        all_connector_names = graph_config.get_nodes_by_category("CONNECTOR")
+        all_connector_names = graph_config.get_nodes_by_category('CONNECTOR')
         other_connector_names = [
             name for name in all_connector_names if name not in door_names
         ]
@@ -329,12 +329,12 @@ class ConnectionNodeCreator(BaseNodeCreator):
         )
 
         kernel_list = self.geometry_config.get(
-            "connection_dilation_kernel_size", [3, 3]
+            'connection_dilation_kernel_size', [3, 3]
         )
         if not (isinstance(kernel_list, list) and len(kernel_list) == 2):
             kernel_list = [3, 3]
         dilation_kernel = np.ones(tuple(kernel_list), np.uint8)
-        area_threshold = self.geometry_config.get("area_threshold", 60)
+        area_threshold = self.geometry_config.get('area_threshold', 60)
 
         for name in door_names:
             node_props = self._get_node_properties(name)
@@ -369,18 +369,18 @@ class ConnectionNodeCreator(BaseNodeCreator):
                 ]  # Filter out special IDs
 
                 ground_floor_num = self.super_network_config.get(
-                    "ground_floor_number_for_outside"
+                    'ground_floor_number_for_outside'
                 )
                 if (
                     collides_outdoor
                     and collides_corridor
                     and floor_num == ground_floor_num
                 ):
-                    door_type = "EXTERIOR"
+                    door_type = 'EXTERIOR'
                 elif collides_other_connector and collides_corridor:
-                    door_type = "INTERIOR"
+                    door_type = 'INTERIOR'
                 elif collides_room and (collides_corridor or collides_other_connector):
-                    door_type = "ROOM"
+                    door_type = 'ROOM'
 
                 centroid_x, centroid_y = centroids[i]
                 node_id = self.graph_manager.generate_node_id()
@@ -388,11 +388,11 @@ class ConnectionNodeCreator(BaseNodeCreator):
                 self.graph_manager.add_node(
                     node_id,
                     name=name,
-                    cname=node_props.get("cname"),
-                    rgb=node_props.get("rgb"),
-                    code=node_props.get("code"),
-                    service_time=node_props.get("service_time", 0),
-                    category=node_props.get("category"),
+                    cname=node_props.get('cname'),
+                    rgb=node_props.get('rgb'),
+                    code=node_props.get('code'),
+                    service_time=node_props.get('service_time', 0),
+                    category=node_props.get('category'),
                     pos_x=centroid_x,
                     pos_y=centroid_y,
                     pos_z=z_level,

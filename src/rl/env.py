@@ -23,29 +23,29 @@ class GraphObservation:
 
     def to_dict(self) -> dict[str, np.ndarray]:
         return {
-            "x_numerical": self.x_numerical,
-            "x_categorical": self.x_categorical,
-            "edge_index": self.edge_index,
-            "edge_weight": self.edge_weight,
-            "node_mask": self.node_mask,
-            "edge_mask": self.edge_mask,
+            'x_numerical': self.x_numerical,
+            'x_categorical': self.x_categorical,
+            'edge_index': self.edge_index,
+            'edge_weight': self.edge_weight,
+            'node_mask': self.node_mask,
+            'edge_mask': self.edge_mask,
         }
 
     def __repr__(self) -> str:
         return (
-            f"GraphObservation(\n"
-            f" x_numerical shape: {self.x_numerical.shape},\n"
-            f" x_categorical shape: {self.x_categorical.shape},\n"
-            f" edge_index shape: {self.edge_index.shape},\n"
-            f" edge_weight shape: {self.edge_weight.shape},\n"
-            f" node_mask shape: {self.node_mask.shape},\n"
-            f" edge_mask shape: {self.edge_mask.shape},\n"
-            f")"
+            f'GraphObservation(\n'
+            f' x_numerical shape: {self.x_numerical.shape},\n'
+            f' x_categorical shape: {self.x_categorical.shape},\n'
+            f' edge_index shape: {self.edge_index.shape},\n'
+            f' edge_weight shape: {self.edge_weight.shape},\n'
+            f' node_mask shape: {self.node_mask.shape},\n'
+            f' edge_mask shape: {self.edge_mask.shape},\n'
+            f')'
         )
 
 
 class LayoutEnv(gym.Env):
-    metadata: ClassVar[dict[str, list[str]]] = {"render_modes": ["human"]}
+    metadata: ClassVar[dict[str, list[str]]] = {'render_modes': ['human']}
 
     def __init__(
         self,
@@ -96,29 +96,29 @@ class LayoutEnv(gym.Env):
         self.E_max = self.max_departments * (self.max_departments - 1) // 2
         self.observation_space = spaces.Dict(
             {
-                "x_numerical": spaces.Box(
+                'x_numerical': spaces.Box(
                     low=-5,
                     high=5,
                     shape=(self.max_departments, self.numerical_feature_dim),
                     dtype=np.float32,
                 ),
-                "x_categorical": spaces.Box(
+                'x_categorical': spaces.Box(
                     low=0,
                     high=self.max_departments - 1,
                     shape=(self.max_departments,),
                     dtype=np.int32,
                 ),
-                "edge_index": spaces.Box(
+                'edge_index': spaces.Box(
                     low=0,
                     high=-1,
                     shape=(2, self.E_max),
                     dtype=np.int32,
                 ),
-                "edge_weight": spaces.Box(
+                'edge_weight': spaces.Box(
                     low=-1, high=1, shape=(self.E_max,), dtype=np.float32
                 ),
-                "node_mask": spaces.MultiBinary(self.max_departments),
-                "edge_mask": spaces.MultiBinary(self.E_max),
+                'node_mask': spaces.MultiBinary(self.max_departments),
+                'edge_mask': spaces.MultiBinary(self.E_max),
             }
         )
         self.action_space = spaces.MultiDiscrete(
@@ -136,10 +136,10 @@ class LayoutEnv(gym.Env):
         self.cost_manager.initialize(pathways=pathways)
 
         fixable_features = self.cost_manager.slots[
-            ["service_time", "service_weight", "area"]
+            ['service_time', 'service_weight', 'area']
         ].to_numpy()
         moveable_features = self.cost_manager.slots[
-            ["pos_x", "pos_y", "pos_z"]
+            ['pos_x', 'pos_y', 'pos_z']
         ].to_numpy()
 
         self.fixable_features[: len(fixable_features)] = fixable_features
@@ -169,7 +169,7 @@ class LayoutEnv(gym.Env):
     def step(self, action: np.ndarray):
         self.current_step += 1
         self.logger.info(
-            f"Env {self.env_id} Step {self.current_step}, Action taken: {action}, Train: {self.is_training}"
+            f'Env {self.env_id} Step {self.current_step}, Action taken: {action}, Train: {self.is_training}'
         )
 
         total_reward: float = 0.0
@@ -186,7 +186,7 @@ class LayoutEnv(gym.Env):
             terminated = False
             truncated = self.current_step >= self.max_step
             info = self._get_info()
-            self.logger.warning(f"Invalid action: {action}, reward: {reward}")
+            self.logger.warning(f'Invalid action: {action}, reward: {reward}')
             return (
                 observation.to_dict(),
                 total_reward + reward,
@@ -217,7 +217,7 @@ class LayoutEnv(gym.Env):
         total_reward += travel_reward + step_penalty + area_cost
 
         self.logger.info(
-            f"Step {self.current_step}: Swapped {dept1} <-> {dept2}, total_reward: {total_reward}, travel_reward: {travel_reward}, area_cost: {area_cost}"
+            f'Step {self.current_step}: Swapped {dept1} <-> {dept2}, total_reward: {total_reward}, travel_reward: {travel_reward}, area_cost: {area_cost}'
         )
 
         terminated = False
@@ -232,7 +232,7 @@ class LayoutEnv(gym.Env):
         self, *, seed: int | None = None, options: dict[str, Any] | None = None
     ) -> tuple[dict[str, np.ndarray], dict]:
         super().reset(seed=seed)
-        self.logger.info("Resetting environment")
+        self.logger.info('Resetting environment')
 
         pathways = self.pathway_generator.generate_all()
         # self.cost_manager = CostManager(self.config, is_shuffle=True) # If needed to shuffle travel_matrix
@@ -244,7 +244,7 @@ class LayoutEnv(gym.Env):
         self.current_cost = self.initial_cost
 
         self.logger.info(
-            f"New instance created. Active departments: {self.num_total_slot}, Initial travel cost: {self.initial_cost}"
+            f'New instance created. Active departments: {self.num_total_slot}, Initial travel cost: {self.initial_cost}'
         )
 
         observation = self._get_observation()
@@ -307,18 +307,18 @@ class LayoutEnv(gym.Env):
 
     def _get_info(self) -> dict:
         return {
-            "current_cost": self.current_cost,
-            "initial_cost": self.initial_cost,
-            "step": self.current_step,
-            "num_departments": self.num_total_slot,
+            'current_cost': self.current_cost,
+            'initial_cost': self.initial_cost,
+            'step': self.current_step,
+            'num_departments': self.num_total_slot,
         }
 
-    def render(self, mode: str = "human"):
-        if mode == "human":
-            print(f"Step: {self.current_step}")
+    def render(self, mode: str = 'human'):
+        if mode == 'human':
+            print(f'Step: {self.current_step}')
             print(
-                f"Current Total Travel Cost: {self.current_cost:.2f} (Initial: {self.initial_cost:.2f})"
+                f'Current Total Travel Cost: {self.current_cost:.2f} (Initial: {self.initial_cost:.2f})'
             )
             print(
-                f"Improvement: {(self.initial_cost - self.current_cost) / (self.initial_cost + 1e-6) * 100:.2f}%"
+                f'Improvement: {(self.initial_cost - self.current_cost) / (self.initial_cost + 1e-6) * 100:.2f}%'
             )

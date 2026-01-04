@@ -24,7 +24,7 @@ class GraphManager:
         """
         self._graph = nx.Graph()
         self._id_counter = itertools.count(start=id_start)
-        logger.debug(f"GraphManager initialized with starting ID: {id_start}")
+        logger.debug(f'GraphManager initialized with starting ID: {id_start}')
 
     def generate_node_id(self) -> int:
         """Generates a new unique node ID."""
@@ -44,7 +44,7 @@ class GraphManager:
             **attrs: A dictionary of attributes for the node.
         """
         self._graph.add_node(node_id, **attrs)
-        logger.debug(f"Added node: {node_id} with attributes {attrs}")
+        logger.debug(f'Added node: {node_id} with attributes {attrs}')
 
     def add_edge(self, node1_id: int, node2_id: int, **attrs: Any) -> None:
         """Adds an edge between two nodes, calculating weight if not provided.
@@ -58,36 +58,36 @@ class GraphManager:
             **attrs: A dictionary of attributes for the edge.
         """
         if self._graph.has_node(node1_id) and self._graph.has_node(node2_id):
-            if "weight" not in attrs:
+            if 'weight' not in attrs:
                 node1_data = self.get_node_attributes(node1_id)
                 node2_data = self.get_node_attributes(node2_id)
                 if node1_data and node2_data:
                     dist = np.linalg.norm(
                         np.array(
                             [
-                                node1_data["pos_x"],
-                                node1_data["pos_y"],
-                                node1_data["pos_z"],
+                                node1_data['pos_x'],
+                                node1_data['pos_y'],
+                                node1_data['pos_z'],
                             ]
                         )
                         - np.array(
                             [
-                                node2_data["pos_x"],
-                                node2_data["pos_y"],
-                                node2_data["pos_z"],
+                                node2_data['pos_x'],
+                                node2_data['pos_y'],
+                                node2_data['pos_z'],
                             ]
                         )
                     )
                     geo_config = graph_config.get_geometry_config()
-                    scale = geo_config.get("pixel_to_meter_scale", 0.1)
-                    speed = geo_config.get("pedestrian_speed", 1.2)
-                    attrs["weight"] = (dist * scale) / speed
+                    scale = geo_config.get('pixel_to_meter_scale', 0.1)
+                    speed = geo_config.get('pedestrian_speed', 1.2)
+                    attrs['weight'] = (dist * scale) / speed
 
             self._graph.add_edge(node1_id, node2_id, **attrs)
-            logger.debug(f"Added edge: {node1_id} -> {node2_id} with {attrs}")
+            logger.debug(f'Added edge: {node1_id} -> {node2_id} with {attrs}')
         else:
             logger.warning(
-                f"Attempted to connect non-existent node: {node1_id} or {node2_id}"
+                f'Attempted to connect non-existent node: {node1_id} or {node2_id}'
             )
 
     def connect_nodes_by_ids(self, node1_id: int, node2_id: int, **attrs: Any) -> None:
@@ -108,9 +108,9 @@ class GraphManager:
         """Removes a node from the graph."""
         if self._graph.has_node(node_id):
             self._graph.remove_node(node_id)
-            logger.debug(f"Removed node: {node_id}")
+            logger.debug(f'Removed node: {node_id}')
         else:
-            logger.warning(f"Attempted to remove non-existent node: {node_id}")
+            logger.warning(f'Attempted to remove non-existent node: {node_id}')
 
     def get_nodes_by_attribute(
         self, attr_name: str, attr_value: Any
@@ -145,7 +145,7 @@ class GraphManager:
     def clear(self) -> None:
         """Clears all nodes and edges from the graph."""
         self._graph.clear()
-        logger.debug("GraphManager cleared.")
+        logger.debug('GraphManager cleared.')
 
     def __len__(self) -> int:
         """Returns the number of nodes."""
@@ -153,4 +153,4 @@ class GraphManager:
 
     def __str__(self) -> str:
         """Returns a string representation of the GraphManager."""
-        return f"GraphManager(nodes={self.node_count()}, edges={self.edge_count()})"
+        return f'GraphManager(nodes={self.node_count()}, edges={self.edge_count()})'

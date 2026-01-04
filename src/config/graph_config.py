@@ -34,12 +34,12 @@ def get_config() -> dict[str, Any] | None:
     global _config_cache
     if _config_cache is None:
         config_path = (
-            Path(__file__).parent.parent.parent / "configs" / "graph_config.yaml"
+            Path(__file__).parent.parent.parent / 'configs' / 'graph_config.yaml'
         )
         if not config_path.exists():
-            raise FileNotFoundError(f"Configuration file not found at: {config_path}")
+            raise FileNotFoundError(f'Configuration file not found at: {config_path}')
 
-        with open(config_path, encoding="utf-8") as f:
+        with open(config_path, encoding='utf-8') as f:
             try:
                 _config_cache = yaml.safe_load(f)
             except yaml.YAMLError as e:
@@ -59,7 +59,7 @@ def get_node_definitions() -> dict[str, dict[str, Any]]:
     config = get_config()
     if config is None:
         return {}
-    return config.get("node_definitions", {})
+    return config.get('node_definitions', {})
 
 
 def get_rgb_to_name_map() -> dict[tuple[int, int, int], str]:
@@ -76,9 +76,9 @@ def get_rgb_to_name_map() -> dict[tuple[int, int, int], str]:
     if _rgb_to_name_map_cache is None:
         node_defs = get_node_definitions()
         _rgb_to_name_map_cache = {
-            tuple(properties["rgb"]): node_name
+            tuple(properties['rgb']): node_name
             for node_name, properties in node_defs.items()
-            if "rgb" in properties
+            if 'rgb' in properties
         }
     return _rgb_to_name_map_cache
 
@@ -97,7 +97,7 @@ def get_nodes_by_category(category: str) -> list[str]:
     return [
         node_name
         for node_name, properties in node_defs.items()
-        if properties.get("category") == category
+        if properties.get('category') == category
     ]
 
 
@@ -111,7 +111,7 @@ def get_geometry_config() -> dict[str, float]:
     config = get_config()
     if config is None:
         return {}
-    return config.get("geometry", {})
+    return config.get('geometry', {})
 
 
 def get_super_network_config() -> dict[str, Any]:
@@ -124,7 +124,7 @@ def get_super_network_config() -> dict[str, Any]:
     config = get_config()
     if config is None:
         return {}
-    return config.get("super_network", {})
+    return config.get('super_network', {})
 
 
 def get_special_ids() -> dict[str, int]:
@@ -137,7 +137,7 @@ def get_special_ids() -> dict[str, int]:
     config = get_config()
     if config is None:
         return {}
-    return config.get("special_ids", {})
+    return config.get('special_ids', {})
 
 
 _plotter_config_cache: dict[str, Any] = {}
@@ -152,13 +152,13 @@ def get_plotter_config() -> dict[str, Any]:
     """
     global _plotter_config_cache
     if not _plotter_config_cache:
-        config_path = Path(__file__).parent.parent.parent / "configs" / "plotter.yaml"
+        config_path = Path(__file__).parent.parent.parent / 'configs' / 'plotter.yaml'
         if not config_path.exists():
             raise FileNotFoundError(
-                f"Plotter configuration file not found at: {config_path}"
+                f'Plotter configuration file not found at: {config_path}'
             )
 
-        with open(config_path, encoding="utf-8") as f:
+        with open(config_path, encoding='utf-8') as f:
             try:
                 _plotter_config_cache = yaml.safe_load(f)
             except yaml.YAMLError as e:

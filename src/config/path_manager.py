@@ -68,12 +68,12 @@ def _load_paths():
     global _paths_cache
     _paths_cache = {}
     root = get_project_root()
-    config_path = root / "configs" / "paths.yaml"
+    config_path = root / 'configs' / 'paths.yaml'
 
     if not config_path.exists():
-        raise FileNotFoundError(f"Paths configuration file not found at {config_path}")
+        raise FileNotFoundError(f'Paths configuration file not found at {config_path}')
 
-    with open(config_path, encoding="utf-8") as f:
+    with open(config_path, encoding='utf-8') as f:
         raw_paths = yaml.safe_load(f)
 
     # Simple interpolation for variables like {data_dir}

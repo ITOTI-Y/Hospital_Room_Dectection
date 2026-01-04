@@ -12,7 +12,7 @@ from src.utils.logger import setup_logger
 
 config = config_loader.ConfigLoader()
 setup_logger(
-    log_file=Path(config.paths.log_dir) / f"{datetime.now():%Y-%m-%d_%H-%M-%S}.log"
+    log_file=Path(config.paths.log_dir) / f'{datetime.now():%Y-%m-%d_%H-%M-%S}.log'
 )
 
 logger = logger.bind(module=__name__)
@@ -24,9 +24,9 @@ def network(
     image_dir: Annotated[
         Path | None,
         typer.Option(
-            "--image-dir",
-            "-i",
-            help="Floor annotation images directory",
+            '--image-dir',
+            '-i',
+            help='Floor annotation images directory',
             exists=True,
             file_okay=False,
             dir_okay=True,
@@ -37,18 +37,18 @@ def network(
     vis_output: Annotated[
         str,
         typer.Option(
-            "--vis-output", "-v", help="Network visualization output filename"
+            '--vis-output', '-v', help='Network visualization output filename'
         ),
-    ] = "hospital_network_3d.html",
+    ] = 'hospital_network_3d.html',
     travel_times_output: Annotated[
         str,
         typer.Option(
-            "--travel-times-output", "-t", help="Travel times matrix output filename"
+            '--travel-times-output', '-t', help='Travel times matrix output filename'
         ),
-    ] = "hospital_travel_times.csv",
+    ] = 'hospital_travel_times.csv',
     slots_output: Annotated[
-        str, typer.Option("--slots-output", "-s", help="SLOT nodes output filename")
-    ] = "slots.csv",
+        str, typer.Option('--slots-output', '-s', help='SLOT nodes output filename')
+    ] = 'slots.csv',
 ):
     generator = NetworkGenerator(config)
 
@@ -61,16 +61,16 @@ def network(
         )
 
         if success:
-            logger.info("System execution completed successfully")
+            logger.info('System execution completed successfully')
         else:
-            logger.error("System execution failed")
+            logger.error('System execution failed')
             raise typer.Exit(code=1)
 
     except KeyboardInterrupt as e:
-        logger.warning("Interrupted by user")
+        logger.warning('Interrupted by user')
         raise typer.Exit(code=1) from e
     except Exception as e:
-        logger.exception("System execution error")
+        logger.exception('System execution error')
         raise typer.Exit(code=1) from e
 
 
@@ -80,5 +80,5 @@ def train():
     optimize_manager.run()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     app()

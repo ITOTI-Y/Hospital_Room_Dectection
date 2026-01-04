@@ -29,12 +29,12 @@ class FloorManager:
         self._floor_patterns = {
             # Order matters: more specific patterns first
             # B-1, B1, b-1, b1 -> negative
-            r"([Bb])-?(\d+)": lambda m: -int(m.group(2)),
+            r'([Bb])-?(\d+)': lambda m: -int(m.group(2)),
             # -1F, -2f -> negative
-            r"-(\d+)[Ff]": lambda m: -int(m.group(1)),
-            r"([Ll])(\d+)": lambda m: int(m.group(2))
+            r'-(\d+)[Ff]': lambda m: -int(m.group(1)),
+            r'([Ll])(\d+)': lambda m: int(m.group(2))
             - 1,  # L1, l2 -> positive, 1-based to 0-based
-            r"(\d+)[Ff]": lambda m: int(m.group(1))
+            r'(\d+)[Ff]': lambda m: int(m.group(1))
             - 1,  # 1F, 2f -> positive, 1-based to 0-based
             # Add more general patterns if needed, like just a number if no prefix/suffix
             # r'_(\d+)_': lambda m: int(m.group(1)) # Example: floor_1_plan.png
@@ -87,7 +87,7 @@ class FloorManager:
             if floor is not None:
                 if floor in path_to_floor_map.values():
                     logger.warning(
-                        f"Warning: Duplicate floor number {floor} detected. Check filenames."
+                        f'Warning: Duplicate floor number {floor} detected. Check filenames.'
                     )
                 detected_floors[p_path] = floor
             else:
@@ -128,8 +128,8 @@ class FloorManager:
 
         if len(floor_to_path_map) != len(path_to_floor_map):
             logger.warning(
-                "Non-unique floor numbers assigned or detected, "
-                "floor_to_path_map may not represent all images."
+                'Non-unique floor numbers assigned or detected, '
+                'floor_to_path_map may not represent all images.'
             )
 
         return path_to_floor_map, floor_to_path_map

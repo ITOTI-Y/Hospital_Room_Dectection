@@ -3,4 +3,4 @@
 
 from .plotter import BasePlotter, PlotlyPlotter  # MatplotlibPlotter can be added later
 
-__all__ = ["BasePlotter", "PlotlyPlotter"]
+__all__ = ['BasePlotter', 'PlotlyPlotter']

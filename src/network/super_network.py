@@ -58,10 +58,10 @@ def _process_floor_worker(
         )
         return graph, width, height, next_id, image_path, z_level, floor_num
     except Exception as e:
-        logger.error(f"Error processing floor {image_path.name} in worker: {e}")
+        logger.error(f'Error processing floor {image_path.name} in worker: {e}')
         s_config = graph_config.get_super_network_config()
         est_next_id = id_start_value + s_config.get(
-            "estimated_max_nodes_per_floor", 10000
+            'estimated_max_nodes_per_floor', 10000
         )
         return None, None, None, est_next_id, image_path, z_level, floor_num
 
@@ -86,13 +86,13 @@ class SuperNetwork:
             num_processes if num_processes is not None else (os.cpu_count() or 1)
         )
 
-        floor_height = self.s_config.get("default_floor_height", 10.0)
+        floor_height = self.s_config.get('default_floor_height', 10.0)
         self.floor_manager = FloorManager(
             base_floor_default=base_floor, default_floor_height=floor_height
         )
 
         self.vertical_connection_tolerance: int = self.s_config.get(
-            "default_vertical_connection_tolerance", 0
+            'default_vertical_connection_tolerance', 0
         )
         self.floor_z_map: dict[int, float] = {}
         self.path_to_floor_map: dict[Path, int] = {}
@@ -103,7 +103,7 @@ class SuperNetwork:
         self, floor_num: int, designated_ground_floor_num: int | None
     ) -> bool:
         """Determines if outside nodes should be processed for a specific floor."""
-        generate_outside = self.s_config.get("generate_outside_nodes", False)
+        generate_outside = self.s_config.get('generate_outside_nodes', False)
         if not generate_outside:
             return False
 
@@ -112,7 +112,7 @@ class SuperNetwork:
             or floor_num != designated_ground_floor_num
         ):
             return False
-        return bool(self.s_config.get("outside_types"))
+        return bool(self.s_config.get('outside_types'))
 
     def _prepare_floor_data(
         self,
@@ -136,14 +136,14 @@ class SuperNetwork:
             self.floor_z_map = self.floor_manager.calculate_z_levels(floor_to_path_map)
 
         if not self.floor_z_map:
-            raise ValueError("Could not determine Z-levels for floors.")
+            raise ValueError('Could not determine Z-levels for floors.')
 
         all_floor_nums = list(self.floor_z_map.keys())
         if not all_floor_nums:
             return []
 
         designated_ground_floor_num = self.s_config.get(
-            "ground_floor_number_for_outside"
+            'ground_floor_number_for_outside'
         )
         if designated_ground_floor_num is None:
             positive_or_zero_floors = sorted([fn for fn in all_floor_nums if fn >= 0])
@@ -180,10 +180,10 @@ class SuperNetwork:
         self.super_graph.clear()
         floor_run_data = self._prepare_floor_data(image_file_paths, z_levels_override)
         if not floor_run_data:
-            logger.warning("No floor data to process.")
+            logger.warning('No floor data to process.')
             return self.super_graph
 
-        max_nodes = self.s_config.get("estimated_max_nodes_per_floor", 10000)
+        max_nodes = self.s_config.get('estimated_max_nodes_per_floor', 10000)
         tasks = [
             (p, z, i * max_nodes + 1, outside, floor_num)
             for i, (p, z, outside, floor_num) in enumerate(floor_run_data, start=1)
@@ -191,7 +191,7 @@ class SuperNetwork:
 
         self.num_processes = min(self.num_processes, len(tasks))
         logger.info(
-            f"Processing {len(tasks)} floors using {self.num_processes} processes..."
+            f'Processing {len(tasks)} floors using {self.num_processes} processes...'
         )
         results: list[Any] = []
         if self.num_processes > 1 and len(tasks) > 1:
@@ -206,94 +206,94 @@ class SuperNetwork:
         first_floor = True
         for graph, width, height, _, path, _, _ in results:
             if graph is None:
-                logger.warning(f"Failed to process floor image {path.name}. Skipping.")
+                logger.warning(f'Failed to process floor image {path.name}. Skipping.')
                 continue
             if first_floor:
                 self.width, self.height, first_floor = width, height, False
             elif (self.width, self.height) != (width, height):
-                raise ValueError(f"Image dimensions mismatch for {path.name}.")
+                raise ValueError(f'Image dimensions mismatch for {path.name}.')
 
             self.super_graph.add_nodes_from(graph.nodes(data=True))
             self.super_graph.add_edges_from(graph.edges(data=True))
 
         if force_vertical_tolerance is not None:
             self.vertical_connection_tolerance = force_vertical_tolerance
-        elif self.s_config.get("default_vertical_connection_tolerance") == 0:
+        elif self.s_config.get('default_vertical_connection_tolerance') == 0:
             self.vertical_connection_tolerance = (
                 self._auto_calculate_vertical_tolerance()
             )
 
         self._connect_floors()
         logger.info(
-            f"SuperNetwork construction complete. Total nodes: {self.super_graph.number_of_nodes()}"
+            f'SuperNetwork construction complete. Total nodes: {self.super_graph.number_of_nodes()}'
         )
         return self.super_graph
 
     def _auto_calculate_vertical_tolerance(self) -> int:
         """Automatically calculates a tolerance for connecting vertical nodes."""
-        vertical_types = self.s_config.get("vertical_types", [])
+        vertical_types = self.s_config.get('vertical_types', [])
         vertical_nodes_data = [
             data
             for _, data in self.super_graph.nodes(data=True)
-            if data.get("type") in vertical_types
+            if data.get('type') in vertical_types
         ]
         if len(vertical_nodes_data) < 2:
-            return self.s_config.get("default_vertical_connection_tolerance", 0)
+            return self.s_config.get('default_vertical_connection_tolerance', 0)
 
         positions_xy = np.array(
-            [(data["pos_x"], data["pos_y"]) for data in vertical_nodes_data]
+            [(data['pos_x'], data['pos_y']) for data in vertical_nodes_data]
         )
         if len(positions_xy) < 2:
-            return self.s_config.get("default_vertical_connection_tolerance", 0)
+            return self.s_config.get('default_vertical_connection_tolerance', 0)
 
         try:
             tree = KDTree(positions_xy)
             distances, _ = tree.query(positions_xy, k=2)
             nearest_distances = distances[:, 1][distances[:, 1] > 1e-6]
             if nearest_distances.size == 0:
-                return self.s_config.get("default_vertical_connection_tolerance", 0)
+                return self.s_config.get('default_vertical_connection_tolerance', 0)
 
             avg_min_dist = np.mean(nearest_distances)
-            factor = self.s_config.get("vertical_tolerance_factor", 0.5)
-            min_tol = self.s_config.get("min_vertical_tolerance", 10)
+            factor = self.s_config.get('vertical_tolerance_factor', 0.5)
+            min_tol = self.s_config.get('min_vertical_tolerance', 10)
             calculated_tolerance = int(avg_min_dist * factor)
             logger.info(
-                f"Auto-calculated vertical tolerance: {calculated_tolerance} (based on avg_min_dist: {avg_min_dist:.2f})"
+                f'Auto-calculated vertical tolerance: {calculated_tolerance} (based on avg_min_dist: {avg_min_dist:.2f})'
             )
             return max(min_tol, calculated_tolerance)
         except Exception as e:
-            logger.error(f"Error in auto-calculating tolerance: {e}. Using default.")
-            return self.s_config.get("default_vertical_connection_tolerance", 0)
+            logger.error(f'Error in auto-calculating tolerance: {e}. Using default.')
+            return self.s_config.get('default_vertical_connection_tolerance', 0)
 
     def _connect_floors(self) -> None:
         """Connects vertical transport nodes between different floors."""
-        vertical_types = self.s_config.get("vertical_types", [])
+        vertical_types = self.s_config.get('vertical_types', [])
         all_vertical_nodes = [
             (node_id, data)
             for node_id, data in self.super_graph.nodes(data=True)
-            if data.get("name") in vertical_types
+            if data.get('name') in vertical_types
         ]
         if not all_vertical_nodes:
-            logger.info("No vertical nodes found to connect between floors.")
+            logger.info('No vertical nodes found to connect between floors.')
             return
 
         nodes_by_name: dict[str, list[dict[str, Any]]] = {}
         for node_id, data in all_vertical_nodes:
-            data["id"] = node_id
-            nodes_by_name.setdefault(data.get("name", "unknown"), []).append(data)
+            data['id'] = node_id
+            nodes_by_name.setdefault(data.get('name', 'unknown'), []).append(data)
 
         logger.info(
-            f"Attempting to connect floors. Tolerance: {self.vertical_connection_tolerance} pixels."
+            f'Attempting to connect floors. Tolerance: {self.vertical_connection_tolerance} pixels.'
         )
         connected_pairs_count = 0
-        z_diff_threshold = self.s_config.get("z_level_diff_threshold", 1.0)
+        z_diff_threshold = self.s_config.get('z_level_diff_threshold', 1.0)
 
         for _, nodes in nodes_by_name.items():
             if len(nodes) < 2:
                 continue
 
-            nodes.sort(key=lambda n: (n["pos_z"], n["pos_y"], n["pos_x"]))
-            positions = np.array([(n["pos_x"], n["pos_y"]) for n in nodes])
+            nodes.sort(key=lambda n: (n['pos_z'], n['pos_y'], n['pos_x']))
+            positions = np.array([(n['pos_x'], n['pos_y']) for n in nodes])
             if len(positions) < 2:
                 continue
 
@@ -303,21 +303,19 @@ class SuperNetwork:
             for i, j in pairs:
                 node_i, node_j = nodes[i], nodes[j]
                 if abs(
-                    node_i["pos_z"] - node_j["pos_z"]
+                    node_i['pos_z'] - node_j['pos_z']
                 ) > z_diff_threshold and not self.super_graph.has_edge(
-                    node_i["id"], node_j["id"]
+                    node_i['id'], node_j['id']
                 ):
-                    time_per_floor = node_i.get(
-                        "time_per_floor", 10.0
-                    )
+                    time_per_floor = node_i.get('time_per_floor', 10.0)
                     self.super_graph.add_edge(
-                        node_i["id"],
-                        node_j["id"],
-                        type="vertical_connection",
+                        node_i['id'],
+                        node_j['id'],
+                        type='vertical_connection',
                         weight=time_per_floor,
                     )
                     connected_pairs_count += 1
 
         logger.info(
-            f"Inter-floor connections made for {connected_pairs_count} pairs of vertical nodes."
+            f'Inter-floor connections made for {connected_pairs_count} pairs of vertical nodes.'
         )

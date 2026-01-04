@@ -18,7 +18,7 @@ class CostManager:
 
         self.pathways: dict[str, dict[str, Any]] = {}
         self.max_travel_time: float = 0.0
-        self.min_travel_time: float = float("inf")
+        self.min_travel_time: float = float('inf')
         self.travel_times: pd.DataFrame = pd.DataFrame(dtype=float)
         self.name_to_name_id: dict[str, list[str]] = defaultdict(list)
         self.id_to_name_id: dict[int, str] = {}
@@ -44,7 +44,7 @@ class CostManager:
             df.columns = np.random.permutation(df.columns)
             df.index = df.columns
         for name_id in df.index:
-            name, id_num = name_id.rsplit("_", 1)
+            name, id_num = name_id.rsplit('_', 1)
             self.name_to_name_id[name].append(name_id)
             self.id_to_name_id[int(id_num)] = name_id
             self.name_id_to_id[name_id] = int(id_num)
@@ -54,16 +54,16 @@ class CostManager:
 
     def _load_slots_information(self) -> None:
         df = pd.read_csv(self.config.paths.slots_csv)  # type: ignore
-        for _, row in df[["name", "id", "area"]].iterrows():
-            name_id = str(row["name"]) + "_" + str(row["id"])
-            self.name_id_to_area[name_id] = float(row["area"])
-            self.id_to_area[int(row["id"])] = float(row["area"])
-        df["service_weight"] = 0.0
+        for _, row in df[['name', 'id', 'area']].iterrows():
+            name_id = str(row['name']) + '_' + str(row['id'])
+            self.name_id_to_area[name_id] = float(row['area'])
+            self.id_to_area[int(row['id'])] = float(row['area'])
+        df['service_weight'] = 0.0
         self.slots = df.copy()
 
     def _load_node_definitions(self) -> None:
         self.node_def = self.config.graph_config.node_definitions  # type: ignore
-        self.cname_to_name = {v["cname"]: k for k, v in self.node_def.items()}  # type: ignore
+        self.cname_to_name = {v['cname']: k for k, v in self.node_def.items()}  # type: ignore
 
     def _load_adjacency_preferences(self) -> None:
         if adjacency_preferences := self.config.constraints.adjacency_preferences:  # type: ignore
@@ -78,8 +78,8 @@ class CostManager:
                 )
 
     def _precompute_initial_layout(self) -> None:
-        for _, row in self.slots[["name", "id"]].iterrows():
-            name = row["name"] + "_" + str(row["id"])
+        for _, row in self.slots[['name', 'id']].iterrows():
+            name = row['name'] + '_' + str(row['id'])
             self.initial_layout[name] = name
 
     def _precompute_pair_weights(self):
@@ -90,15 +90,15 @@ class CostManager:
                 self.pair_weights[(dept1, dept2)] = 0.0
 
         for pathway in self.pathways.values():
-            sequence: list[str] = pathway.get("core_sequence", [])
-            weight = pathway.get("weight", 1.0)
-            start_nodes: list[str] = pathway.get("start_nodes", [])
-            end_nodes: list[str] = pathway.get("end_nodes", [])
+            sequence: list[str] = pathway.get('core_sequence', [])
+            weight = pathway.get('weight', 1.0)
+            start_nodes: list[str] = pathway.get('start_nodes', [])
+            end_nodes: list[str] = pathway.get('end_nodes', [])
 
             for i, dept in enumerate(sequence):
                 dept: str = self.cname_to_name.get(dept, dept)
                 self.service_weights[dept] += weight
-                self.slots.loc[self.slots["name"] == dept, "service_weight"] += weight
+                self.slots.loc[self.slots['name'] == dept, 'service_weight'] += weight
                 if i > 0:
                     prev_dept = self.cname_to_name.get(sequence[i - 1], sequence[i - 1])
                     pairs = list(
@@ -119,7 +119,7 @@ class CostManager:
                 dept = self.cname_to_name.get(sequence[0], sequence[0])
                 if dept in self.service_weights:
                     self.service_weights[dept] += weight
-                    self.slots.loc[self.slots["name"] == dept, "service_weight"] += (
+                    self.slots.loc[self.slots['name'] == dept, 'service_weight'] += (
                         weight
                     )
                 pairs: list[tuple[str, str]] = list(
@@ -141,7 +141,7 @@ class CostManager:
                     dept = self.cname_to_name.get(sequence[-1], sequence[-1])
                     if dept in self.service_weights:
                         self.service_weights[dept] += weight
-                    self.slots.loc[self.slots["name"] == dept, "service_weight"] += (
+                    self.slots.loc[self.slots['name'] == dept, 'service_weight'] += (
                         weight
                     )
                     pairs = list(
@@ -154,7 +154,7 @@ class CostManager:
                     dept = self.cname_to_name.get(end_nodes[i - 1], end_nodes[i - 1])
                     if dept in self.service_weights:
                         self.service_weights[dept] += weight
-                    self.slots.loc[self.slots["name"] == dept, "service_weight"] += (
+                    self.slots.loc[self.slots['name'] == dept, 'service_weight'] += (
                         weight
                     )
                     pairs = list(
@@ -169,12 +169,12 @@ class CostManager:
                         self.pair_weights[reversed_pair] += weight / len(pairs)
                         continue
                     self.pair_weights[pair] += weight / len(pairs)
-        self.logger.info(f"Total {len(self.pair_weights)} pairs computed.")
+        self.logger.info(f'Total {len(self.pair_weights)} pairs computed.')
 
     def _precompute_service_time_cost(self) -> None:
         service_cost = 0.0
         for dept in self.service_weights:
-            service_time = self.node_def.get(dept, {}).get("service_time", 0)
+            service_time = self.node_def.get(dept, {}).get('service_time', 0)
             service_cost += service_time * self.service_weights[dept]
         self.origin_service_cost = service_cost
 
@@ -198,7 +198,7 @@ class CostManager:
         self.initial_layout: dict[str, str] = {}
         self.pair_weights: dict[tuple[str, str], float] = defaultdict(float)
         self.pair_times: dict[tuple[str, str], float] = defaultdict(float)
-        self.service_weights: dict[str, float] = dict.fromkeys(self.slots["name"], 0.0)
+        self.service_weights: dict[str, float] = dict.fromkeys(self.slots['name'], 0.0)
         self.origin_service_cost: float = 0.0
         self.area_dict: dict[tuple[int, int], float] = {}
 
@@ -211,21 +211,21 @@ class CostManager:
         self._precompute_travel_time_cost()
         self._precompute_area_dict()
         self.shared_data = {
-            "max_travel_time": self.max_travel_time,
-            "min_travel_time": self.min_travel_time,
-            "travel_times": self.travel_times,
-            "pair_weights": self.pair_weights,
-            "pair_times": self.pair_times,
-            "service_weights": self.service_weights,
-            "node_def": self.node_def,
-            "name_id_to_id": self.name_id_to_id,
-            "id_to_name_id": self.id_to_name_id,
-            "area_dict": self.area_dict,
-            "initial_layout": self.initial_layout,
-            "origin_service_cost": self.origin_service_cost,
-            "adjacency_preferences": self.adjacency_preferences,
-            "id_to_area": self.id_to_area,
-            "slots": self.slots,
+            'max_travel_time': self.max_travel_time,
+            'min_travel_time': self.min_travel_time,
+            'travel_times': self.travel_times,
+            'pair_weights': self.pair_weights,
+            'pair_times': self.pair_times,
+            'service_weights': self.service_weights,
+            'node_def': self.node_def,
+            'name_id_to_id': self.name_id_to_id,
+            'id_to_name_id': self.id_to_name_id,
+            'area_dict': self.area_dict,
+            'initial_layout': self.initial_layout,
+            'origin_service_cost': self.origin_service_cost,
+            'adjacency_preferences': self.adjacency_preferences,
+            'id_to_area': self.id_to_area,
+            'slots': self.slots,
         }
 
     @property
@@ -234,28 +234,28 @@ class CostManager:
 
     @property
     def slots_name_id(self) -> pd.Series:
-        return self.slots["name"] + "_" + self.slots["id"].astype(str)
+        return self.slots['name'] + '_' + self.slots['id'].astype(str)
 
-    def create_cost_engine(self) -> "CostEngine":
+    def create_cost_engine(self) -> 'CostEngine':
         return CostEngine(self.shared_data)
 
 
 class CostEngine:
     def __init__(self, shared_data: dict[str, Any]):
         self.logger = logger.bind(module=__name__)
-        self.max_travel_time = shared_data["max_travel_time"]
-        self.min_travel_time = shared_data["min_travel_time"]
-        self.travel_times = shared_data["travel_times"]
-        self.pair_weights: dict[tuple[str, str], float] = shared_data["pair_weights"]
-        self.pair_times = shared_data["pair_times"]
-        self.name_id_to_id = shared_data["name_id_to_id"]
-        self.id_to_name_id = shared_data["id_to_name_id"]
-        self.area_dict: dict[tuple[int, int], float] = shared_data["area_dict"]
-        self.origin_service_cost = shared_data["origin_service_cost"]
-        self.initial_layout = shared_data["initial_layout"]
-        self.adjacency_preferences = shared_data["adjacency_preferences"]
-        self.id_to_area = shared_data["id_to_area"]
-        self.slots = shared_data["slots"]
+        self.max_travel_time = shared_data['max_travel_time']
+        self.min_travel_time = shared_data['min_travel_time']
+        self.travel_times = shared_data['travel_times']
+        self.pair_weights: dict[tuple[str, str], float] = shared_data['pair_weights']
+        self.pair_times = shared_data['pair_times']
+        self.name_id_to_id = shared_data['name_id_to_id']
+        self.id_to_name_id = shared_data['id_to_name_id']
+        self.area_dict: dict[tuple[int, int], float] = shared_data['area_dict']
+        self.origin_service_cost = shared_data['origin_service_cost']
+        self.initial_layout = shared_data['initial_layout']
+        self.adjacency_preferences = shared_data['adjacency_preferences']
+        self.id_to_area = shared_data['id_to_area']
+        self.slots = shared_data['slots']
         self._previous_swap: tuple[str, str] | None = None
 
         self._layout = copy.deepcopy(self.initial_layout)
@@ -345,8 +345,8 @@ class CostEngine:
         name_id_weights = [
             (self.id_to_name_id[int(id1)], self.id_to_name_id[int(id2)], weight)
             for id1, id2, weight in id_weights
-            if int(id1) in set(self.slots["id"].astype(int).values)
-            and int(id2) in set(self.slots["id"].astype(int).values)
+            if int(id1) in set(self.slots['id'].astype(int).values)
+            and int(id2) in set(self.slots['id'].astype(int).values)
         ]
         return name_id_weights
 

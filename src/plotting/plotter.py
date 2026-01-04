@@ -38,9 +38,9 @@ class BasePlotter(abc.ABC):
         """
         try:
             coords = [
-                node_data.get("pos_x"),
-                node_data.get("pos_y"),
-                node_data.get("pos_z"),
+                node_data.get('pos_x'),
+                node_data.get('pos_y'),
+                node_data.get('pos_z'),
             ]
             return all(isinstance(c, (int, float)) and np.isfinite(c) for c in coords)
         except (TypeError, AttributeError):
@@ -50,41 +50,41 @@ class BasePlotter(abc.ABC):
         """
         Gets edge style configuration from the plotter config.
         """
-        return self.plotter_config.get("edge_styles", {})
+        return self.plotter_config.get('edge_styles', {})
 
     def _classify_edge_type(self, start_node: dict, end_node: dict) -> str:
         """
         Classifies the edge type based on node properties.
         """
-        z_diff = abs(start_node.get("pos_z", 0) - end_node.get("pos_z", 0))
-        z_threshold = self.super_network_config.get("z_level_diff_threshold", 1.0)
+        z_diff = abs(start_node.get('pos_z', 0) - end_node.get('pos_z', 0))
+        z_threshold = self.super_network_config.get('z_level_diff_threshold', 1.0)
         if z_diff > z_threshold:
-            return "vertical"
+            return 'vertical'
 
-        start_category = start_node.get("category")
-        end_category = end_node.get("category")
+        start_category = start_node.get('category')
+        end_category = end_node.get('category')
 
-        if start_category == "CONNECTOR" or end_category == "CONNECTOR":
-            return "door"
+        if start_category == 'CONNECTOR' or end_category == 'CONNECTOR':
+            return 'door'
 
-        return "horizontal"
+        return 'horizontal'
 
     def _get_node_color(self, node_name: str) -> str:
         """
         Determines the plotting color for a given node name from config.
         """
         node_props = self.node_defs.get(node_name, {})
-        rgb = node_props.get("rgb")
+        rgb = node_props.get('rgb')
         if rgb and len(rgb) == 3:
-            return f"rgb({rgb[0]},{rgb[1]},{rgb[2]})"
-        return "#1f77b4"  # Default Plotly blue
+            return f'rgb({rgb[0]},{rgb[1]},{rgb[2]})'
+        return '#1f77b4'  # Default Plotly blue
 
     @abc.abstractmethod
     def plot(
         self,
         graph: nx.Graph,
         output_path: Path | str | None = None,
-        title: str = "Network Graph",
+        title: str = 'Network Graph',
         # For Plotly layout, original image width
         graph_width: int | None = None,
         # For Plotly layout, original image height
@@ -129,7 +129,7 @@ class PlotlyPlotter(BasePlotter):
             base_floor_for_labels: The base floor number for labeling (e.g. 0 for ground, 1 for first).
         """
         if not all_z_levels:
-            return {"sliders": []}
+            return {'sliders': []}
 
         # Create floor labels. Try to map Z-levels back to "human-readable" floor numbers.
         z_to_floor_label_map: dict[float, str] = {}
@@ -144,33 +144,33 @@ class PlotlyPlotter(BasePlotter):
                 floor_nums_at_z = z_to_floor_num.get(z_level)
                 if floor_nums_at_z:
                     # If multiple floor numbers map to the same z_level, list them or take first
-                    f_num_str = "/".join(map(str, sorted(floor_nums_at_z)))
+                    f_num_str = '/'.join(map(str, sorted(floor_nums_at_z)))
                     # e.g., F1, F-1/B1
-                    z_to_floor_label_map[z_level] = f"F{f_num_str}"
+                    z_to_floor_label_map[z_level] = f'F{f_num_str}'
                 # Fallback if z_level not in map (should not happen if map is complete)
                 else:
-                    z_to_floor_label_map[z_level] = f"Z={z_level:.1f}"
+                    z_to_floor_label_map[z_level] = f'Z={z_level:.1f}'
         else:  # Fallback if no floor_z_map is provided
             for i, z_level in enumerate(all_z_levels):
                 # Attempt simple labeling if base_floor is known
                 floor_num_guess = base_floor_for_labels + i  # This is a rough guess
-                z_to_floor_label_map[z_level] = f"F{floor_num_guess} (Z={z_level:.1f})"
+                z_to_floor_label_map[z_level] = f'F{floor_num_guess} (Z={z_level:.1f})'
 
         slider_steps = []
         for z_level in all_z_levels:
-            label = z_to_floor_label_map.get(z_level, f"Z={z_level:.1f}")
+            label = z_to_floor_label_map.get(z_level, f'Z={z_level:.1f}')
             slider_steps.append(
                 {
-                    "label": label,
-                    "method": "relayout",
-                    "args": [
+                    'label': label,
+                    'method': 'relayout',
+                    'args': [
                         {
-                            "scene.zaxis.range": [
+                            'scene.zaxis.range': [
                                 z_level
-                                - self.super_network_config.get("floor_height", 3.0) / 2
+                                - self.super_network_config.get('floor_height', 3.0) / 2
                                 + 0.1,
                                 z_level
-                                + self.super_network_config.get("floor_height", 3.0) / 2
+                                + self.super_network_config.get('floor_height', 3.0) / 2
                                 - 0.1,
                             ]
                         }
@@ -181,15 +181,15 @@ class PlotlyPlotter(BasePlotter):
         # Add a step to show all floors
         slider_steps.append(
             {
-                "label": "All Floors",
-                "method": "relayout",
-                "args": [
+                'label': 'All Floors',
+                'method': 'relayout',
+                'args': [
                     {
-                        "scene.zaxis.range": [
+                        'scene.zaxis.range': [
                             min_z
-                            - self.super_network_config.get("floor_height", 3.0) * 0.5,
+                            - self.super_network_config.get('floor_height', 3.0) * 0.5,
                             max_z
-                            + self.super_network_config.get("floor_height", 3.0) * 0.5,
+                            + self.super_network_config.get('floor_height', 3.0) * 0.5,
                         ]
                     }
                 ],  # View all
@@ -198,96 +198,96 @@ class PlotlyPlotter(BasePlotter):
 
         sliders = [
             {
-                "active": len(all_z_levels),  # Default to "All Floors"
-                "currentvalue": {"prefix": "Current Display: "},
-                "pad": {"t": 50},
-                "steps": slider_steps,
-                "name": "Floor Selection",
+                'active': len(all_z_levels),  # Default to "All Floors"
+                'currentvalue': {'prefix': 'Current Display: '},
+                'pad': {'t': 50},
+                'steps': slider_steps,
+                'name': 'Floor Selection',
             }
         ]
-        return {"sliders": sliders}
+        return {'sliders': sliders}
 
     def plot(
         self,
         graph: nx.Graph,
         output_path: Path | str | None = None,
-        title: str = "3D Network Graph",
+        title: str = '3D Network Graph',
         graph_width: int | None = None,
         graph_height: int | None = None,
         floor_z_map: dict[int, float] | None = None,
     ):
         if not graph.nodes:
-            logger.warning("PlotlyPlotter: Graph has no nodes to plot.")
+            logger.warning('PlotlyPlotter: Graph has no nodes to plot.')
             return
 
         nodes_by_name: dict[str, dict[str, list]] = {}
-        all_z_coords = [data.get("pos_z", 0) for _, data in graph.nodes(data=True)]
+        all_z_coords = [data.get('pos_z', 0) for _, data in graph.nodes(data=True)]
 
         # Group nodes by their 'name' for creating traces
         for node_id, data in graph.nodes(data=True):
-            name = data.get("name", "Unknown")
+            name = data.get('name', 'Unknown')
             if name not in nodes_by_name:
                 nodes_by_name[name] = {
-                    "x": [],
-                    "y": [],
-                    "z": [],
-                    "hover_text": [],
-                    "sizes": [],
-                    "ids": [],
+                    'x': [],
+                    'y': [],
+                    'z': [],
+                    'hover_text': [],
+                    'sizes': [],
+                    'ids': [],
                 }
 
             if not self._validate_node_coordinates(data, node_id):
-                logger.warning(f"Skipping node {node_id} due to invalid coordinates.")
+                logger.warning(f'Skipping node {node_id} due to invalid coordinates.')
                 continue
 
-            x, y, z = data["pos_x"], data["pos_y"], data["pos_z"]
+            x, y, z = data['pos_x'], data['pos_y'], data['pos_z']
             plot_x = (
                 (graph_width - x)
-                if self.plotter_config.get("image_mirror") and graph_width
+                if self.plotter_config.get('image_mirror') and graph_width
                 else x
             )
 
-            nodes_by_name[name]["x"].append(plot_x)
-            nodes_by_name[name]["y"].append(y)
-            nodes_by_name[name]["z"].append(z)
-            nodes_by_name[name]["ids"].append(node_id)
+            nodes_by_name[name]['x'].append(plot_x)
+            nodes_by_name[name]['y'].append(y)
+            nodes_by_name[name]['z'].append(z)
+            nodes_by_name[name]['ids'].append(node_id)
 
-            hover_label = f"ID: {node_id}<br>Name: {name}<br>CName: {data.get('cname', 'N/A')}<br>Code: {data.get('code', 'N/A')}<br>Pos: ({x:.1f}, {y:.1f}, {z:.1f})"
-            if name == "Door":
-                door_type = data.get("door_type", "N/A")
-                hover_label += f"<br>Door Type: {door_type}"
-            nodes_by_name[name]["hover_text"].append(hover_label)
+            hover_label = f'ID: {node_id}<br>Name: {name}<br>CName: {data.get("cname", "N/A")}<br>Code: {data.get("code", "N/A")}<br>Pos: ({x:.1f}, {y:.1f}, {z:.1f})'
+            if name == 'Door':
+                door_type = data.get('door_type', 'N/A')
+                hover_label += f'<br>Door Type: {door_type}'
+            nodes_by_name[name]['hover_text'].append(hover_label)
 
-            node_sizes = self.plotter_config.get("node_sizes", {})
+            node_sizes = self.plotter_config.get('node_sizes', {})
             size = node_sizes.get(
-                data.get("category", "default"), node_sizes.get("default", 3)
+                data.get('category', 'default'), node_sizes.get('default', 3)
             )
-            nodes_by_name[name]["sizes"].append(size)
+            nodes_by_name[name]['sizes'].append(size)
 
         # Create node traces
         node_traces = []
         for name, data in nodes_by_name.items():
             node_traces.append(
                 go.Scatter3d(
-                    x=data["x"],
-                    y=data["y"],
-                    z=data["z"],
-                    mode="markers",
+                    x=data['x'],
+                    y=data['y'],
+                    z=data['z'],
+                    mode='markers',
                     marker={
-                        "size": data["sizes"],
-                        "color": self._get_node_color(name),
-                        "opacity": self.plotter_config.get("node_opacity", 0.8),
+                        'size': data['sizes'],
+                        'color': self._get_node_color(name),
+                        'opacity': self.plotter_config.get('node_opacity', 0.8),
                     },
-                    text=data["hover_text"],
-                    hoverinfo="text",
+                    text=data['hover_text'],
+                    hoverinfo='text',
                     name=name,
-                    customdata=data["ids"],
+                    customdata=data['ids'],
                 )
             )
 
         # Prepare edge data
         edge_styles = self._get_edge_style_config()
-        edge_data = {key: {"x": [], "y": [], "z": []} for key in edge_styles}
+        edge_data = {key: {'x': [], 'y': [], 'z': []} for key in edge_styles}
 
         for u, v in graph.edges():
             node_u, node_v = graph.nodes[u], graph.nodes[v]
@@ -296,74 +296,74 @@ class PlotlyPlotter(BasePlotter):
             ) or not self._validate_node_coordinates(node_v, v):
                 continue
 
-            x0, y0, z0 = node_u["pos_x"], node_u["pos_y"], node_u["pos_z"]
-            x1, y1, z1 = node_v["pos_x"], node_v["pos_y"], node_v["pos_z"]
+            x0, y0, z0 = node_u['pos_x'], node_u['pos_y'], node_u['pos_z']
+            x1, y1, z1 = node_v['pos_x'], node_v['pos_y'], node_v['pos_z']
 
-            if self.plotter_config.get("image_mirror") and graph_width:
+            if self.plotter_config.get('image_mirror') and graph_width:
                 x0, x1 = graph_width - x0, graph_width - x1
 
             edge_type = self._classify_edge_type(node_u, node_v)
-            edge_data[edge_type]["x"].extend([x0, x1, None])
-            edge_data[edge_type]["y"].extend([y0, y1, None])
-            edge_data[edge_type]["z"].extend([z0, z1, None])
+            edge_data[edge_type]['x'].extend([x0, x1, None])
+            edge_data[edge_type]['y'].extend([y0, y1, None])
+            edge_data[edge_type]['z'].extend([z0, z1, None])
 
         # Create edge traces
         edge_traces = []
         for edge_type, data in edge_data.items():
-            if data["x"]:
+            if data['x']:
                 style = edge_styles[edge_type]
                 edge_traces.append(
                     go.Scatter3d(
-                        x=data["x"],
-                        y=data["y"],
-                        z=data["z"],
-                        mode="lines",
-                        line={"color": style["color"], "width": style["width"]},
-                        hoverinfo="none",
-                        name=style["name"],
+                        x=data['x'],
+                        y=data['y'],
+                        z=data['z'],
+                        mode='lines',
+                        line={'color': style['color'], 'width': style['width']},
+                        hoverinfo='none',
+                        name=style['name'],
                         showlegend=True,
                     )
                 )
 
         # Create layout
-        scene_config = self.plotter_config.get("scene", {})
-        aspect_ratio = scene_config.get("aspect_ratio", {"x": 1, "y": 1, "z": 1})
-        camera_eye = scene_config.get("camera", {}).get(
-            "eye", {"x": 1.25, "y": 1.25, "z": 1.25}
+        scene_config = self.plotter_config.get('scene', {})
+        aspect_ratio = scene_config.get('aspect_ratio', {'x': 1, 'y': 1, 'z': 1})
+        camera_eye = scene_config.get('camera', {}).get(
+            'eye', {'x': 1.25, 'y': 1.25, 'z': 1.25}
         )
 
         layout = go.Layout(
             title=title,
             showlegend=True,
-            hovermode="closest",
-            margin={"b": 20, "l": 5, "r": 5, "t": 40},
+            hovermode='closest',
+            margin={'b': 20, 'l': 5, 'r': 5, 't': 40},
             scene={
-                "xaxis": {
-                    "title": "X",
+                'xaxis': {
+                    'title': 'X',
                 },
-                "yaxis": {"title": "Y"},
-                "zaxis": {"title": "Z (Floor)"},
-                "aspectmode": "manual",
-                "aspectratio": {
-                    "x": aspect_ratio["x"],
-                    "y": aspect_ratio["y"],
-                    "z": aspect_ratio["z"],
+                'yaxis': {'title': 'Y'},
+                'zaxis': {'title': 'Z (Floor)'},
+                'aspectmode': 'manual',
+                'aspectratio': {
+                    'x': aspect_ratio['x'],
+                    'y': aspect_ratio['y'],
+                    'z': aspect_ratio['z'],
                 },
-                "camera": {
-                    "eye": {
-                        "x": camera_eye["x"],
-                        "y": camera_eye["y"],
-                        "z": camera_eye["z"],
+                'camera': {
+                    'eye': {
+                        'x': camera_eye['x'],
+                        'y': camera_eye['y'],
+                        'z': camera_eye['z'],
                     }
                 },
             },
             legend={
-                "orientation": "v",
-                "x": 0.02,
-                "y": 1.0,
-                "xanchor": "left",
-                "yanchor": "top",
-                "bgcolor": "rgba(255, 255, 255, 0.7)",
+                'orientation': 'v',
+                'x': 0.02,
+                'y': 1.0,
+                'xanchor': 'left',
+                'yanchor': 'top',
+                'bgcolor': 'rgba(255, 255, 255, 0.7)',
             },
         )
 
@@ -384,6 +384,6 @@ class PlotlyPlotter(BasePlotter):
         if output_path:
             p = pathlib.Path(output_path)
             p.parent.mkdir(parents=True, exist_ok=True)
-            fig.write_html(str(p), config=self.plotter_config.get("plotly_config"))
+            fig.write_html(str(p), config=self.plotter_config.get('plotly_config'))
         else:
             fig.show()

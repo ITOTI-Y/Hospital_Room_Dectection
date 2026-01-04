@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 def calculate_room_travel_times(
     graph: nx.Graph,
     output_dir: pathlib.Path,
-    output_filename: str = "hospital_travel_times.csv",
+    output_filename: str = 'hospital_travel_times.csv',
 ) -> dict[Hashable, Any]:
     """
     Calculates shortest travel times between all pairs of service locations.
@@ -36,13 +36,14 @@ def calculate_room_travel_times(
         dictionaries mapping target location names to travel times.
     """
     if not graph.nodes:
-        logger.warning("Graph is empty. Cannot calculate travel times.")
+        logger.warning('Graph is empty. Cannot calculate travel times.')
         return {}
 
     location_nodes = {
         node_id: data
         for node_id, data in graph.nodes(data=True)
-        if data.get("category") in ["SLOT", "FIXED"] or data.get("door_type") == "EXTERIOR"
+        if data.get('category') in ['SLOT', 'FIXED']
+        or data.get('door_type') == 'EXTERIOR'
     }
 
     if not location_nodes:
@@ -50,15 +51,15 @@ def calculate_room_travel_times(
         return {}
 
     location_names = sorted(
-        [f"{data['name']}_{node_id}" for node_id, data in location_nodes.items()]
+        [f'{data["name"]}_{node_id}' for node_id, data in location_nodes.items()]
     )
-    name_to_id = {name: int(name.split("_")[-1]) for name in location_names}
+    name_to_id = {name: int(name.split('_')[-1]) for name in location_names}
 
     logger.info(
-        f"Calculating travel times for {len(location_names)} unique locations..."
+        f'Calculating travel times for {len(location_names)} unique locations...'
     )
 
-    all_pairs_lengths = dict(nx.all_pairs_dijkstra_path_length(graph, weight="weight"))
+    all_pairs_lengths = dict(nx.all_pairs_dijkstra_path_length(graph, weight='weight'))
 
     df_data = {}
     for start_name in location_names:
@@ -68,22 +69,22 @@ def calculate_room_travel_times(
             for target_name in location_names:
                 target_id = name_to_id[target_name]
                 time = all_pairs_lengths[start_id].get(target_id)
-                row[target_name] = round(time, 2) if time is not None else float("inf")
+                row[target_name] = round(time, 2) if time is not None else float('inf')
         else:
-            logger.warning(f"Node {start_name} (ID: {start_id}) is disconnected.")
+            logger.warning(f'Node {start_name} (ID: {start_id}) is disconnected.')
             for target_name in location_names:
-                row[target_name] = float("inf")
+                row[target_name] = float('inf')
         df_data[start_name] = row
 
-    df = pd.DataFrame.from_dict(df_data, orient="index")
-    df.index.name = "Source/Target"
+    df = pd.DataFrame.from_dict(df_data, orient='index')
+    df.index.name = 'Source/Target'
 
     output_dir.mkdir(parents=True, exist_ok=True)
     csv_file_path = output_dir / output_filename
     try:
-        df.to_csv(csv_file_path, float_format="%.2f")
-        logger.info(f"Travel times matrix saved to {csv_file_path}")
+        df.to_csv(csv_file_path, float_format='%.2f')
+        logger.info(f'Travel times matrix saved to {csv_file_path}')
     except OSError as e:
-        logger.error(f"Failed to write travel times CSV to {csv_file_path}: {e}")
+        logger.error(f'Failed to write travel times CSV to {csv_file_path}: {e}')
 
     return df.to_dict()
