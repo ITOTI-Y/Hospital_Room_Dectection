@@ -305,7 +305,11 @@ class CostManager:
 
             idx = slot_name_to_idx[name]
             area_vector[idx] = float(row['area'])
-            position_matrix[idx] = [float(row['pos_x']), float(row['pos_y']), float(row['pos_z'])]
+            position_matrix[idx] = [
+                float(row['pos_x']),
+                float(row['pos_y']),
+                float(row['pos_z']),
+            ]
             type_name = str(row['name'])
             dept_types[idx] = type_name
             service_times[idx] = float(node_def[type_name]['service_time'])

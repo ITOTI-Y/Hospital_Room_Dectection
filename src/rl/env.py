@@ -9,7 +9,7 @@ from loguru import logger
 from sklearn.preprocessing import StandardScaler
 
 from src.config.config_loader import ConfigLoader
-from src.pipeline import CostManager, PathwayGenerator, CostManagerV2
+from src.pipeline import CostManagerV2, PathwayGenerator
 
 
 @dataclass
