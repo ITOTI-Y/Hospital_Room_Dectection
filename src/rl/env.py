@@ -9,7 +9,7 @@ from loguru import logger
 from sklearn.preprocessing import StandardScaler
 
 from src.config.config_loader import ConfigLoader
-from src.pipeline import CostManager, PathwayGenerator
+from src.pipeline import CostManager, PathwayGenerator, CostManagerV2
 
 
 @dataclass
@@ -82,7 +82,7 @@ class LayoutEnv(gym.Env):
         )
 
         self.pathway_generator = PathwayGenerator(self.config, is_training=is_training)
-        self.cost_manager = CostManager(self.config, is_shuffle=True)
+        self.cost_manager = CostManagerV2(self.config, shuffle_initial_layout=True)
 
         self.norm_numerical_feature: np.ndarray | None = None
         self.index_to_dept_id: dict[int, str] = {}

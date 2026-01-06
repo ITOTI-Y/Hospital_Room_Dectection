@@ -28,7 +28,7 @@ def export_slots_to_csv(
 
     slot_nodes: list[dict[str, Any]] = []
     for node_id, data in graph.nodes(data=True):
-        if data.get('category') == 'SLOT':
+        if data.get('category') == 'SLOT' or data.get('category') == 'FIXED' or data.get('door_type') == 'EXTERIOR':
             node_data = data.copy()
             node_data['id'] = node_id
             slot_nodes.append(node_data)

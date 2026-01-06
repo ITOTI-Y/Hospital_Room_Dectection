@@ -166,6 +166,7 @@ class DepartmentData:
     # Mapping from type name to list of department indices
     # e.g., {"Pharmacy": [0], "Radiology": [3, 15], ...}
     type_to_dept_indices: dict[str, list[int]]  # (n_types,), dtype: list[int]
+    swappable_mask: np.ndarray  # (n_slots,), dtype: bool
 
     @property
     def n_depts(self) -> int:
@@ -292,6 +293,7 @@ class CostManager:
         position_matrix = np.zeros((n, 3), dtype=np.float32)
         service_times = np.zeros(n, dtype=np.float32)
         dept_types = [''] * n
+        swappable_mask = np.zeros(n, dtype=bool)
 
         node_def = self.config.graph_config.node_definitions
 
@@ -303,11 +305,12 @@ class CostManager:
 
             idx = slot_name_to_idx[name]
             area_vector[idx] = float(row['area'])
-            position_matrix[idx] = [float(row['x']), float(row['y']), float(row['z'])]
+            position_matrix[idx] = [float(row['pos_x']), float(row['pos_y']), float(row['pos_z'])]
             type_name = str(row['name'])
             dept_types[idx] = type_name
-
             service_times[idx] = float(node_def[type_name]['service_time'])
+            if row['category'] == 'SLOT':
+                swappable_mask[idx] = True
 
         type_to_dept_indices: dict[str, list[int]] = defaultdict(list)
         for idx, dept_type in enumerate(dept_types):
@@ -329,6 +332,7 @@ class CostManager:
             dept_names=slot_names.copy(),
             dept_name_to_idx=slot_name_to_idx,
             type_to_dept_indices=type_to_dept_indices,
+            swappable_mask=swappable_mask,
         )
 
         return slot_data, dept_data
@@ -373,10 +377,15 @@ class CostManager:
     def _create_intitial_layout(self) -> np.ndarray:
         n = self._slot_data.n_slots
 
+        layout = np.arange(n, dtype=np.int32)
+
         if self.shuffle_initial_layout:
-            return np.random.permutation(n).astype(np.int32)
-        else:
-            return np.arange(n, dtype=np.int32)
+            swappable = np.where(self._dept_data.swappable_mask)[0]
+            swappable_slots = layout[swappable].copy()
+            np.random.shuffle(swappable_slots)
+            layout[swappable] = swappable_slots
+
+        return layout
 
     def _build_name_mapping(self) -> dict[str, int]:
         node_def = dict(self.config.graph_config.node_definitions)

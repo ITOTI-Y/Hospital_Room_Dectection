@@ -9,7 +9,7 @@ from tianshou.utils import TensorboardLogger
 from torch.utils.tensorboard import SummaryWriter
 
 from src.config.config_loader import ConfigLoader
-from src.pipeline import CostManager, PathwayGenerator
+from src.pipeline import CostManagerV2, PathwayGenerator
 from src.rl.env import LayoutEnv
 from src.rl.models.policy import LayoutA2CPolicy
 from src.rl.models.ppo_model import LayoutOptimizationModel
@@ -22,7 +22,7 @@ class OptimizeManager:
         self.kwargs = kwargs
 
         self.pathway_generator = PathwayGenerator(self.config)
-        self.cost_manager = CostManager(self.config, is_shuffle=True)
+        self.cost_manager = CostManagerV2(self.config, shuffle_initial_layout=False)
         self.max_departments = self.config.agent.max_departments
         self.max_steps = self.config.agent.max_steps
 
