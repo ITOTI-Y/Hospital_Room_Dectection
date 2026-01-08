@@ -720,3 +720,11 @@ class CostEngine:
                     distance = self._slots.distance_matrix[slot_i, slot_j]
                     score += pref * pref * (self._slots.max_distance / distance)
         return score
+
+    @property
+    def dept_to_slot(self) -> np.ndarray:
+        return self._state.dept_to_slot
+
+    @property
+    def slot_to_dept(self) -> np.ndarray:
+        return self._state.slot_to_dept

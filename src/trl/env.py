@@ -50,6 +50,7 @@ This allows the model to learn stable patterns before facing new flows.
 
 from typing import TYPE_CHECKING, Literal
 
+import numpy as np
 import torch
 from loguru import logger
 from sklearn.preprocessing import StandardScaler
@@ -62,8 +63,6 @@ if TYPE_CHECKING:
     from src.config.config_loader import ConfigLoader
     from src.pipeline.cost_manager_v2 import CostEngine, CostManager
     from src.pipeline.pathway_generator import PathwayGenerator
-
-import numpy as np
 
 
 class HospitalLayoutEnv(EnvBase):
@@ -571,10 +570,10 @@ class HospitalLayoutEnv(EnvBase):
 
         obs = self._build_observation()
 
-        obs['reward'] = torch.tensor([reward], dtype=torch.float32).to(self.device)
-        obs['done'] = torch.tensor([done], dtype=torch.bool).to(self.device)
-        obs['terminated'] = torch.tensor([terminated], dtype=torch.bool).to(self.device)
-        obs['truncated'] = torch.tensor([truncated], dtype=torch.bool).to(self.device)
+        obs['reward'] = torch.tensor([reward], dtype=torch.float32, device=self.device)
+        obs['done'] = torch.tensor([done], dtype=torch.bool, device=self.device)
+        obs['terminated'] = torch.tensor([terminated], dtype=torch.bool, device=self.device)
+        obs['truncated'] = torch.tensor([truncated], dtype=torch.bool, device=self.device)
 
         return obs
 
