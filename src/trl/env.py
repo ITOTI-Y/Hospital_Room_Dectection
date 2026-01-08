@@ -572,8 +572,12 @@ class HospitalLayoutEnv(EnvBase):
 
         obs['reward'] = torch.tensor([reward], dtype=torch.float32, device=self.device)
         obs['done'] = torch.tensor([done], dtype=torch.bool, device=self.device)
-        obs['terminated'] = torch.tensor([terminated], dtype=torch.bool, device=self.device)
-        obs['truncated'] = torch.tensor([truncated], dtype=torch.bool, device=self.device)
+        obs['terminated'] = torch.tensor(
+            [terminated], dtype=torch.bool, device=self.device
+        )
+        obs['truncated'] = torch.tensor(
+            [truncated], dtype=torch.bool, device=self.device
+        )
 
         return obs
 
@@ -588,6 +592,10 @@ class HospitalLayoutEnv(EnvBase):
         if self._initial_cost == 0:
             return 0.0
         return (self._initial_cost - self._current_cost) / self._initial_cost
+
+    @property
+    def current_cost(self) -> float:
+        return self._current_cost
 
     @property
     def n_depts(self) -> int:

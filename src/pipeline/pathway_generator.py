@@ -5,10 +5,16 @@ from loguru import logger
 
 from src.config.config_loader import ConfigLoader
 
-EvalMode = Literal["smart", "traditional"]
+EvalMode = Literal['smart', 'traditional']
+
 
 class PathwayGenerator:
-    def __init__(self, config: ConfigLoader, is_training: bool = True, eval_mode: EvalMode = "smart"):
+    def __init__(
+        self,
+        config: ConfigLoader,
+        is_training: bool = True,
+        eval_mode: EvalMode = 'smart',
+    ):
         self.process_id = 1
         self.paths = config.paths
         self.is_training = is_training
@@ -16,9 +22,9 @@ class PathwayGenerator:
             self.meta_rules = config.pathways.training.meta_rules
             self.pathways_number = config.pathways.pathways_number
         else:
-            if eval_mode == "smart":
+            if eval_mode == 'smart':
                 self.meta_rules = config.pathways.evaluation.smart.meta_rules
-            elif eval_mode == "traditional":
+            elif eval_mode == 'traditional':
                 self.meta_rules = config.pathways.evaluation.traditional.meta_rules
             self.pathways_number = len(self.meta_rules)
         self.pools = config.pathways.training.department_pools
