@@ -2,6 +2,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated
 
+import torch.multiprocessing as mp
 import typer
 from loguru import logger
 
@@ -10,6 +11,7 @@ from src.network_generator import NetworkGenerator
 from src.optimize_manager import OptimizeManager
 from src.utils.logger import setup_logger
 
+mp.set_start_method('spawn', force=True)
 config = config_loader.ConfigLoader()
 setup_logger(
     log_file=Path(config.paths.log_dir) / f'{datetime.now():%Y-%m-%d_%H-%M-%S}.log'
@@ -78,6 +80,24 @@ def network(
 def train():
     optimize_manager = OptimizeManager(config)
     optimize_manager.run()
+
+
+@app.command()
+def train_trl():
+    from src.trl.actor_critic import create_actor_critic
+    from src.trl.encoder import DualStreamGNNEncoder
+    from src.trl.env import create_eval_env, create_train_env
+    from src.trl.trainer import create_trainer
+
+    encoder = DualStreamGNNEncoder()
+    actor_critic = create_actor_critic(encoder)
+
+    trainer = create_trainer(
+        env_maker=lambda: create_train_env(config),
+        actor_critic=actor_critic,
+        eval_env_maker=lambda: create_eval_env(config),
+    )
+    trainer.train()
 
 
 if __name__ == '__main__':

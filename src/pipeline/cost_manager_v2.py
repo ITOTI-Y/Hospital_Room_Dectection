@@ -243,7 +243,7 @@ class CostManager:
     """
 
     def __init__(self, config: ConfigLoader, shuffle_initial_layout: bool = False):
-        self.logger = logger
+        self.logger = logger.bind(module=__name__)
         self.config = config
         self.shuffle_initial_layout = shuffle_initial_layout
 

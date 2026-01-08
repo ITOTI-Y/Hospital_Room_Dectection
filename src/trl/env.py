@@ -48,6 +48,8 @@ This allows the model to learn stable patterns before facing new flows.
 - flow_update_interval=10: New flow every 10 episodes (stable learning)
 """
 
+from __future__ import annotations
+
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
@@ -135,9 +137,9 @@ class HospitalLayoutEnv(EnvBase):
     ):
         super().__init__(device=config.device, batch_size=torch.Size([]))
 
-        self.logger = logger
+        self.logger = logger.bind(module=__name__)
         self.config = config
-        self.device = config.device
+        self._env_device = config.device
         self.max_departments = config.max_departments
         self.max_steps = config.max_steps
 
@@ -203,7 +205,7 @@ class HospitalLayoutEnv(EnvBase):
             f'{mode_str}, '
             f'max_departments={self.max_departments}, '
             f'max_steps={self.max_steps}, '
-            f'device={self.device}, '
+            f'device={self._env_device}, '
             f'flow_update_interval={self.flow_update_interval if is_training else "N/A"}, '
             f'no_improvement_patience={self.no_improvement_patience}'
         )
@@ -246,7 +248,7 @@ class HospitalLayoutEnv(EnvBase):
         slot_features_padded[:n_actual] = slot_features_norm
 
         self._cached_slot_features = torch.as_tensor(
-            slot_features_padded, device=self.device
+            slot_features_padded, device=self._env_device
         )
 
         # Distance matrix: min-max normalized to [0, 1]
@@ -260,7 +262,7 @@ class HospitalLayoutEnv(EnvBase):
         dist_padded = np.zeros((n, n), dtype=np.float32)
         dist_padded[:n_actual, :n_actual] = dist_norm
 
-        self._cached_distance_matrix = torch.as_tensor(dist_padded, device=self.device)
+        self._cached_distance_matrix = torch.as_tensor(dist_padded, device=self._env_device)
 
         self.logger.debug(
             f'Static features cached: slot_features={self._cached_slot_features.shape}, '
@@ -297,7 +299,7 @@ class HospitalLayoutEnv(EnvBase):
         dept_features_padded[: self._n_depts] = dept_features_norm
 
         self._cached_dept_features = torch.as_tensor(
-            dept_features_padded, device=self.device
+            dept_features_padded, device=self._env_device
         )
 
         flow_matrix = flow_data.flow_matrix
@@ -307,7 +309,7 @@ class HospitalLayoutEnv(EnvBase):
         flow_padded = np.zeros((n, n), dtype=np.float32)
         flow_padded[: self._n_depts, : self._n_depts] = flow_norm
 
-        self._cached_flow_matrix = torch.as_tensor(flow_padded, device=self.device)
+        self._cached_flow_matrix = torch.as_tensor(flow_padded, device=self._env_device)
 
         self.logger.debug(
             f'Flow features cached: dept_features={self._cached_dept_features.shape}, '
@@ -346,17 +348,17 @@ class HospitalLayoutEnv(EnvBase):
                 'dept_features': self._cached_dept_features,
                 'flow_matrix': self._cached_flow_matrix,
                 'dept_to_slot': torch.as_tensor(
-                    dept_to_slot_padded, device=self.device
+                    dept_to_slot_padded, device=self._env_device
                 ),
                 'slot_to_dept': torch.as_tensor(
-                    slot_to_dept_padded, device=self.device
+                    slot_to_dept_padded, device=self._env_device
                 ),
-                'node_mask': torch.as_tensor(node_mask, device=self.device),
+                'node_mask': torch.as_tensor(node_mask, device=self._env_device),
                 'step_count': torch.tensor(self._current_step, dtype=torch.float32).to(
-                    self.device
+                    self._env_device
                 ),
             },
-            device=self.device,
+            device=self._env_device,
             batch_size=self.batch_size,
         )
 
@@ -570,13 +572,13 @@ class HospitalLayoutEnv(EnvBase):
 
         obs = self._build_observation()
 
-        obs['reward'] = torch.tensor([reward], dtype=torch.float32, device=self.device)
-        obs['done'] = torch.tensor([done], dtype=torch.bool, device=self.device)
+        obs['reward'] = torch.tensor([reward], dtype=torch.float32, device=self._env_device)
+        obs['done'] = torch.tensor([done], dtype=torch.bool, device=self._env_device)
         obs['terminated'] = torch.tensor(
-            [terminated], dtype=torch.bool, device=self.device
+            [terminated], dtype=torch.bool, device=self._env_device
         )
         obs['truncated'] = torch.tensor(
-            [truncated], dtype=torch.bool, device=self.device
+            [truncated], dtype=torch.bool, device=self._env_device
         )
 
         return obs
@@ -653,17 +655,17 @@ def create_env(
         is_training=is_training,
         eval_mode=eval_mode,
     )
-    cost_manager = CostManagerV2(config_loader, shuffle_initial_layout=True)
+    cost_manager = CostManagerV2(config_loader, shuffle_initial_layout=False)
 
     if env_config is None:
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        # device = 'cuda' if torch.cuda.is_available() else 'cpu'
         env_config = LayoutEnvConfig(
             max_departments=config_loader.agent.max_departments,
             max_steps=config_loader.agent.max_steps,
-            device=device,
+            device=torch.device('cpu'),
         )
 
-    return HospitalLayoutEnv(
+    env = HospitalLayoutEnv(
         cost_manager=cost_manager,
         pathway_generator=pathway_generator,
         config=env_config,
@@ -671,6 +673,8 @@ def create_env(
         eval_mode=eval_mode,
         **kwargs,
     )
+
+    return env.to(env_config.device)
 
 
 def create_train_env(

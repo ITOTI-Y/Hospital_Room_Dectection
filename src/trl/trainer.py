@@ -227,7 +227,7 @@ class PPOTrainer:
         config: TrainerConfig,
         device: str | torch.device = 'cuda',
     ):
-        self.logger = logger
+        self.logger = logger.bind(module=__name__)
         self.config = config
         self.ppo_config = config.ppo
         self.device = torch.device(device) if isinstance(device, str) else device
