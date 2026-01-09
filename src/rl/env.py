@@ -344,7 +344,7 @@ class HospitalLayoutEnv(EnvBase):
         node_mask[: self._n_depts] = True
 
         obs = TensorDict(
-            {
+            {  # type: ignore[arg-type]
                 'slot_features': self._cached_slot_features,
                 'distance_matrix': self._cached_distance_matrix,
                 'dept_features': self._cached_dept_features,
@@ -356,8 +356,8 @@ class HospitalLayoutEnv(EnvBase):
                     slot_to_dept_padded, device=self._env_device
                 ),
                 'node_mask': torch.as_tensor(node_mask, device=self._env_device),
-                'step_count': torch.tensor(self._current_step, dtype=torch.float32).to(
-                    self._env_device
+                'step_count': torch.tensor(
+                    self._current_step, dtype=torch.float32, device=self._env_device
                 ),
             },
             device=self._env_device,
