@@ -8,7 +8,6 @@ from loguru import logger
 
 from src.config import config_loader
 from src.network_generator import NetworkGenerator
-from src.optimize_manager import OptimizeManager
 from src.utils.logger import setup_logger
 
 mp.set_start_method('spawn', force=True)
@@ -78,16 +77,10 @@ def network(
 
 @app.command()
 def train():
-    optimize_manager = OptimizeManager(config)
-    optimize_manager.run()
-
-
-@app.command()
-def train_trl():
-    from src.trl.actor_critic import create_actor_critic
-    from src.trl.encoder import DualStreamGNNEncoder
-    from src.trl.env import create_eval_env, create_train_env
-    from src.trl.trainer import create_trainer
+    from src.rl.actor_critic import create_actor_critic
+    from src.rl.encoder import DualStreamGNNEncoder
+    from src.rl.env import create_eval_env, create_train_env
+    from src.rl.trainer import create_trainer
 
     encoder = DualStreamGNNEncoder()
     actor_critic = create_actor_critic(encoder)
