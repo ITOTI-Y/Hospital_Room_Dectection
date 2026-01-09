@@ -705,13 +705,13 @@ class PPOTrainer:
                 done = False
                 while not done:
                     output = self.actor_critic(
-                        slot_features=obs['slot_features'].unsqueeze(0),
-                        distance_matrix=obs['distance_matrix'].unsqueeze(0),
-                        dept_features=obs['dept_features'].unsqueeze(0),
-                        flow_matrix=obs['flow_matrix'].unsqueeze(0),
-                        dept_to_slot=obs['dept_to_slot'].unsqueeze(0),
-                        slot_to_dept=obs['slot_to_dept'].unsqueeze(0),
-                        node_mask=obs['node_mask'].unsqueeze(0),
+                        slot_features=obs['slot_features'].unsqueeze(0).to(self.device),
+                        distance_matrix=obs['distance_matrix'].unsqueeze(0).to(self.device),
+                        dept_features=obs['dept_features'].unsqueeze(0).to(self.device),
+                        flow_matrix=obs['flow_matrix'].unsqueeze(0).to(self.device),
+                        dept_to_slot=obs['dept_to_slot'].unsqueeze(0).to(self.device),
+                        slot_to_dept=obs['slot_to_dept'].unsqueeze(0).to(self.device),
+                        node_mask=obs['node_mask'].unsqueeze(0).to(self.device),
                         deterministic=True,
                     )
 

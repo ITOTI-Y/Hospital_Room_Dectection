@@ -662,7 +662,6 @@ def create_env(
     cost_manager = CostManagerV2(config_loader, shuffle_initial_layout=False)
 
     if env_config is None:
-        # device = 'cuda' if torch.cuda.is_available() else 'cpu'
         env_config = LayoutEnvConfig(
             max_departments=config_loader.agent.max_departments,
             max_steps=config_loader.agent.max_steps,

@@ -39,13 +39,13 @@ explicit = true
 
 [tool.uv.sources]
 torchvision = [
-    { index = "pytorch", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { index = "pytorch", marker = "sys_platform == 'win32'" },
 ]
 torch = [
-    { index = "pytorch", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { index = "pytorch", marker = "sys_platform == 'win32'" },
 ]
 torchaudio = [
-    { index = "pytorch", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+    { index = "pytorch", marker = "sys_platform == 'win32'" },
 ]
 
 [tool.ruff]

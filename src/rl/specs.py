@@ -97,7 +97,7 @@ class PPOConfig:
         target_kl: Target KL divergence for early stopping (None to disable)
     """
 
-    total_frames: int = 1000000
+    total_frames: int = 1003520
     frames_per_batch: int = 4096
     num_epochs: int = 10
     mini_batch_size: int = 256
