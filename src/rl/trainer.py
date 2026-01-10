@@ -177,7 +177,7 @@ class TrainerConfig:
     save_interval: int = 100
     num_eval_episodes: int = 10
     use_amp: bool = True
-    compile_model: bool = True
+    compile_model: bool = False
     seed: int | None = None
 
     num_envs: int = 16
