@@ -2,7 +2,7 @@
 num_train_envs: 8
 num_test_envs: 16
 
-max_departments: 50
+max_departments: 100
 max_steps: 100
 
 lr: 1e-4
