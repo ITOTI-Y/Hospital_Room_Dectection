@@ -171,3 +171,4 @@ events.*
 .claude/*
 wandb/
 results/model/
+.serena/

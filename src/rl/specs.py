@@ -65,7 +65,7 @@ class LayoutEnvConfig:
         device: Device for tensors ('cpu' | 'cuda')
     """
 
-    max_departments: int = 100
+    max_departments: int = 50
     slot_feature_dim: int = 4
     dept_feature_dim: int = 2
     max_steps: int = 100
@@ -98,19 +98,19 @@ class PPOConfig:
     """
 
     total_frames: int = 1003520
-    frames_per_batch: int = 4096
+    frames_per_batch: int = 8192
     num_epochs: int = 10
-    mini_batch_size: int = 256
+    mini_batch_size: int = 512
     lr: float = 3e-4
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.2
-    entropy_coef: float = 0.01
+    entropy_coef: float = 0.1
     value_coef: float = 0.5
     max_grad_norm: float = 0.5
     normalize_advantage: bool = True
     anneal_lr: bool = True
-    target_kl: float | None = None
+    target_kl: float | None = 0.015
 
     def __post_init__(self):
         if self.total_frames < self.frames_per_batch:
@@ -137,7 +137,7 @@ class ModelConfig:
         num_distance_bins: Number of bins for learnable distance bias
     """
 
-    hidden_dim: int = 256
+    hidden_dim: int = 512
     phys_hidden_dim: int = 128
     flow_hidden_dim: int = 128
     num_encoder_layers: int = 3
