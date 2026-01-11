@@ -12,6 +12,14 @@
             "program": "/home/pan/code/Hospital_Room_Dectection/main.py",
             "console": "integratedTerminal",
             "args": "train"
+        },
+        {
+            "name": "Baseline",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "/home/pan/code/Hospital_Room_Dectection/main.py",
+            "console": "integratedTerminal",
+            "args": "baseline"
         }
     ]
 }

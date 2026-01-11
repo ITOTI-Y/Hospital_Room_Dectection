@@ -181,11 +181,11 @@ class GeneticAlgorithm(BaseOptimizer):
         )
 
         return OptimizationResult(
-            best_cost=best_cost,
+            best_cost=float(best_cost),
             initial_cost=initial_cost,
             improvement_ratio=improvement_ratio,
             best_layout=best_layout,
-            cost_history=cost_history,
+            cost_history=[float(cost) for cost in cost_history],
             iterations=generation + 1,
             evaluations=evaluations,
             time_seconds=elapsed,

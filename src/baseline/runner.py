@@ -58,12 +58,13 @@ class BaselineRunner:
     def __init__(
         self,
         config: ConfigLoader,
-        shuffle_initial_layout: bool = True,
+        shuffle_initial_layout: bool = False,
+        eval_mode: Literal['smart', 'traditional'] = 'smart',
     ):
         self.config = config
         self.logger = logger.bind(module='BaselineRunner')
 
-        self.pathway_generator = PathwayGenerator(config)
+        self.pathway_generator = PathwayGenerator(config, is_training=False, eval_mode=eval_mode)
         self.cost_manager = CostManager(
             config, shuffle_initial_layout=shuffle_initial_layout
         )

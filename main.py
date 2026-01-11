@@ -106,7 +106,7 @@ def baseline(
     n_runs: Annotated[
         int,
         typer.Option('--n-runs', '-n', help='Number of runs per algorithm'),
-    ] = 5,
+    ] = 50,
     ga_iterations: Annotated[
         int,
         typer.Option('--ga-iter', help='Max generations for GA'),
@@ -118,50 +118,94 @@ def baseline(
     seed: Annotated[
         int,
         typer.Option('--seed', '-s', help='Random seed'),
-    ] = 42,
+    ] = 1,
     output_dir: Annotated[
         str,
         typer.Option('--output', '-o', help='Output directory for results'),
     ] = 'results/baseline',
+    visualize: Annotated[
+        bool,
+        typer.Option('--visualize', '-vi', help='Generate result visualization'),
+    ] = True,
 ):
     """Run baseline optimization algorithms (GA and/or SA)."""
-    from src.baseline import BaselineRunner
+    # from src.baseline import BaselineRunner
 
-    runner = BaselineRunner(config, shuffle_initial_layout=True)
-    runner.initialize_pathways()
+    # runner = BaselineRunner(config, shuffle_initial_layout=True)
+    # runner.initialize_pathways()
 
-    if algorithm == 'compare':
-        results = runner.run_comparison(
-            n_runs=n_runs,
-            ga_iterations=ga_iterations,
-            sa_iterations=sa_iterations,
-            base_seed=seed,
-        )
-        runner.export_results(results, output_dir)
+    # if algorithm == 'compare':
+    #     results = runner.run_comparison(
+    #         n_runs=n_runs,
+    #         ga_iterations=ga_iterations,
+    #         sa_iterations=sa_iterations,
+    #         base_seed=seed,
+    #     )
+    #     runner.export_results(results, output_dir)
 
-    elif algorithm == 'ga':
-        result = runner.run_genetic_algorithm(
-            max_iterations=ga_iterations,
-            seed=seed,
-        )
-        logger.info(
-            f'GA Result: cost={result.best_cost:.2f}, '
-            f'improvement={result.improvement_ratio:.2%}'
+    # elif algorithm == 'ga':
+    #     result = runner.run_genetic_algorithm(
+    #         max_iterations=ga_iterations,
+    #         seed=seed,
+    #     )
+    #     logger.info(
+    #         f'GA Result: cost={result.best_cost:.2f}, '
+    #         f'improvement={result.improvement_ratio:.2%}'
+    #     )
+
+    # elif algorithm == 'sa':
+    #     result = runner.run_simulated_annealing(
+    #         max_iterations=sa_iterations,
+    #         seed=seed,
+    #     )
+    #     logger.info(
+    #         f'SA Result: cost={result.best_cost:.2f}, '
+    #         f'improvement={result.improvement_ratio:.2%}'
+    #     )
+
+    # else:
+    #     logger.error(f"Unknown algorithm: {algorithm}. Use 'ga', 'sa', or 'compare'")
+    #     raise typer.Exit(code=1)
+
+    if visualize:
+        from src.baseline.visualization import (
+            BaselineChartGenerator,
+            load_results_from_dir,
         )
 
-    elif algorithm == 'sa':
-        result = runner.run_simulated_annealing(
-            max_iterations=sa_iterations,
-            seed=seed,
-        )
-        logger.info(
-            f'SA Result: cost={result.best_cost:.2f}, '
-            f'improvement={result.improvement_ratio:.2%}'
-        )
+        save_dir = Path(output_dir) / 'plots'
 
-    else:
-        logger.error(f"Unknown algorithm: {algorithm}. Use 'ga', 'sa', or 'compare'")
-        raise typer.Exit(code=1)
+        results = load_results_from_dir(output_dir)
+        generator = BaselineChartGenerator(output_dir=save_dir)
+
+        logger.info('Generating convergence comparison (single run)...')
+        single_results = {'GA': results['GA'][0], 'SA': results['SA'][0]}
+        path = generator.convergence_comparison(single_results, normalize=True)
+        logger.info(f'Saved: {path}')
+
+        logger.info('Generating convergence with confidence intervals...')
+        path = generator.convergence_with_confidence(results, normalize=True)
+        logger.info(f'Saved: {path}')
+
+        logger.info('Generating solution quality box plot...')
+        path = generator.solution_quality_comparison(
+            results, metric='improvement_ratio'
+        )
+        logger.info(f'Saved: {path}')
+
+        logger.info('Generating solution quality bar chart...')
+        path = generator.solution_quality_bar(results, metric='improvement_ratio')
+        logger.info(f'Saved: {path}')
+
+        logger.info('Generating best cost comparison...')
+        path = generator.solution_quality_bar(results, metric='best_cost')
+        logger.info(f'Saved: {path}')
+
+        logger.info('Generating efficiency comparison...')
+        path = generator.efficiency_comparison(results)
+        logger.info(f'Saved: {path}')
+
+        logger.info('All charts generated successfully!')
 
 
 if __name__ == '__main__':

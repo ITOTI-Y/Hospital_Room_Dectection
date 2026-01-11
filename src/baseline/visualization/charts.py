@@ -1,10 +1,12 @@
 """Chart generator for baseline optimization algorithm comparison."""
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pandas as pd
 import ultraplot as uplt
 
 from src.baseline.base import OptimizationResult
@@ -14,6 +16,59 @@ from src.baseline.visualization.journal_style import (
     ImageType,
     JournalStyle,
 )
+
+
+def load_results_from_dir(
+    results_dir: Path | str,
+    prefix: str = 'baseline',
+) -> dict[str, list[OptimizationResult]]:
+    """Load optimization results from saved files.
+
+    Args:
+        results_dir: Directory containing result files.
+        prefix: Filename prefix.
+
+    Returns:
+        Dict mapping algorithm names to list of OptimizationResult.
+    """
+    results_dir = Path(results_dir)
+    results: dict[str, list[OptimizationResult]] = {'GA': [], 'SA': []}
+
+    summary_path = results_dir / f'{prefix}_summary.csv'
+    if not summary_path.exists():
+        raise FileNotFoundError(f'Summary file not found: {summary_path}')
+
+    summary_df = pd.read_csv(summary_path)
+
+    for _, row in summary_df.iterrows():
+        algo = row['algorithm']
+        run_id = int(row['run'])
+
+        history_path = results_dir / f'{prefix}_{algo}_run{run_id}_history.json'
+        layout_path = results_dir / f'{prefix}_{algo}_run{run_id}_layout.npy'
+
+        with open(history_path) as f:
+            history_data = json.load(f)
+
+        best_layout = np.load(layout_path)
+
+        result = OptimizationResult(
+            best_cost=row['best_cost'],
+            initial_cost=row['initial_cost'],
+            improvement_ratio=row['improvement_ratio'],
+            best_layout=best_layout,
+            cost_history=history_data['cost_history'],
+            iterations=row['iterations'],
+            evaluations=row['evaluations'],
+            time_seconds=row['time_seconds'],
+            converged=row['converged'],
+            metadata=history_data.get('metadata', {}),
+        )
+
+        algo_key = 'GA' if algo == 'ga' else 'SA'
+        results[algo_key].append(result)
+
+    return results
 
 
 @dataclass
@@ -558,10 +613,7 @@ class BaselineChartGenerator:
             Path to saved figure.
         """
         fig, axs = self.create_figure(
-            width=FigureWidth.DOUBLE_COLUMN,
-            aspect_ratio=0.5,
-            ncols=2,
-            sharey=False
+            width=FigureWidth.DOUBLE_COLUMN, aspect_ratio=0.5, ncols=2, sharey=False
         )
 
         try:

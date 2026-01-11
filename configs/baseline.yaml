@@ -28,9 +28,9 @@ simulated_annealing:
 
 # Comparison Settings
 comparison:
-  n_runs: 5                   # Number of runs per algorithm
-  base_seed: 42               # Base random seed
-  shuffle_initial_layout: true # Shuffle layout before optimization
+  n_runs: 50                   # Number of runs per algorithm
+  base_seed: 1               # Base random seed
+  shuffle_initial_layout: false # Shuffle layout before optimization
 
 # Output Settings
 output:
