@@ -175,12 +175,12 @@ class TrainerConfig:
     log_interval: int = 10
     eval_interval: int = 50
     save_interval: int = 100
-    num_eval_episodes: int = 5
+    num_eval_episodes: int = 10
     use_amp: bool = True
     compile_model: bool = False
-    seed: int = 1
+    seed: int | None = None
 
-    num_envs: int = 8
+    num_envs: int = 16
 
     normalize_reward: bool = True
     normalize_advantage: bool = True
@@ -277,14 +277,15 @@ class PPOTrainer:
             f'frames_per_batch={self.ppo_config.frames_per_batch}'
         )
 
-    def _set_seed(self, seed: int) -> None:
+    def _set_seed(self, seed: int | None) -> None:
         import random
 
-        random.seed(seed)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-        if torch.cuda.is_available():
-            torch.cuda.manual_seed_all(seed)
+        if seed:
+            random.seed(seed)
+            np.random.seed(seed)
+            torch.manual_seed(seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(seed)
 
     def _create_lr_scheduler(self) -> torch.optim.lr_scheduler.LRScheduler:
         total_updates = (

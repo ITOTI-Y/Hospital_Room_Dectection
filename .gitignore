@@ -172,3 +172,4 @@ events.*
 wandb/
 results/model/
 results/baseline/
+.serena/
