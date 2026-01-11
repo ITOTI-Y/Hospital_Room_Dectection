@@ -129,43 +129,43 @@ def baseline(
     ] = True,
 ):
     """Run baseline optimization algorithms (GA and/or SA)."""
-    # from src.baseline import BaselineRunner
+    from src.baseline import BaselineRunner
 
-    # runner = BaselineRunner(config, shuffle_initial_layout=True)
-    # runner.initialize_pathways()
+    runner = BaselineRunner(config, shuffle_initial_layout=True)
+    runner.initialize_pathways()
 
-    # if algorithm == 'compare':
-    #     results = runner.run_comparison(
-    #         n_runs=n_runs,
-    #         ga_iterations=ga_iterations,
-    #         sa_iterations=sa_iterations,
-    #         base_seed=seed,
-    #     )
-    #     runner.export_results(results, output_dir)
+    if algorithm == 'compare':
+        results = runner.run_comparison(
+            n_runs=n_runs,
+            ga_iterations=ga_iterations,
+            sa_iterations=sa_iterations,
+            base_seed=seed,
+        )
+        runner.export_results(results, output_dir)
 
-    # elif algorithm == 'ga':
-    #     result = runner.run_genetic_algorithm(
-    #         max_iterations=ga_iterations,
-    #         seed=seed,
-    #     )
-    #     logger.info(
-    #         f'GA Result: cost={result.best_cost:.2f}, '
-    #         f'improvement={result.improvement_ratio:.2%}'
-    #     )
+    elif algorithm == 'ga':
+        result = runner.run_genetic_algorithm(
+            max_iterations=ga_iterations,
+            seed=seed,
+        )
+        logger.info(
+            f'GA Result: cost={result.best_cost:.2f}, '
+            f'improvement={result.improvement_ratio:.2%}'
+        )
 
-    # elif algorithm == 'sa':
-    #     result = runner.run_simulated_annealing(
-    #         max_iterations=sa_iterations,
-    #         seed=seed,
-    #     )
-    #     logger.info(
-    #         f'SA Result: cost={result.best_cost:.2f}, '
-    #         f'improvement={result.improvement_ratio:.2%}'
-    #     )
+    elif algorithm == 'sa':
+        result = runner.run_simulated_annealing(
+            max_iterations=sa_iterations,
+            seed=seed,
+        )
+        logger.info(
+            f'SA Result: cost={result.best_cost:.2f}, '
+            f'improvement={result.improvement_ratio:.2%}'
+        )
 
-    # else:
-    #     logger.error(f"Unknown algorithm: {algorithm}. Use 'ga', 'sa', or 'compare'")
-    #     raise typer.Exit(code=1)
+    else:
+        logger.error(f"Unknown algorithm: {algorithm}. Use 'ga', 'sa', or 'compare'")
+        raise typer.Exit(code=1)
 
     if visualize:
         from src.baseline.visualization import (

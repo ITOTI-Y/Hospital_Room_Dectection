@@ -44,7 +44,7 @@ class GAConfig:
     mutation_rate: float = 0.2
     tournament_size: int = 5
     stagnation_limit: int = 50
-    convergence_threshold: float = 1e-4
+    convergence_threshold: float = 1e-5
     convergence_window: int = 20
 
 
