@@ -64,7 +64,9 @@ class BaselineRunner:
         self.config = config
         self.logger = logger.bind(module='BaselineRunner')
 
-        self.pathway_generator = PathwayGenerator(config, is_training=False, eval_mode=eval_mode)
+        self.pathway_generator = PathwayGenerator(
+            config, is_training=False, eval_mode=eval_mode
+        )
         self.cost_manager = CostManager(
             config, shuffle_initial_layout=shuffle_initial_layout
         )
