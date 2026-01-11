@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 2
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.13' and sys_platform == 'win32'",
@@ -1072,6 +1072,7 @@ dependencies = [
     { name = "torch-geometric" },
     { name = "torchrl" },
     { name = "typer" },
+    { name = "ultraplot" },
     { name = "wandb" },
 ]
 
@@ -1102,6 +1103,7 @@ requires-dist = [
     { name = "torch-geometric", specifier = ">=2.6.1" },
     { name = "torchrl", specifier = ">=0.10.1" },
     { name = "typer", specifier = ">=0.15.1" },
+    { name = "ultraplot", specifier = ">=1.70.0" },
     { name = "wandb", specifier = ">=0.23.1" },
 ]
 
@@ -4215,6 +4217,20 @@ source = { registry = "https://pypi.org/simple" }
 sdist = { url = "https://files.pythonhosted.org/packages/95/32/1a225d6164441be760d75c2c42e2780dc0873fe382da3e98a2e1e48361e5/tzdata-2025.2.tar.gz", hash = "sha256:b60a638fcc0daffadf82fe0f57e53d06bdec2f36c4df66280ae79bce6bd6f2b9", size = 196380, upload-time = "2025-03-23T13:54:43.652Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/5c/23/c7abc0ca0a1526a0774eca151daeb8de62ec457e77262b66b359c3c7679e/tzdata-2025.2-py2.py3-none-any.whl", hash = "sha256:1a403fada01ff9221ca8044d701868fa132215d84beb92242d9acd2147f667a8", size = 347839, upload-time = "2025-03-23T13:54:41.845Z" },
+]
+
+[[package]]
+name = "ultraplot"
+version = "1.70.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "typing-extensions", marker = "python_full_version < '3.12'" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/12/8e/ab482ffe85b8f6837384e7be389646ce6ae3bbed4bbcd1413f7926f264e2/ultraplot-1.70.0.tar.gz", hash = "sha256:bcca4bf8aaadc0f48b344d3e31955a92c81e23871d2ca7f756b422b3dc5d023b", size = 14809275, upload-time = "2026-01-04T04:46:20.523Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/43/6c/b26831b890b37c09882f6406efd31441c8e512bf1efbc967b9d867c5e02b/ultraplot-1.70.0-py3-none-any.whl", hash = "sha256:2b29d1b1e36bd6cf88458370825cfab2c62b9acab706a2cfa434660d7dc4bf74", size = 13604122, upload-time = "2026-01-04T04:46:17.446Z" },
 ]
 
 [[package]]

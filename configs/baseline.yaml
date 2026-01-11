@@ -1,0 +1,38 @@
+# Baseline Optimization Algorithms Configuration
+
+# Genetic Algorithm Configuration
+genetic_algorithm:
+  population_size: 100        # Number of individuals in population
+  elite_size: 5               # Number of best individuals preserved
+  crossover_rate: 0.8         # Probability of crossover
+  mutation_rate: 0.2          # Probability of mutation per individual
+  tournament_size: 5          # Tournament selection size
+  stagnation_limit: 50        # Generations without improvement before stopping
+  max_iterations: 500         # Maximum number of generations
+  convergence_threshold: 1e-4 # Min improvement ratio per window to continue
+  convergence_window: 20      # Number of generations to measure convergence
+
+# Simulated Annealing Configuration
+simulated_annealing:
+  initial_temp: 1000.0        # Starting temperature (auto-estimated if 0)
+  final_temp: 0.1             # Minimum temperature
+  cooling_rate: 0.995         # Temperature reduction factor
+  iterations_per_temp: 10     # Iterations at each temperature level
+  cooling_schedule: geometric # geometric, linear, or adaptive
+  reheat_threshold: 100       # Iterations before reheating (0 to disable)
+  reheat_factor: 2.0          # Temperature multiplier when reheating
+  max_iterations: 50000       # Maximum total iterations
+  auto_estimate_temp: true    # Auto-estimate initial temperature
+  convergence_threshold: 1e-5 # Min improvement ratio per window to continue
+  convergence_window: 500     # Number of iterations to measure convergence
+
+# Comparison Settings
+comparison:
+  n_runs: 5                   # Number of runs per algorithm
+  base_seed: 42               # Base random seed
+  shuffle_initial_layout: true # Shuffle layout before optimization
+
+# Output Settings
+output:
+  dir: results/baseline       # Output directory for results
+  prefix: baseline            # Filename prefix

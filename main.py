@@ -93,5 +93,76 @@ def train():
     trainer.train()
 
 
+@app.command()
+def baseline(
+    algorithm: Annotated[
+        str,
+        typer.Option(
+            '--algorithm',
+            '-a',
+            help='Algorithm to run: ga (Genetic Algorithm), sa (Simulated Annealing), or compare (both)',
+        ),
+    ] = 'compare',
+    n_runs: Annotated[
+        int,
+        typer.Option('--n-runs', '-n', help='Number of runs per algorithm'),
+    ] = 5,
+    ga_iterations: Annotated[
+        int,
+        typer.Option('--ga-iter', help='Max generations for GA'),
+    ] = 200,
+    sa_iterations: Annotated[
+        int,
+        typer.Option('--sa-iter', help='Max iterations for SA'),
+    ] = 10000,
+    seed: Annotated[
+        int,
+        typer.Option('--seed', '-s', help='Random seed'),
+    ] = 42,
+    output_dir: Annotated[
+        str,
+        typer.Option('--output', '-o', help='Output directory for results'),
+    ] = 'results/baseline',
+):
+    """Run baseline optimization algorithms (GA and/or SA)."""
+    from src.baseline import BaselineRunner
+
+    runner = BaselineRunner(config, shuffle_initial_layout=True)
+    runner.initialize_pathways()
+
+    if algorithm == 'compare':
+        results = runner.run_comparison(
+            n_runs=n_runs,
+            ga_iterations=ga_iterations,
+            sa_iterations=sa_iterations,
+            base_seed=seed,
+        )
+        runner.export_results(results, output_dir)
+
+    elif algorithm == 'ga':
+        result = runner.run_genetic_algorithm(
+            max_iterations=ga_iterations,
+            seed=seed,
+        )
+        logger.info(
+            f'GA Result: cost={result.best_cost:.2f}, '
+            f'improvement={result.improvement_ratio:.2%}'
+        )
+
+    elif algorithm == 'sa':
+        result = runner.run_simulated_annealing(
+            max_iterations=sa_iterations,
+            seed=seed,
+        )
+        logger.info(
+            f'SA Result: cost={result.best_cost:.2f}, '
+            f'improvement={result.improvement_ratio:.2%}'
+        )
+
+    else:
+        logger.error(f"Unknown algorithm: {algorithm}. Use 'ga', 'sa', or 'compare'")
+        raise typer.Exit(code=1)
+
+
 if __name__ == '__main__':
     app()
